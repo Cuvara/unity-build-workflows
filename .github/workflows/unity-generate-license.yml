@@ -1,9 +1,11 @@
 name: Generate Unity License
 
-# Generate a Docker-compatible .ulf license file using game-ci/unity-activate.
+# Generate a Docker-compatible .ulf license file by running Unity activation
+# directly inside the unityci/editor Docker image.
 #
-# This uses GameCI's official activation action which handles Unity Personal
-# licensing correctly (including Unity 6).
+# game-ci/unity-activate@v2 hardcodes dockerRepoVersion=1, but Unity 6 images
+# only exist at version 3+. This workflow bypasses the action and drives Docker
+# directly so the correct image tag is always used.
 #
 # When APP_ID + APP_PRIVATE_KEY secrets are present, the .ulf is automatically
 # set as UNITY_LICENSE org/repo secret via GitHub App bot.
@@ -52,42 +54,84 @@ jobs:
     name: Generate Docker License
     runs-on: ubuntu-latest
     steps:
+      - name: Free disk space
+        run: |
+          echo "Before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost \
+            /usr/share/swift 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          echo "After:"; df -h / | tail -1
+
       - name: Activate Unity and generate .ulf
         id: activate
-        uses: game-ci/unity-activate@fbbebcb5a254e2d1dc44ad931047e3f320e4968a # main with Unity 6 fix
-        with:
-          unityVersion: ${{ inputs.unity-version }}
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_VERSION: ${{ inputs.unity-version }}
+        run: |
+          set -euo pipefail
 
-      - name: Find generated .ulf
+          # Resolve the latest available Docker image tag for this Unity version.
+          # unityci/editor tags follow: ubuntu-<version>-linux-il2cpp-<repoVersion>
+          # We try version 3 first (Unity 6 era), then fall back to 1 (legacy).
+          IMAGE_BASE="unityci/editor"
+          for REPO_VER in 3 1; do
+            IMAGE="${IMAGE_BASE}:ubuntu-${UNITY_VERSION}-linux-il2cpp-${REPO_VER}"
+            echo "Trying image: ${IMAGE}"
+            if docker pull "${IMAGE}" 2>/dev/null; then
+              echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            IMAGE=""
+          done
+
+          if [ -z "${IMAGE}" ]; then
+            echo "::error::No unityci/editor image found for Unity ${UNITY_VERSION}"
+            exit 1
+          fi
+
+          # Run Unity inside the container to perform activation.
+          # Unity writes the .ulf to /root/.local/share/unity3d/Unity/
+          mkdir -p license-output
+
+          docker run --rm \
+            -e UNITY_EMAIL="${UNITY_EMAIL}" \
+            -e UNITY_PASSWORD="${UNITY_PASSWORD}" \
+            -v "$(pwd)/license-output:/output" \
+            "${IMAGE}" \
+            bash -c '
+              set -e
+              # Attempt account-based activation (Unity Personal)
+              unity-editor \
+                -batchmode -nographics -quit \
+                -username "$UNITY_EMAIL" \
+                -password "$UNITY_PASSWORD" \
+                -logFile /dev/stdout \
+                2>&1 || true
+
+              # Find and copy the generated .ulf
+              ULF=$(find /root -name "*.ulf" 2>/dev/null | head -1)
+              if [ -z "$ULF" ]; then
+                ULF=$(find /home -name "*.ulf" 2>/dev/null | head -1)
+              fi
+              if [ -n "$ULF" ]; then
+                cp "$ULF" /output/Unity_lic.ulf
+                echo "License file found: $ULF"
+              else
+                echo "ERROR: No .ulf file generated"
+                # Dump license paths for debugging
+                find / -name "*.ulf" -o -name "*.alf" 2>/dev/null || true
+                exit 1
+              fi
+            '
+
+      - name: Verify .ulf was generated
         id: find-ulf
         run: |
-          # game-ci/unity-activate writes .ulf to Unity config directory
-          ULF=$(find /home/runner -name "*.ulf" -o -name "Unity_lic.ulf" 2>/dev/null | head -1)
-          if [ -z "${ULF}" ]; then
-            ULF=$(find /tmp -name "*.ulf" 2>/dev/null | head -1)
-          fi
-          if [ -z "${ULF}" ]; then
-            # Check Unity license paths
-            for dir in \
-              "${HOME}/.local/share/unity3d/Unity" \
-              "${HOME}/.config/unity3d/Unity" \
-              "/usr/share/unity3d/config"; do
-              if [ -d "$dir" ]; then
-                ULF=$(find "$dir" -name "*.ulf" 2>/dev/null | head -1)
-                [ -n "${ULF}" ] && break
-              fi
-            done
-          fi
-
-          if [ -n "${ULF}" ]; then
-            echo "ulf-path=${ULF}" >> "$GITHUB_OUTPUT"
+          if [ -f "license-output/Unity_lic.ulf" ]; then
             echo "ulf-found=true" >> "$GITHUB_OUTPUT"
-            mkdir -p license-output
-            cp "${ULF}" license-output/Unity_lic.ulf
-            echo "Found .ulf: ${ULF}"
+            echo "License file size: $(wc -c < license-output/Unity_lic.ulf) bytes"
           else
             echo "ulf-found=false" >> "$GITHUB_OUTPUT"
             echo "::error::No .ulf file found after activation"
