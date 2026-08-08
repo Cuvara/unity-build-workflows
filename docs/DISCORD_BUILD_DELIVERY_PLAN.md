@@ -417,7 +417,7 @@ notify-discord:
 
     # ── Post to Discord thread ───────────────────────────────────────────────
     - name: Post Discord build delivery
-      uses: dyCuong03/unity-build-workflows/.github/actions/discord-upload-build@main
+      uses: Cuvara/unity-build-workflows/.github/actions/discord-upload-build@main
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       with:
@@ -571,7 +571,7 @@ All steps wrapped in `|| true` or `set +e` so no step can exit non-zero.
 ### How to get thread ID
 1. Enable Developer Mode in Discord: User Settings → Advanced → Developer Mode
 2. Right-click the target thread → "Copy Thread ID"
-3. Set: `gh variable set DISCORD_THREAD_ID --repo dyCuong03/NDC-Unity-Template --body "<snowflake>"`
+3. Set: `gh variable set DISCORD_THREAD_ID --repo Cuvara/NDCUnityTemplate --body "<snowflake>"`
 
 ---
 

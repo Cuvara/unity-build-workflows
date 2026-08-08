@@ -277,13 +277,13 @@ The file is a signed XML document beginning with `<?xml`. Do **not** modify it.
 # 1. Set UNITY_LICENSE — pipe the raw .ulf file contents directly
 #    (replace the path with the actual location found above)
 ULF="/mnt/c/ProgramData/Unity/Unity_lic.ulf"
-gh secret set UNITY_LICENSE --repo dyCuong03/NDC-Unity-Template < "$ULF"
+gh secret set UNITY_LICENSE --repo Cuvara/NDCUnityTemplate < "$ULF"
 
 # 2. Set UNITY_EMAIL — enter interactively when prompted
-gh secret set UNITY_EMAIL --repo dyCuong03/NDC-Unity-Template
+gh secret set UNITY_EMAIL --repo Cuvara/NDCUnityTemplate
 
 # 3. Set UNITY_PASSWORD — enter interactively when prompted
-gh secret set UNITY_PASSWORD --repo dyCuong03/NDC-Unity-Template
+gh secret set UNITY_PASSWORD --repo Cuvara/NDCUnityTemplate
 ```
 
 > Pipe `UNITY_LICENSE` from the file rather than copy-pasting to avoid
@@ -296,7 +296,7 @@ gh secret set UNITY_PASSWORD --repo dyCuong03/NDC-Unity-Template
 Check that all three secrets are present (names only — values are never shown):
 
 ```bash
-gh secret list --repo dyCuong03/NDC-Unity-Template \
+gh secret list --repo Cuvara/NDCUnityTemplate \
   | grep -E 'UNITY_LICENSE|UNITY_EMAIL|UNITY_PASSWORD'
 ```
 
@@ -327,10 +327,10 @@ with the GameCI-style activation path.
 
 ```bash
 # CORRECT — raw file contents
-gh secret set UNITY_LICENSE --repo dyCuong03/NDC-Unity-Template < Unity_lic.ulf
+gh secret set UNITY_LICENSE --repo Cuvara/NDCUnityTemplate < Unity_lic.ulf
 
 # WRONG — do not base64-encode
-gh secret set UNITY_LICENSE --repo dyCuong03/NDC-Unity-Template \
+gh secret set UNITY_LICENSE --repo Cuvara/NDCUnityTemplate \
   <<< "$(base64 Unity_lic.ulf)"
 ```
 
@@ -354,7 +354,7 @@ patterns. The classified failure name appears in CI logs as:
 | `0 entitlements` | `UNITY_EMAIL`/`UNITY_PASSWORD` set but `UNITY_LICENSE` missing — no seat entitlement without `.ulf` | Add `UNITY_LICENSE` secret (raw `.ulf` contents) |
 | `LICENSE_FILE_INVALID` / `license.*invalid` in log | `UNITY_LICENSE` contains invalid XML, wrong file type, or empty value | Re-export the `.ulf` from Unity Hub; verify `find` command above finds a non-empty file |
 | `UNITY_LICENSE contains UnityEntitlementLicense XML (not a .ulf)` | A `.xml` entitlement file was set instead of a `.ulf` | Use the `.ulf` file, **not** `UnityEntitlementLicense.xml` |
-| `UNITY_LICENSE decoded to empty file` | Secret is set to an empty string or whitespace | Delete the secret and re-set it: `gh secret set UNITY_LICENSE --repo dyCuong03/NDC-Unity-Template < Unity_lic.ulf` |
+| `UNITY_LICENSE decoded to empty file` | Secret is set to an empty string or whitespace | Delete the secret and re-set it: `gh secret set UNITY_LICENSE --repo Cuvara/NDCUnityTemplate < Unity_lic.ulf` |
 | `UNITY_LICENSE accidentally base64-encoded` | `UNITY_LICENSE_ENCODING` forced to `base64` but value is raw, or vice-versa | Remove `UNITY_LICENSE_ENCODING` override; set secret as raw `.ulf` file |
 | `AUTH_FAILED` / `invalid.*password\|auth.*fail` in log | Wrong email or password in secrets | Re-set `UNITY_EMAIL` / `UNITY_PASSWORD`; confirm credentials work at id.unity.com |
 | `MFA_OR_2FA_REQUIRED` / `two.factor\|2fa` in log | The Unity account has MFA/2FA enabled | Disable 2FA on the CI Unity account, or use a dedicated CI account without 2FA |

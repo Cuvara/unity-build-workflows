@@ -491,7 +491,7 @@ Steps:
 
 ### `build-android`
 ```yaml
-uses: dyCuong03/unity-build-workflows/.github/workflows/reusable-build-platform.yml@main
+uses: Cuvara/unity-build-workflows/.github/workflows/reusable-build-platform.yml@main
 with:
   platform: Android
   unity-version: ${{ needs.resolve-config.outputs.unity-version }}
@@ -519,7 +519,7 @@ Same with `platform: LinuxServer`.
 
 ### `build-ios`
 ```yaml
-uses: dyCuong03/unity-build-workflows/.github/workflows/reusable-build-platform.yml@main
+uses: Cuvara/unity-build-workflows/.github/workflows/reusable-build-platform.yml@main
 with:
   platform: iOS
   unity-version: ${{ needs.resolve-config.outputs.unity-version }}
@@ -537,7 +537,7 @@ secrets: inherit
 
 ### `build-addressables`
 ```yaml
-uses: dyCuong03/unity-build-workflows/.github/workflows/reusable-build-platform.yml@main
+uses: Cuvara/unity-build-workflows/.github/workflows/reusable-build-platform.yml@main
 with:
   platform: Addressables
   unity-version: ${{ needs.resolve-config.outputs.unity-version }}
@@ -556,7 +556,7 @@ secrets:
 
 ### `unity-tests`
 ```yaml
-uses: dyCuong03/unity-build-workflows/.github/workflows/reusable-unity-tests.yml@main
+uses: Cuvara/unity-build-workflows/.github/workflows/reusable-unity-tests.yml@main
 with:
   unity-version: ${{ needs.resolve-config.outputs.unity-version }}
   test-mode: ${{ inputs.test-mode }}

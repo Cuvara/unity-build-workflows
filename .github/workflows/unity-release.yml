@@ -43,7 +43,7 @@ jobs:
     # published unity-editor image). The upstream toolkit repo is NOT a Unity
     # project, and its own `v*` tags are toolkit releases, not game releases —
     # so skip the entire chain there (all downstream jobs `need` this one).
-    if: ${{ github.repository != 'dyCuong03/unity-build-workflows' }}
+    if: ${{ github.repository != 'Cuvara/unity-build-workflows' }}
     runs-on: ubuntu-latest
     environment: production
     permissions:

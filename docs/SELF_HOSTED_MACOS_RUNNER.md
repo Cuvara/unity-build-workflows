@@ -140,7 +140,7 @@ Trigger a smoke build (signing secrets must be set first — see
 
 ```bash
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=iOS
 ```
@@ -148,7 +148,7 @@ gh workflow run unity-build.yml \
 Watch it:
 
 ```bash
-gh run watch --repo dyCuong03/NDC-Unity-Template
+gh run watch --repo Cuvara/NDCUnityTemplate
 ```
 
 Expected: `build-ios` picks up on your runner and produces the `ios-xcode`

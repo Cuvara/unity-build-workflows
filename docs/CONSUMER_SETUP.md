@@ -31,13 +31,13 @@ Related docs:
 ## Step 1: (Optional) Add the Toolkit as a Git Submodule
 
 The submodule is **not required** for CI — the caller workflow references the
-toolkit remotely via `uses: dyCuong03/unity-build-workflows/...`. Add it only
+toolkit remotely via `uses: Cuvara/unity-build-workflows/...`. Add it only
 if you want local access to templates, documentation, and the
 `AddressableBuilder.cs` helper.
 
 ```bash
 # From your project root
-git submodule add https://github.com/dyCuong03/unity-build-workflows unity-build-workflows
+git submodule add https://github.com/Cuvara/unity-build-workflows unity-build-workflows
 git submodule update --init --recursive
 ```
 
@@ -59,12 +59,12 @@ cp unity-build-workflows/templates/consumer-unity-build.yml \
 
 # Without the submodule — download directly:
 curl -fsSL \
-  https://raw.githubusercontent.com/dyCuong03/unity-build-workflows/main/templates/consumer-unity-build.yml \
+  https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/consumer-unity-build.yml \
   -o .github/workflows/unity-build.yml
 ```
 
 The file is ready to use as-is. It calls
-`dyCuong03/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1`
+`Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1`
 with `secrets: inherit` — no per-secret wiring needed.
 
 **Version pinning (recommended):**
@@ -77,8 +77,8 @@ with `secrets: inherit` — no per-secret wiring needed.
 
 The template ships pinned to `@v1`. For fully reproducible builds, pin to an
 exact tag (e.g. `@v1.0.0`) and bump it deliberately. Available tags:
-`gh release list -R dyCuong03/unity-build-workflows` or
-`git ls-remote --tags https://github.com/dyCuong03/unity-build-workflows`.
+`gh release list -R Cuvara/unity-build-workflows` or
+`git ls-remote --tags https://github.com/Cuvara/unity-build-workflows`.
 Set `toolkit-ref:` in the caller to the SAME ref so the toolkit scripts are
 checked out from the matching version.
 
@@ -103,7 +103,7 @@ Set these in your repository: `Settings → Secrets and variables → Actions �
 ### Unity license (Personal / free)
 
 ```bash
-REPO="YOUR_ORG/YOUR_REPO"   # e.g. dyCuong03/NDC-Unity-Template
+REPO="YOUR_ORG/YOUR_REPO"   # e.g. Cuvara/NDCUnityTemplate
 
 # Unity account credentials (required)
 gh secret set UNITY_EMAIL    --repo "${REPO}"   # paste email when prompted
@@ -199,7 +199,7 @@ cp unity-build-workflows/templates/AddressableBuilder.cs \
 
 # Without submodule:
 curl -fsSL \
-  https://raw.githubusercontent.com/dyCuong03/unity-build-workflows/main/templates/AddressableBuilder.cs \
+  https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/AddressableBuilder.cs \
   -o Assets/BuildScripts/Editor/AddressableBuilder.cs
 ```
 

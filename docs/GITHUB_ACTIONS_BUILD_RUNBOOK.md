@@ -63,7 +63,7 @@ for setup instructions and the reason all three are required.
 
 Verify secrets are set:
 ```bash
-gh secret list --repo dyCuong03/NDC-Unity-Template \
+gh secret list --repo Cuvara/NDCUnityTemplate \
   | grep -E 'UNITY_LICENSE|UNITY_EMAIL|UNITY_PASSWORD'
 ```
 
@@ -78,25 +78,25 @@ The consumer workflow file is `.github/workflows/build.yml` (name: `Unity CI`).
 ```bash
 # Android
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Android
 
 # WebGL
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=WebGL
 
 # Linux Standalone
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Linux64
 
 # Linux Dedicated Server
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=LinuxServer
 ```
@@ -105,7 +105,7 @@ gh workflow run build.yml \
 
 ```bash
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=All
 ```
@@ -124,7 +124,7 @@ gh workflow run build.yml \
 Example with extra inputs:
 ```bash
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Android \
   -f environment=staging \
@@ -150,37 +150,37 @@ For a complete guide see [EXPLICIT\_PLATFORM\_FLOW.md](EXPLICIT_PLATFORM_FLOW.md
 ```bash
 # Android
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Android
 
 # WebGL
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=WebGL
 
 # Linux Standalone
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Linux64
 
 # Linux Dedicated Server
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=LinuxServer
 
 # Windows Standalone (Mono backend via docker; use runner-mode=self-hosted-windows for IL2CPP)
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Windows64
 
 # iOS (requires a registered macos-unity-xcode runner — see Section 10)
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=iOS
 ```
@@ -189,7 +189,7 @@ gh workflow run unity-build.yml \
 
 ```bash
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=All
 ```
@@ -212,7 +212,7 @@ gh workflow run unity-build.yml \
 
 ```bash
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Android \
   -f environment=staging \
@@ -223,7 +223,7 @@ gh workflow run unity-build.yml \
 
 # Build an Android App Bundle (AAB) for Play Store submission
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Android \
   -f environment=production \
@@ -276,7 +276,7 @@ deferred.
 ### List recent runs
 
 ```bash
-gh run list --repo dyCuong03/NDC-Unity-Template \
+gh run list --repo Cuvara/NDCUnityTemplate \
   --workflow build.yml --limit 10
 ```
 
@@ -285,7 +285,7 @@ gh run list --repo dyCuong03/NDC-Unity-Template \
 ```bash
 # Show only logs from failed steps
 gh run view <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --log-failed
 ```
 
@@ -293,7 +293,7 @@ gh run view <RUN_ID> \
 
 ```bash
 gh run view <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --log
 ```
 
@@ -301,18 +301,18 @@ gh run view <RUN_ID> \
 
 ```bash
 gh run watch <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template
+  --repo Cuvara/NDCUnityTemplate
 ```
 
 ### Fetch raw logs for a specific job via API
 
 ```bash
 # List jobs in a run to get job IDs
-gh api repos/dyCuong03/NDC-Unity-Template/actions/runs/<RUN_ID>/jobs \
+gh api repos/Cuvara/NDCUnityTemplate/actions/runs/<RUN_ID>/jobs \
   --jq '.jobs[] | {id: .id, name: .name, status: .status, conclusion: .conclusion}'
 
 # Fetch raw log for a specific job
-gh api repos/dyCuong03/NDC-Unity-Template/actions/jobs/<JOB_ID>/logs
+gh api repos/Cuvara/NDCUnityTemplate/actions/jobs/<JOB_ID>/logs
 ```
 
 ### Key log lines to look for
@@ -337,7 +337,7 @@ Build artifacts are retained for 14 days (configured in `build.yml`).
 
 ```bash
 gh run view <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --json artifacts --jq '.artifacts[].name'
 ```
 
@@ -345,7 +345,7 @@ gh run view <RUN_ID> \
 
 ```bash
 gh run download <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template
+  --repo Cuvara/NDCUnityTemplate
 ls -lh
 ```
 
@@ -353,7 +353,7 @@ ls -lh
 
 ```bash
 gh run download <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --name "<artifact-name>"
 ```
 
@@ -371,7 +371,7 @@ UNITY_VERSION="6000.0.26f1"
 
 # Rebuild a single variant
 gh workflow run build-unity-image.yml \
-  --repo dyCuong03/unity-build-workflows \
+  --repo Cuvara/unity-build-workflows \
   --ref main \
   -f unity-version="${UNITY_VERSION}" \
   -f image-variant=android \
@@ -381,7 +381,7 @@ gh workflow run build-unity-image.yml \
 # Trigger all three variants
 for VARIANT in android webgl linux; do
   gh workflow run build-unity-image.yml \
-    --repo dyCuong03/unity-build-workflows \
+    --repo Cuvara/unity-build-workflows \
     --ref main \
     -f unity-version="${UNITY_VERSION}" \
     -f image-variant="${VARIANT}" \
@@ -392,7 +392,7 @@ done
 
 Monitor builds:
 ```bash
-gh run list --repo dyCuong03/unity-build-workflows \
+gh run list --repo Cuvara/unity-build-workflows \
   --workflow build-unity-image.yml --limit 10
 ```
 
@@ -436,7 +436,7 @@ caching, or artifact structure as the main workflow.
 To trigger it:
 ```bash
 gh workflow run gameci-baseline.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main
 ```
 
@@ -511,11 +511,11 @@ cleanup — see [GITHUB\_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md).
 
 ```bash
 # Verify environments and branch policies
-gh api repos/dyCuong03/NDC-Unity-Template/environments \
+gh api repos/Cuvara/NDCUnityTemplate/environments \
   --jq '.environments[] | {name: .name, protection_rules: .protection_rules}'
 
 # List recent deployments
-gh api 'repos/dyCuong03/NDC-Unity-Template/deployments?per_page=20' \
+gh api 'repos/Cuvara/NDCUnityTemplate/deployments?per_page=20' \
   --jq '.[] | {id: .id, environment: .environment, ref: .ref, created_at: .created_at}'
 ```
 
@@ -525,30 +525,30 @@ gh api 'repos/dyCuong03/NDC-Unity-Template/deployments?per_page=20' \
 
 ```bash
 # List recent workflow runs
-gh run list --repo dyCuong03/NDC-Unity-Template --workflow build.yml --limit 10
+gh run list --repo Cuvara/NDCUnityTemplate --workflow build.yml --limit 10
 
 # View a specific run (summary)
-gh run view <RUN_ID> --repo dyCuong03/NDC-Unity-Template
+gh run view <RUN_ID> --repo Cuvara/NDCUnityTemplate
 
 # Show failed step logs
-gh run view <RUN_ID> --repo dyCuong03/NDC-Unity-Template --log-failed
+gh run view <RUN_ID> --repo Cuvara/NDCUnityTemplate --log-failed
 
 # Download artifacts
-gh run download <RUN_ID> --repo dyCuong03/NDC-Unity-Template
+gh run download <RUN_ID> --repo Cuvara/NDCUnityTemplate
 
 # List secrets (names only)
-gh secret list --repo dyCuong03/NDC-Unity-Template
+gh secret list --repo Cuvara/NDCUnityTemplate
 
 # Set a secret from a file
-gh secret set UNITY_LICENSE --repo dyCuong03/NDC-Unity-Template < Unity_lic.ulf
+gh secret set UNITY_LICENSE --repo Cuvara/NDCUnityTemplate < Unity_lic.ulf
 
 # Trigger a build
-gh workflow run build.yml --repo dyCuong03/NDC-Unity-Template --ref main -f platform=Android
+gh workflow run build.yml --repo Cuvara/NDCUnityTemplate --ref main -f platform=Android
 
 # Trigger image rebuild
-gh workflow run build-unity-image.yml --repo dyCuong03/unity-build-workflows --ref main \
+gh workflow run build-unity-image.yml --repo Cuvara/unity-build-workflows --ref main \
   -f unity-version=6000.0.26f1 -f image-variant=android -f push-image=true
 
 # List image build runs
-gh run list --repo dyCuong03/unity-build-workflows --workflow build-unity-image.yml --limit 10
+gh run list --repo Cuvara/unity-build-workflows --workflow build-unity-image.yml --limit 10
 ```

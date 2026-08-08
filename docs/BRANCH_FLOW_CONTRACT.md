@@ -202,7 +202,7 @@ on:
 ```
 
 ### resolve-config job
-- Checkout consumer; also obtain the toolkit (checkout repo dyCuong03/unity-build-workflows @ TOOLKIT_REF into a path, OR use the submodule) so `resolve_build_flow.sh` is available.
+- Checkout consumer; also obtain the toolkit (checkout repo Cuvara/unity-build-workflows @ TOOLKIT_REF into a path, OR use the submodule) so `resolve_build_flow.sh` is available.
 - Run the resolver with the env mapping above; export ALL resolver outputs as job
   outputs **plus** the existing `unity-version` / `project-path` / `toolkit-ref`.
 - Pass `vars.*` as `VAR_*` env vars so the resolver can read repository variables.

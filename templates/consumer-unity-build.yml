@@ -114,7 +114,7 @@ jobs:
     #   @v1          — latest stable v1.x (gets backward-compatible fixes)   ← production default
     #   @v1.2.0      — exact release (fully reproducible)
     #   @main        — bleeding edge (development only; may break)
-    uses: dyCuong03/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1
+    uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1
     secrets: inherit
     with:
       # ── Dispatch inputs (fall back to sensible defaults for push/PR events) ──

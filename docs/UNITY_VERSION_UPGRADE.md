@@ -130,7 +130,7 @@ NEW_VERSION="<NEW_VERSION>"   # e.g. 6000.0.47f1
 
 # Android image
 gh workflow run build-unity-image.yml \
-  --repo dyCuong03/unity-build-workflows \
+  --repo Cuvara/unity-build-workflows \
   --ref main \
   -f unity-version="${NEW_VERSION}" \
   -f image-variant=android \
@@ -139,7 +139,7 @@ gh workflow run build-unity-image.yml \
 
 # WebGL image
 gh workflow run build-unity-image.yml \
-  --repo dyCuong03/unity-build-workflows \
+  --repo Cuvara/unity-build-workflows \
   --ref main \
   -f unity-version="${NEW_VERSION}" \
   -f image-variant=webgl \
@@ -148,7 +148,7 @@ gh workflow run build-unity-image.yml \
 
 # Linux image
 gh workflow run build-unity-image.yml \
-  --repo dyCuong03/unity-build-workflows \
+  --repo Cuvara/unity-build-workflows \
   --ref main \
   -f unity-version="${NEW_VERSION}" \
   -f image-variant=linux \
@@ -158,7 +158,7 @@ gh workflow run build-unity-image.yml \
 
 Monitor image builds:
 ```bash
-gh run list --repo dyCuong03/unity-build-workflows \
+gh run list --repo Cuvara/unity-build-workflows \
   --workflow build-unity-image.yml --limit 10
 ```
 
@@ -181,7 +181,7 @@ gh api \
 The manifest artifact (`image-manifest-<variant>-<version>.json`) uploaded by
 the build workflow contains the image digest for pinned references:
 ```bash
-gh run download --repo dyCuong03/unity-build-workflows \
+gh run download --repo Cuvara/unity-build-workflows \
   --name "image-manifest-android-${NEW_VERSION}"
 cat image-manifest-android.json
 ```
@@ -208,36 +208,36 @@ Trigger builds for each Docker platform:
 NEW_VERSION="<NEW_VERSION>"
 
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Android
 
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=WebGL
 
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Linux64
 
 gh workflow run build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=LinuxServer
 ```
 
 Monitor:
 ```bash
-gh run list --repo dyCuong03/NDC-Unity-Template \
+gh run list --repo Cuvara/NDCUnityTemplate \
   --workflow build.yml --limit 10
 ```
 
 Download and verify artifacts for a specific run:
 ```bash
 RUN_ID=<run_id>
-gh run download --repo dyCuong03/NDC-Unity-Template "${RUN_ID}"
+gh run download --repo Cuvara/NDCUnityTemplate "${RUN_ID}"
 ls -lh
 ```
 
@@ -254,6 +254,6 @@ Example entry:
 ## Unity 6000.0.47f1 upgrade — 2026-06-29
 
 - Unity version: 6000.0.47f1 (changeset: abcdef123456)
-- Image builds: dyCuong03/unity-build-workflows run #<android_run_id>, #<webgl_run_id>, #<linux_run_id>
-- Consumer builds verified: dyCuong03/NDC-Unity-Template run #<android_run_id>, #<webgl_run_id>, #<linux_run_id>
+- Image builds: Cuvara/unity-build-workflows run #<android_run_id>, #<webgl_run_id>, #<linux_run_id>
+- Consumer builds verified: Cuvara/NDCUnityTemplate run #<android_run_id>, #<webgl_run_id>, #<linux_run_id>
 ```

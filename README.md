@@ -336,7 +336,7 @@ Build variants using `build-unity-image.yml` in this repository:
 
 ```bash
 gh workflow run build-unity-image.yml \
-  --repo dyCuong03/unity-build-workflows \
+  --repo Cuvara/unity-build-workflows \
   --ref main \
   -f unity-version=6000.0.26f1 \
   -f image-variant=android \
@@ -350,13 +350,13 @@ full rebuild procedure.
 
 ## Using From a Consumer Repository
 
-The consumer repository (e.g. `dyCuong03/NDC-Unity-Template`) calls this
+The consumer repository (e.g. `Cuvara/NDCUnityTemplate`) calls this
 toolkit via reusable workflows:
 
 ```yaml
 jobs:
   pipeline:
-    uses: dyCuong03/unity-build-workflows/.github/workflows/unity-pipeline.yml@main
+    uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@main
     with:
       platform: Android
       project-path: '.'
@@ -393,7 +393,7 @@ The fastest way to add this pipeline to a new Unity project:
 # 1. Copy the caller workflow template
 mkdir -p .github/workflows
 curl -fsSL \
-  https://raw.githubusercontent.com/dyCuong03/unity-build-workflows/main/templates/consumer-unity-build.yml \
+  https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/consumer-unity-build.yml \
   -o .github/workflows/unity-build.yml
 
 # 2. Set required secrets
@@ -408,7 +408,7 @@ git push
 ```
 
 The caller workflow (`consumer-unity-build.yml`) uses a single
-`uses: dyCuong03/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1`
+`uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1`
 call with `secrets: inherit` — no per-secret wiring, no build scripts to copy.
 
 **Pin the version**: `@v1` (latest stable, auto-fixes) or `@v1.2.0` (exact) for

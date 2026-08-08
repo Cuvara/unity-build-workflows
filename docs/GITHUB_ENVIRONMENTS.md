@@ -162,7 +162,7 @@ GitHub repo → Settings → Environments → [environment name]
 
 Or directly:
 ```
-https://github.com/dyCuong03/NDC-Unity-Template/settings/environments
+https://github.com/Cuvara/NDCUnityTemplate/settings/environments
 ```
 
 ### Required reviewers (production — manual UI step)
@@ -193,7 +193,7 @@ To view or change this:
 Or via the API:
 ```bash
 # List current deployment branch policies for production
-gh api repos/dyCuong03/NDC-Unity-Template/environments/production/deployment-branch-policies \
+gh api repos/Cuvara/NDCUnityTemplate/environments/production/deployment-branch-policies \
   --jq '.branch_policies[] | {id: .id, name: .name, type: .type}'
 ```
 
@@ -248,13 +248,13 @@ for production.
 Verify the current state:
 ```bash
 # List environments
-gh api repos/dyCuong03/NDC-Unity-Template/environments \
+gh api repos/Cuvara/NDCUnityTemplate/environments \
   --jq '.environments[] | {name: .name, protection_rules: .protection_rules}'
 
 # List branch policies for each environment
 for env in development staging production; do
   echo "=== ${env} ==="
-  gh api "repos/dyCuong03/NDC-Unity-Template/environments/${env}/deployment-branch-policies" \
+  gh api "repos/Cuvara/NDCUnityTemplate/environments/${env}/deployment-branch-policies" \
     --jq '.branch_policies[] | {name: .name, type: .type}'
 done
 ```
@@ -291,7 +291,7 @@ The deletion workflow is:
 ### Step-by-step cleanup
 
 ```bash
-REPO="dyCuong03/NDC-Unity-Template"
+REPO="Cuvara/NDCUnityTemplate"
 ENVIRONMENT="development"   # or "production"
 
 # 1. List all deployments for the environment — note the IDs
@@ -328,7 +328,7 @@ This script deactivates and deletes **all** deployments for a given environment.
 Run the list step first and confirm the IDs are the stale ones before executing.
 
 ```bash
-REPO="dyCuong03/NDC-Unity-Template"
+REPO="Cuvara/NDCUnityTemplate"
 ENVIRONMENT="development"   # change to "production" for the failed production deployment
 
 # Print what will be deleted first — review before proceeding

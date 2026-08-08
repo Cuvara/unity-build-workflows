@@ -196,7 +196,7 @@ route to `runs-on: [self-hosted, Windows, unity]`.
 
 ```bash
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --field runner-mode=self-hosted-windows \
   --field platform=All \
   --field environment=production
@@ -279,7 +279,7 @@ with labels `self-hosted`, `Windows`, `unity`.
 
 ```bash
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --field runner-mode=self-hosted-windows \
   --field platform=Android \
   --field environment=development \
@@ -289,7 +289,7 @@ gh workflow run unity-build.yml \
 Watch the run:
 
 ```bash
-gh run watch --repo dyCuong03/NDC-Unity-Template
+gh run watch --repo Cuvara/NDCUnityTemplate
 ```
 
 Expected: `build-android` job picks up on your runner, builds successfully,

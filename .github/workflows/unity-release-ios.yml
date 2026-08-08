@@ -60,7 +60,7 @@ jobs:
     # The upstream toolkit repo is not one, and its `v*` tags are toolkit
     # releases, not game releases. Skip the whole chain there (downstream jobs
     # `need` this one).
-    if: ${{ github.repository != 'dyCuong03/unity-build-workflows' }}
+    if: ${{ github.repository != 'Cuvara/unity-build-workflows' }}
     runs-on: ubuntu-latest
     outputs:
       build-version: ${{ steps.version.outputs.version }}

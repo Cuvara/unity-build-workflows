@@ -82,13 +82,13 @@ with the `gh` CLI.
 ```bash
 # Build Android only (docker lane, production)
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Android
 
 # Build all platforms with tests
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=All \
   -f run-tests=true \
@@ -96,7 +96,7 @@ gh workflow run unity-build.yml \
 
 # Build WebGL with Addressables, staging environment, clean
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=WebGL \
   -f build-addressables=true \
@@ -105,7 +105,7 @@ gh workflow run unity-build.yml \
 
 # Build Android on self-hosted Windows runner
 gh workflow run unity-build.yml \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --ref main \
   -f platform=Android \
   -f runner-mode=self-hosted-windows
@@ -283,17 +283,17 @@ are diagnosable. Binary artifacts are uploaded only on success.
 ```bash
 # List artifact names for a run
 gh run view <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --json artifacts --jq '.artifacts[].name'
 
 # Download a specific artifact
 gh run download <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template \
+  --repo Cuvara/NDCUnityTemplate \
   --name unity-build-Android
 
 # Download all artifacts
 gh run download <RUN_ID> \
-  --repo dyCuong03/NDC-Unity-Template
+  --repo Cuvara/NDCUnityTemplate
 ```
 
 ---

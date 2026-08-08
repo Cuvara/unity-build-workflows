@@ -23,7 +23,7 @@ on:
       toolkit-repo:
         description: "Toolkit repository (owner/repo) for resolve_build_flow.sh."
         required: false
-        default: 'dyCuong03/unity-build-workflows'
+        default: 'Cuvara/unity-build-workflows'
         type: string
 
       toolkit-ref:
