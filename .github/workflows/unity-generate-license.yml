@@ -63,7 +63,7 @@ jobs:
           sudo docker image prune -af 2>/dev/null || true
           echo "After:"; df -h / | tail -1
 
-      - name: Activate Unity and generate .ulf
+      - name: Generate .alf and exchange for .ulf
         id: activate
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
@@ -73,17 +73,15 @@ jobs:
           set -euo pipefail
 
           # Resolve the latest available Docker image tag for this Unity version.
-          # unityci/editor tags follow: ubuntu-<version>-linux-il2cpp-<repoVersion>
-          # We try version 3 first (Unity 6 era), then fall back to 1 (legacy).
           IMAGE_BASE="unityci/editor"
+          IMAGE=""
           for REPO_VER in 3 1; do
-            IMAGE="${IMAGE_BASE}:ubuntu-${UNITY_VERSION}-linux-il2cpp-${REPO_VER}"
-            echo "Trying image: ${IMAGE}"
-            if docker pull "${IMAGE}" 2>/dev/null; then
-              echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+            CANDIDATE="${IMAGE_BASE}:ubuntu-${UNITY_VERSION}-linux-il2cpp-${REPO_VER}"
+            echo "Trying image: ${CANDIDATE}"
+            if docker pull "${CANDIDATE}" 2>/dev/null; then
+              IMAGE="${CANDIDATE}"
               break
             fi
-            IMAGE=""
           done
 
           if [ -z "${IMAGE}" ]; then
@@ -91,40 +89,61 @@ jobs:
             exit 1
           fi
 
-          # Run Unity inside the container to perform activation.
-          # Unity writes the .ulf to /root/.local/share/unity3d/Unity/
           mkdir -p license-output
 
+          # Step 1: Generate manual activation file (.alf) inside Docker
+          echo "--- Step 1: Generating .alf ---"
           docker run --rm \
-            -e UNITY_EMAIL="${UNITY_EMAIL}" \
-            -e UNITY_PASSWORD="${UNITY_PASSWORD}" \
             -v "$(pwd)/license-output:/output" \
             "${IMAGE}" \
             bash -c '
-              set -e
-              # Attempt account-based activation (Unity Personal)
-              unity-editor \
-                -batchmode -nographics -quit \
-                -username "$UNITY_EMAIL" \
-                -password "$UNITY_PASSWORD" \
-                -logFile /dev/stdout \
-                2>&1 || true
-
-              # Find and copy the generated .ulf
-              ULF=$(find /root -name "*.ulf" 2>/dev/null | head -1)
-              if [ -z "$ULF" ]; then
-                ULF=$(find /home -name "*.ulf" 2>/dev/null | head -1)
-              fi
-              if [ -n "$ULF" ]; then
-                cp "$ULF" /output/Unity_lic.ulf
-                echo "License file found: $ULF"
+              unity-editor -batchmode -nographics -quit \
+                -createManualActivationFile \
+                -logFile /dev/stdout 2>&1 || true
+              ALF=$(find / -maxdepth 5 -name "*.alf" 2>/dev/null | head -1)
+              if [ -n "$ALF" ]; then
+                cp "$ALF" /output/Unity.alf
+                echo "ALF found: $ALF"
               else
-                echo "ERROR: No .ulf file generated"
-                # Dump license paths for debugging
-                find / -name "*.ulf" -o -name "*.alf" 2>/dev/null || true
+                echo "ERROR: No .alf generated"
                 exit 1
               fi
             '
+
+          if [ ! -f "license-output/Unity.alf" ]; then
+            echo "::error::.alf file was not generated"
+            exit 1
+          fi
+          echo "ALF file size: $(wc -c < license-output/Unity.alf) bytes"
+
+          # Step 2: Exchange .alf for .ulf via Unity's license API
+          echo "--- Step 2: Exchanging .alf for .ulf via Unity license API ---"
+          ALF_CONTENT=$(cat license-output/Unity.alf)
+
+          # Unity's manual activation endpoint
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/xml" \
+            -d "${ALF_CONTENT}" \
+            "https://license.unity3d.com/update/manual" 2>&1) || true
+
+          HTTP_CODE=$(echo "${RESPONSE}" | tail -1)
+          BODY=$(echo "${RESPONSE}" | sed '$d')
+
+          echo "License API HTTP status: ${HTTP_CODE}"
+
+          if echo "${BODY}" | grep -q "<?xml"; then
+            echo "${BODY}" > license-output/Unity_lic.ulf
+            echo "ULF received from Unity API"
+          else
+            echo "::warning::Automatic .ulf exchange failed (HTTP ${HTTP_CODE}). Uploading .alf as artifact for manual activation."
+            echo "Manual steps:"
+            echo "  1. Download the 'unity-docker-license' artifact"
+            echo "  2. Go to https://license.unity3d.com/manual"
+            echo "  3. Upload Unity.alf → download the .ulf"
+            echo "  4. Run: gh secret set UNITY_LICENSE --org Cuvara < Unity_lic.ulf"
+            # Don't fail — we still upload the .alf as artifact
+          fi
 
       - name: Verify .ulf was generated
         id: find-ulf
@@ -134,7 +153,7 @@ jobs:
             echo "License file size: $(wc -c < license-output/Unity_lic.ulf) bytes"
           else
             echo "ulf-found=false" >> "$GITHUB_OUTPUT"
-            echo "::error::No .ulf file found after activation"
+            echo "::warning::No .ulf file generated — check artifacts for .alf file and complete manual activation"
           fi
 
       - name: Upload license artifact
@@ -242,13 +261,21 @@ jobs:
           if [ "${ULF_FOUND}" = "true" ]; then
             {
               echo "## License Generated Successfully"
-              echo "Unity \`${{ inputs.unity-version }}\` license generated."
+              echo "Unity \`${{ inputs.unity-version }}\` license generated and set as secret."
             } >> "$GITHUB_STEP_SUMMARY"
           else
             {
-              echo "## License Generation Failed"
-              echo "game-ci/unity-activate could not generate a .ulf file."
-              echo "Check Unity credentials (UNITY_EMAIL, UNITY_PASSWORD)."
+              echo "## Manual Activation Required"
+              echo "The .alf file has been uploaded as an artifact."
+              echo ""
+              echo "### Steps to complete:"
+              echo "1. Download the \`unity-docker-license\` artifact from this run"
+              echo "2. Go to https://license.unity3d.com/manual"
+              echo "3. Upload \`Unity.alf\` and download the resulting \`.ulf\` file"
+              echo "4. Set it as a secret:"
+              echo "\`\`\`bash"
+              echo "gh secret set UNITY_LICENSE --org \$(echo \$GITHUB_REPOSITORY | cut -d/ -f1) < Unity_lic.ulf"
+              echo "\`\`\`"
             } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
+            # Don't exit 1 — the .alf artifact is still useful
           fi
