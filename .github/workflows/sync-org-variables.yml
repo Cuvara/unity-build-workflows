@@ -1,0 +1,306 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Cross-Repo Variable Sync
+# ════════════════════════════════════════════════════════════════════════════
+# Syncs organization-level Actions variables to all repos in the Cuvara org.
+# Ensures new org variables propagate to existing repos (not just new repos
+# created from the template).
+#
+# Repos with SKIP_VARIABLE_SYNC=true are excluded.
+#
+# Uses Cuvara-BOT (GitHub App) for authentication.
+#
+# Usage:
+#   - Runs weekly on schedule
+#   - Manually via workflow_dispatch
+#   - Called from another workflow via workflow_call
+
+name: Sync Org Variables
+
+on:
+  workflow_call:
+    secrets:
+      APP_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
+
+  workflow_dispatch: {}
+
+  schedule:
+    # Every Sunday at 04:00 UTC
+    - cron: '0 4 * * 0'
+
+jobs:
+  sync:
+    name: Sync Variables
+    runs-on: ubuntu-latest
+    steps:
+      # ── 1. Generate bot token ─────────────────────────────────────────────
+      - name: Generate bot token
+        id: bot
+        shell: bash
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
+            echo "::error::APP_ID or APP_PRIVATE_KEY secret is missing"
+            exit 1
+          fi
+
+          BOT_TOKEN=$(node -e "
+          const crypto = require('crypto');
+          const https  = require('https');
+
+          const APP_ID = process.env.APP_ID;
+          const PEM    = process.env.APP_PRIVATE_KEY;
+          const ORG    = process.env.GITHUB_REPOSITORY.split('/')[0];
+
+          const now     = Math.floor(Date.now() / 1000);
+          const header  = Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})).toString('base64url');
+          const payload = Buffer.from(JSON.stringify({iat: now-60, exp: now+600, iss: APP_ID})).toString('base64url');
+          const signature = crypto.sign('SHA256', Buffer.from(header+'.'+payload), PEM).toString('base64url');
+          const jwt = header+'.'+payload+'.'+signature;
+
+          function api(path, token, method, body) {
+            return new Promise((resolve, reject) => {
+              const opts = {
+                hostname: 'api.github.com', path, method: method||'GET',
+                headers: {
+                  'Authorization': 'Bearer '+token,
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'cuvara-bot',
+                  'X-GitHub-Api-Version': '2022-11-28'
+                }
+              };
+              const req = https.request(opts, res => {
+                let d=''; res.on('data', c => d+=c);
+                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d||'{}')}));
+              });
+              req.on('error', reject);
+              if (body) req.write(JSON.stringify(body));
+              req.end();
+            });
+          }
+
+          (async () => {
+            const instRes = await api('/app/installations', jwt);
+            const inst = instRes.data.find(i => i.account.login === ORG);
+            if (!inst) { console.error('App not installed on '+ORG); process.exit(1); }
+            const tokenRes = await api('/app/installations/'+inst.id+'/access_tokens', jwt, 'POST', {});
+            if (tokenRes.status !== 201) { console.error('Token error:', JSON.stringify(tokenRes.data)); process.exit(1); }
+            console.log(tokenRes.data.token);
+          })();
+          ")
+
+          if [ -z "${BOT_TOKEN}" ]; then
+            echo "::error::Failed to generate bot token"
+            exit 1
+          fi
+
+          echo "::add-mask::${BOT_TOKEN}"
+          echo "token=${BOT_TOKEN}" >> "$GITHUB_OUTPUT"
+
+      # ── 2. List org variables ─────────────────────────────────────────────
+      - name: List org variables
+        id: org-vars
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          ORG=$(echo "${GITHUB_REPOSITORY}" | cut -d/ -f1)
+
+          echo "Fetching org-level variables for ${ORG}..."
+
+          # Paginate through all org variables
+          VARS_JSON=$(gh api --paginate "orgs/${ORG}/actions/variables" \
+            -q '.variables[] | {name: .name, value: .value}' 2>/dev/null | jq -s '.')
+
+          VAR_COUNT=$(echo "${VARS_JSON}" | jq 'length')
+          echo "Found ${VAR_COUNT} org variable(s)"
+
+          if [ "${VAR_COUNT}" -eq 0 ]; then
+            echo "::warning::No org-level variables found — nothing to sync."
+            echo "count=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "count=${VAR_COUNT}" >> "$GITHUB_OUTPUT"
+            echo "Variables to sync:"
+            echo "${VARS_JSON}" | jq -r '.[] | "  - \(.name) = \(.value)"'
+          fi
+
+          # Save vars to file for next step
+          echo "${VARS_JSON}" > /tmp/org-vars.json
+
+      # ── 3. List repos and sync ────────────────────────────────────────────
+      - name: Sync variables to repos
+        if: steps.org-vars.outputs.count != '0'
+        id: sync
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          ORG=$(echo "${GITHUB_REPOSITORY}" | cut -d/ -f1)
+          VARS_JSON=$(cat /tmp/org-vars.json)
+
+          # ── List all repos in org (paginated) ─────────────────────────────
+          echo "Fetching repos in ${ORG}..."
+          REPOS=$(gh api --paginate "orgs/${ORG}/repos?type=all&per_page=100" \
+            -q '.[].full_name' 2>/dev/null | sort)
+
+          REPO_COUNT=$(echo "${REPOS}" | wc -l)
+          echo "Found ${REPO_COUNT} repo(s)"
+
+          SYNCED=0
+          SKIPPED=0
+          FAILED=0
+          SKIP_LIST=""
+          FAIL_LIST=""
+          SYNC_LIST=""
+
+          for REPO_FULL in ${REPOS}; do
+            echo ""
+            echo "── ${REPO_FULL} ──"
+
+            # ── Check for SKIP_VARIABLE_SYNC ────────────────────────────────
+            SKIP_VAL=$(gh api "repos/${REPO_FULL}/actions/variables/SKIP_VARIABLE_SYNC" \
+              -q '.value' 2>/dev/null) || true
+
+            if [ "${SKIP_VAL}" = "true" ]; then
+              echo "  SKIP: SKIP_VARIABLE_SYNC=true"
+              SKIPPED=$((SKIPPED + 1))
+              SKIP_LIST="${SKIP_LIST}\n| ${REPO_FULL} | SKIP_VARIABLE_SYNC=true |"
+              continue
+            fi
+
+            # ── Set each org variable at repo level ─────────────────────────
+            REPO_FAILED=0
+            while IFS= read -r var; do
+              VAR_NAME=$(echo "${var}" | jq -r '.name')
+              VAR_VALUE=$(echo "${var}" | jq -r '.value')
+
+              # Use PATCH to update or POST to create
+              RESPONSE=$(gh api "repos/${REPO_FULL}/actions/variables/${VAR_NAME}" \
+                -X PATCH \
+                -f value="${VAR_VALUE}" \
+                2>&1) || {
+                # Variable doesn't exist yet — create it
+                CREATE_RESPONSE=$(gh api "repos/${REPO_FULL}/actions/variables" \
+                  -X POST \
+                  -f name="${VAR_NAME}" \
+                  -f value="${VAR_VALUE}" \
+                  2>&1) || {
+                  echo "  WARN: Failed to set ${VAR_NAME} on ${REPO_FULL}"
+                  REPO_FAILED=1
+                }
+              }
+            done < <(echo "${VARS_JSON}" | jq -c '.[]')
+
+            if [ "${REPO_FAILED}" -eq 1 ]; then
+              FAILED=$((FAILED + 1))
+              FAIL_LIST="${FAIL_LIST}\n| ${REPO_FULL} | Partial failure |"
+            else
+              SYNCED=$((SYNCED + 1))
+              SYNC_LIST="${SYNC_LIST}\n| ${REPO_FULL} | Synced |"
+              echo "  OK: All variables synced"
+            fi
+          done
+
+          # ── Save counts ───────────────────────────────────────────────────
+          {
+            echo "synced=${SYNCED}"
+            echo "skipped=${SKIPPED}"
+            echo "failed=${FAILED}"
+            echo "total=${REPO_COUNT}"
+          } >> "$GITHUB_OUTPUT"
+
+          # Multi-line outputs
+          {
+            echo "sync-list<<EOF"
+            printf '%b' "${SYNC_LIST}"
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "skip-list<<EOF"
+            printf '%b' "${SKIP_LIST}"
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "fail-list<<EOF"
+            printf '%b' "${FAIL_LIST}"
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "${FAILED}" -gt 0 ]; then
+            echo "::warning::${FAILED} repo(s) had sync failures"
+          fi
+
+          echo "::notice::Sync complete: ${SYNCED} synced, ${SKIPPED} skipped, ${FAILED} failed out of ${REPO_COUNT} repos"
+
+      # ── 4. Step summary ───────────────────────────────────────────────────
+      - name: Step summary
+        if: always()
+        env:
+          VAR_COUNT: ${{ steps.org-vars.outputs.count }}
+          SYNCED: ${{ steps.sync.outputs.synced }}
+          SKIPPED: ${{ steps.sync.outputs.skipped }}
+          FAILED: ${{ steps.sync.outputs.failed }}
+          TOTAL: ${{ steps.sync.outputs.total }}
+          SYNC_LIST: ${{ steps.sync.outputs.sync-list }}
+          SKIP_LIST: ${{ steps.sync.outputs.skip-list }}
+          FAIL_LIST: ${{ steps.sync.outputs.fail-list }}
+        run: |
+          {
+            echo "## Org Variable Sync"
+            echo ""
+            echo "| Metric | Count |"
+            echo "|---|---|"
+            echo "| Org variables | ${VAR_COUNT:-0} |"
+            echo "| Total repos | ${TOTAL:-0} |"
+            echo "| Synced | ${SYNCED:-0} |"
+            echo "| Skipped | ${SKIPPED:-0} |"
+            echo "| Failed | ${FAILED:-0} |"
+
+            if [ -n "${FAIL_LIST}" ]; then
+              echo ""
+              echo "### Failed Repos"
+              echo "| Repo | Reason |"
+              echo "|---|---|"
+              printf '%b' "${FAIL_LIST}"
+              echo ""
+            fi
+
+            if [ -n "${SKIP_LIST}" ]; then
+              echo ""
+              echo "<details>"
+              echo "<summary>Skipped Repos</summary>"
+              echo ""
+              echo "| Repo | Reason |"
+              echo "|---|---|"
+              printf '%b' "${SKIP_LIST}"
+              echo ""
+              echo "</details>"
+            fi
+
+            if [ -n "${SYNC_LIST}" ]; then
+              echo ""
+              echo "<details>"
+              echo "<summary>Synced Repos</summary>"
+              echo ""
+              echo "| Repo | Status |"
+              echo "|---|---|"
+              printf '%b' "${SYNC_LIST}"
+              echo ""
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

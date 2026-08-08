@@ -1,0 +1,250 @@
+name: Auto-Merge Flow
+
+# Reusable workflow that auto-promotes code through branches when builds pass.
+# Supports the branch flow: develop → staging → main
+#
+# Consumer repos call this after successful builds to automatically create
+# a PR from source → target and enable auto-merge (or merge immediately
+# if require-build-success is false).
+
+on:
+  workflow_call:
+    inputs:
+      source-branch:
+        description: Source branch to merge from
+        type: string
+        required: true
+      target-branch:
+        description: Target branch to merge into
+        type: string
+        required: true
+      require-build-success:
+        description: >
+          When true, enable auto-merge (PR merges only after CI passes).
+          When false, merge the PR immediately without waiting for checks.
+        type: boolean
+        required: false
+        default: true
+    secrets:
+      APP_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      source-branch:
+        description: Source branch to merge from
+        required: true
+        default: develop
+      target-branch:
+        description: Target branch to merge into
+        required: true
+        default: staging
+      require-build-success:
+        description: Require CI to pass before merging
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  auto-merge:
+    name: Auto-merge ${{ inputs.source-branch }} → ${{ inputs.target-branch }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for diff between branches
+        id: diff-check
+        shell: bash
+        run: |
+          git fetch origin "${{ inputs.source-branch }}" "${{ inputs.target-branch }}"
+          DIFF=$(git rev-list --count "origin/${{ inputs.target-branch }}..origin/${{ inputs.source-branch }}")
+          echo "commit-count=${DIFF}" >> "$GITHUB_OUTPUT"
+          if [ "${DIFF}" -eq 0 ]; then
+            echo "::notice::No new commits on ${{ inputs.source-branch }} relative to ${{ inputs.target-branch }}. Nothing to merge."
+            echo "has-diff=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-diff=true" >> "$GITHUB_OUTPUT"
+            echo "${DIFF} commit(s) to promote."
+          fi
+
+      - name: Generate bot installation token
+        id: bot-token
+        if: steps.diff-check.outputs.has-diff == 'true'
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BOT_TOKEN=$(node -e "
+          const crypto = require('crypto');
+          const https = require('https');
+
+          const APP_ID = process.env.APP_ID;
+          const PEM = process.env.APP_PRIVATE_KEY;
+          const ORG = process.env.GITHUB_REPOSITORY.split('/')[0];
+
+          const now = Math.floor(Date.now() / 1000);
+          const header = Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})).toString('base64url');
+          const payload = Buffer.from(JSON.stringify({iat: now-60, exp: now+600, iss: APP_ID})).toString('base64url');
+          const signature = crypto.sign('SHA256', Buffer.from(header+'.'+payload), PEM).toString('base64url');
+          const jwt = header+'.'+payload+'.'+signature;
+
+          function api(path, token, method, body) {
+            return new Promise((resolve, reject) => {
+              const opts = {
+                hostname: 'api.github.com', path, method: method||'GET',
+                headers: {
+                  'Authorization': 'Bearer '+token,
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'cuvara-bot',
+                  'X-GitHub-Api-Version': '2022-11-28'
+                }
+              };
+              const req = https.request(opts, res => {
+                let d=''; res.on('data', c => d+=c);
+                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d||'{}')}));
+              });
+              req.on('error', reject);
+              if (body) req.write(JSON.stringify(body));
+              req.end();
+            });
+          }
+
+          (async () => {
+            const instRes = await api('/app/installations', jwt);
+            const inst = instRes.data.find(i => i.account.login === ORG);
+            if (!inst) { console.error('App not installed on '+ORG); process.exit(1); }
+            const tokenRes = await api('/app/installations/'+inst.id+'/access_tokens', jwt, 'POST', {});
+            if (tokenRes.status !== 201) { console.error('Token error:', JSON.stringify(tokenRes.data)); process.exit(1); }
+            console.log(tokenRes.data.token);
+          })();
+          ")
+
+          if [ -z "${BOT_TOKEN}" ]; then
+            echo "::error::Failed to generate bot installation token"
+            exit 1
+          fi
+          echo "::add-mask::${BOT_TOKEN}"
+          echo "token=${BOT_TOKEN}" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update PR
+        id: create-pr
+        if: steps.diff-check.outputs.has-diff == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE="${{ inputs.source-branch }}"
+          TARGET="${{ inputs.target-branch }}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          # Check if a PR already exists for this source → target
+          EXISTING_PR=$(gh pr list \
+            --repo "${REPO}" \
+            --head "${SOURCE}" \
+            --base "${TARGET}" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)
+
+          if [ -n "${EXISTING_PR}" ]; then
+            echo "::notice::PR #${EXISTING_PR} already exists for ${SOURCE} → ${TARGET}."
+            echo "pr-number=${EXISTING_PR}" >> "$GITHUB_OUTPUT"
+            echo "pr-url=https://github.com/${REPO}/pull/${EXISTING_PR}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Creating PR: ${SOURCE} → ${TARGET}"
+            PR_URL=$(gh pr create \
+              --repo "${REPO}" \
+              --head "${SOURCE}" \
+              --base "${TARGET}" \
+              --title "chore: auto-promote ${SOURCE} → ${TARGET}" \
+              --body "$(cat <<'EOF'
+          ## Auto-merge promotion
+
+          Automated PR created by **Cuvara-BOT** to promote changes from \`${{ inputs.source-branch }}\` to \`${{ inputs.target-branch }}\`.
+
+          This PR was created by the auto-merge workflow after a successful build on the source branch.
+
+          ---
+          *Auto-generated by [unity-build-workflows](https://github.com/Cuvara/unity-build-workflows) auto-merge flow.*
+          EOF
+          )")
+            PR_NUMBER=$(echo "${PR_URL}" | grep -oE '[0-9]+$')
+            echo "pr-number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "pr-url=${PR_URL}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Created PR #${PR_NUMBER}: ${PR_URL}"
+          fi
+
+      - name: Enable auto-merge
+        if: steps.diff-check.outputs.has-diff == 'true' && inputs.require-build-success == true
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PR_NUMBER="${{ steps.create-pr.outputs.pr-number }}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          echo "Enabling auto-merge on PR #${PR_NUMBER}..."
+          gh pr merge "${PR_NUMBER}" \
+            --repo "${REPO}" \
+            --auto \
+            --merge \
+          || echo "::warning::Could not enable auto-merge. Ensure branch protection rules and auto-merge are enabled on the repository."
+
+          echo "::notice::Auto-merge enabled on PR #${PR_NUMBER}. It will merge when all required checks pass."
+
+      - name: Merge immediately
+        if: steps.diff-check.outputs.has-diff == 'true' && inputs.require-build-success == false
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PR_NUMBER="${{ steps.create-pr.outputs.pr-number }}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          echo "Merging PR #${PR_NUMBER} immediately (require-build-success=false)..."
+          gh pr merge "${PR_NUMBER}" \
+            --repo "${REPO}" \
+            --merge \
+            --admin \
+          || {
+            echo "::warning::Admin merge failed. Trying regular merge..."
+            gh pr merge "${PR_NUMBER}" --repo "${REPO}" --merge
+          }
+
+          echo "::notice::PR #${PR_NUMBER} merged successfully."
+
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          HAS_DIFF: ${{ steps.diff-check.outputs.has-diff }}
+          PR_URL: ${{ steps.create-pr.outputs.pr-url }}
+          REQUIRE_BUILD: ${{ inputs.require-build-success }}
+        run: |
+          {
+            echo "## Auto-Merge: ${{ inputs.source-branch }} → ${{ inputs.target-branch }}"
+            echo ""
+            if [ "${HAS_DIFF}" = "false" ]; then
+              echo "No changes to promote — branches are in sync."
+            else
+              echo "- **PR:** ${PR_URL}"
+              if [ "${REQUIRE_BUILD}" = "true" ]; then
+                echo "- **Strategy:** Auto-merge (waiting for CI)"
+              else
+                echo "- **Strategy:** Immediate merge"
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

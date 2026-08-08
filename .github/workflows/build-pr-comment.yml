@@ -1,0 +1,385 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Build PR Comment
+# ════════════════════════════════════════════════════════════════════════════
+# Reusable workflow that posts/updates a build-result comment on the PR
+# associated with the triggering branch or commit.
+#
+# Uses Cuvara-BOT (GitHub App) for authentication so the comment appears
+# as the bot rather than github-actions[bot].
+#
+# Usage from a consumer repo:
+#   jobs:
+#     comment:
+#       needs: [build]
+#       if: always()
+#       uses: Cuvara/unity-build-workflows/.github/workflows/build-pr-comment.yml@main
+#       with:
+#         run-id: ${{ github.run_id }}
+#       secrets:
+#         APP_ID: ${{ secrets.APP_ID }}
+#         APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+
+name: Build PR Comment
+
+on:
+  workflow_call:
+    inputs:
+      run-id:
+        description: "The workflow run ID whose build results to report."
+        type: string
+        required: true
+      project-path:
+        description: "Path to the Unity project root (for display only)."
+        type: string
+        required: false
+        default: '.'
+    secrets:
+      APP_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: "The workflow run ID whose build results to report."
+        required: true
+      project-path:
+        description: "Path to the Unity project root (for display only)."
+        required: false
+        default: '.'
+
+jobs:
+  comment:
+    name: Post Build Comment
+    runs-on: ubuntu-latest
+    steps:
+      # ── 1. Generate bot token ─────────────────────────────────────────────
+      - name: Generate bot token
+        id: bot
+        shell: bash
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
+            echo "::error::APP_ID or APP_PRIVATE_KEY secret is missing"
+            exit 1
+          fi
+
+          BOT_TOKEN=$(node -e "
+          const crypto = require('crypto');
+          const https  = require('https');
+
+          const APP_ID = process.env.APP_ID;
+          const PEM    = process.env.APP_PRIVATE_KEY;
+          const ORG    = process.env.GITHUB_REPOSITORY.split('/')[0];
+
+          const now     = Math.floor(Date.now() / 1000);
+          const header  = Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})).toString('base64url');
+          const payload = Buffer.from(JSON.stringify({iat: now-60, exp: now+600, iss: APP_ID})).toString('base64url');
+          const signature = crypto.sign('SHA256', Buffer.from(header+'.'+payload), PEM).toString('base64url');
+          const jwt = header+'.'+payload+'.'+signature;
+
+          function api(path, token, method, body) {
+            return new Promise((resolve, reject) => {
+              const opts = {
+                hostname: 'api.github.com', path, method: method||'GET',
+                headers: {
+                  'Authorization': 'Bearer '+token,
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'cuvara-bot',
+                  'X-GitHub-Api-Version': '2022-11-28'
+                }
+              };
+              const req = https.request(opts, res => {
+                let d=''; res.on('data', c => d+=c);
+                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d||'{}')}));
+              });
+              req.on('error', reject);
+              if (body) req.write(JSON.stringify(body));
+              req.end();
+            });
+          }
+
+          (async () => {
+            const instRes = await api('/app/installations', jwt);
+            const inst = instRes.data.find(i => i.account.login === ORG);
+            if (!inst) { console.error('App not installed on '+ORG); process.exit(1); }
+            const tokenRes = await api('/app/installations/'+inst.id+'/access_tokens', jwt, 'POST', {});
+            if (tokenRes.status !== 201) { console.error('Token error:', JSON.stringify(tokenRes.data)); process.exit(1); }
+            console.log(tokenRes.data.token);
+          })();
+          ")
+
+          if [ -z "${BOT_TOKEN}" ]; then
+            echo "::error::Failed to generate bot token"
+            exit 1
+          fi
+
+          echo "::add-mask::${BOT_TOKEN}"
+          echo "token=${BOT_TOKEN}" >> "$GITHUB_OUTPUT"
+
+      # ── 2. Find associated PR ──────────────────────────────────────────────
+      - name: Find associated PR
+        id: pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          REPO="${GITHUB_REPOSITORY}"
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+
+          echo "Looking for open PR on branch: ${BRANCH}"
+
+          PR_NUMBER=$(gh api "repos/${REPO}/pulls?state=open&head=${REPO%%/*}:${BRANCH}" \
+            -q '.[0].number // empty' 2>/dev/null) || true
+
+          if [ -z "${PR_NUMBER}" ]; then
+            # Fallback: search by commit SHA
+            PR_NUMBER=$(gh api "repos/${REPO}/commits/${GITHUB_SHA}/pulls" \
+              -q '.[0].number // empty' 2>/dev/null) || true
+          fi
+
+          if [ -z "${PR_NUMBER}" ]; then
+            echo "::warning::No open PR found for branch '${BRANCH}' — skipping comment."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found PR #${PR_NUMBER}"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 3. Gather build results ───────────────────────────────────────────
+      - name: Gather build results
+        if: steps.pr.outputs.found == 'true'
+        id: results
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          RUN_ID: ${{ inputs.run-id }}
+        run: |
+          set -euo pipefail
+
+          REPO="${GITHUB_REPOSITORY}"
+
+          # ── Run metadata ──────────────────────────────────────────────────
+          RUN_DATA=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}" 2>/dev/null) || {
+            echo "::error::Could not fetch run ${RUN_ID}"
+            exit 1
+          }
+
+          RUN_STATUS=$(echo "${RUN_DATA}" | jq -r '.conclusion // .status')
+          RUN_URL=$(echo "${RUN_DATA}" | jq -r '.html_url')
+          RUN_START=$(echo "${RUN_DATA}" | jq -r '.run_started_at // empty')
+
+          # ── Duration ──────────────────────────────────────────────────────
+          DURATION="unknown"
+          if [ -n "${RUN_START}" ]; then
+            START_EPOCH=$(date -u -d "${RUN_START}" +%s 2>/dev/null) || true
+            if [ -n "${START_EPOCH}" ] && [ "${START_EPOCH}" -gt 0 ] 2>/dev/null; then
+              NOW=$(date -u +%s)
+              ELAPSED=$(( NOW - START_EPOCH ))
+              if [ "${ELAPSED}" -ge 60 ]; then
+                DURATION="$(( ELAPSED / 60 ))m $(( ELAPSED % 60 ))s"
+              else
+                DURATION="${ELAPSED}s"
+              fi
+            fi
+          fi
+
+          # ── Jobs (per-platform results) ───────────────────────────────────
+          JOBS_JSON=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+            -q '.jobs[] | {name: .name, conclusion: .conclusion, status: .status}' 2>/dev/null) || true
+
+          # Build a markdown table of platform results
+          PLATFORM_TABLE=""
+          while IFS= read -r job; do
+            [ -z "${job}" ] && continue
+            JOB_NAME=$(echo "${job}" | jq -r '.name')
+            JOB_CONCLUSION=$(echo "${job}" | jq -r '.conclusion // .status')
+
+            # Filter to build jobs only (skip resolve-config, validate, etc.)
+            case "${JOB_NAME}" in
+              *Build*|*build*|*Android*|*WebGL*|*Linux*|*Windows*|*iOS*) ;;
+              *) continue ;;
+            esac
+
+            if [ "${JOB_CONCLUSION}" = "success" ]; then
+              EMOJI="✅"
+            elif [ "${JOB_CONCLUSION}" = "failure" ]; then
+              EMOJI="❌"
+            elif [ "${JOB_CONCLUSION}" = "skipped" ]; then
+              EMOJI="⏭️"
+            elif [ "${JOB_CONCLUSION}" = "cancelled" ]; then
+              EMOJI="🚫"
+            else
+              EMOJI="🔄"
+            fi
+
+            PLATFORM_TABLE="${PLATFORM_TABLE}| ${EMOJI} | ${JOB_NAME} | \`${JOB_CONCLUSION}\` |"$'\n'
+          done < <(echo "${JOBS_JSON}" | jq -c '.' 2>/dev/null)
+
+          # ── Artifacts (sizes) ─────────────────────────────────────────────
+          ARTIFACTS_JSON=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" 2>/dev/null) || true
+
+          ARTIFACT_TABLE=""
+          ARTIFACT_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          if [ -n "${ARTIFACTS_JSON}" ]; then
+            while IFS= read -r art; do
+              [ -z "${art}" ] && continue
+              ART_NAME=$(echo "${art}" | jq -r '.name')
+              ART_SIZE_BYTES=$(echo "${art}" | jq -r '.size_in_bytes')
+
+              # Skip log artifacts in size listing
+              case "${ART_NAME}" in *-logs*) continue ;; esac
+
+              # Human-readable size
+              if [ "${ART_SIZE_BYTES}" -ge 1073741824 ] 2>/dev/null; then
+                ART_SIZE="$(echo "scale=1; ${ART_SIZE_BYTES}/1073741824" | bc)GB"
+              elif [ "${ART_SIZE_BYTES}" -ge 1048576 ] 2>/dev/null; then
+                ART_SIZE="$(echo "scale=1; ${ART_SIZE_BYTES}/1048576" | bc)MB"
+              elif [ "${ART_SIZE_BYTES}" -ge 1024 ] 2>/dev/null; then
+                ART_SIZE="$(echo "scale=1; ${ART_SIZE_BYTES}/1024" | bc)KB"
+              else
+                ART_SIZE="${ART_SIZE_BYTES}B"
+              fi
+
+              ARTIFACT_TABLE="${ARTIFACT_TABLE}| ${ART_NAME} | ${ART_SIZE} |"$'\n'
+            done < <(echo "${ARTIFACTS_JSON}" | jq -c '.artifacts[]' 2>/dev/null)
+          fi
+
+          # ── Overall status emoji ──────────────────────────────────────────
+          if [ "${RUN_STATUS}" = "success" ]; then
+            OVERALL_EMOJI="✅"
+            OVERALL_LABEL="All builds passed"
+          elif [ "${RUN_STATUS}" = "failure" ]; then
+            OVERALL_EMOJI="❌"
+            OVERALL_LABEL="One or more builds failed"
+          elif [ "${RUN_STATUS}" = "cancelled" ]; then
+            OVERALL_EMOJI="🚫"
+            OVERALL_LABEL="Build cancelled"
+          else
+            OVERALL_EMOJI="🔄"
+            OVERALL_LABEL="Build in progress"
+          fi
+
+          # ── Save outputs ──────────────────────────────────────────────────
+          {
+            echo "run-status=${RUN_STATUS}"
+            echo "run-url=${RUN_URL}"
+            echo "duration=${DURATION}"
+            echo "overall-emoji=${OVERALL_EMOJI}"
+            echo "overall-label=${OVERALL_LABEL}"
+            echo "artifact-url=${ARTIFACT_URL}"
+          } >> "$GITHUB_OUTPUT"
+
+          # Multi-line outputs via heredoc
+          {
+            echo "platform-table<<EOF"
+            printf '%s' "${PLATFORM_TABLE}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "artifact-table<<EOF"
+            printf '%s' "${ARTIFACT_TABLE}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # ── 4. Format and post/update comment ─────────────────────────────────
+      - name: Post or update PR comment
+        if: steps.pr.outputs.found == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          RUN_STATUS: ${{ steps.results.outputs.run-status }}
+          RUN_URL: ${{ steps.results.outputs.run-url }}
+          DURATION: ${{ steps.results.outputs.duration }}
+          OVERALL_EMOJI: ${{ steps.results.outputs.overall-emoji }}
+          OVERALL_LABEL: ${{ steps.results.outputs.overall-label }}
+          PLATFORM_TABLE: ${{ steps.results.outputs.platform-table }}
+          ARTIFACT_TABLE: ${{ steps.results.outputs.artifact-table }}
+          ARTIFACT_URL: ${{ steps.results.outputs.artifact-url }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+        run: |
+          set -euo pipefail
+
+          REPO="${GITHUB_REPOSITORY}"
+          MARKER="<!-- cuvara-build-result -->"
+
+          # ── Build comment body ────────────────────────────────────────────
+          BODY="${MARKER}
+          ## ${OVERALL_EMOJI} Unity Build Result — ${OVERALL_LABEL}
+
+          | | Job | Status |
+          |---|---|---|
+          ${PLATFORM_TABLE}
+          **Duration:** \`${DURATION}\` | **Project:** \`${PROJECT_PATH}\`
+
+          [View full run](${RUN_URL})"
+
+          if [ -n "${ARTIFACT_TABLE}" ]; then
+            BODY="${BODY}
+
+          <details>
+          <summary>Build Artifacts</summary>
+
+          | Artifact | Size |
+          |---|---|
+          ${ARTIFACT_TABLE}
+          [Download artifacts](${ARTIFACT_URL})
+
+          </details>"
+          fi
+
+          BODY="${BODY}
+
+          ---
+          <sub>Posted by Cuvara-BOT | $(date -u '+%Y-%m-%d %H:%M UTC')</sub>"
+
+          # ── Find existing comment by marker ───────────────────────────────
+          EXISTING_COMMENT_ID=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
+            -q ".[] | select(.body | contains(\"${MARKER}\")) | .id" 2>/dev/null | head -1) || true
+
+          if [ -n "${EXISTING_COMMENT_ID}" ]; then
+            echo "Updating existing comment ${EXISTING_COMMENT_ID} on PR #${PR_NUMBER}"
+            gh api "repos/${REPO}/issues/comments/${EXISTING_COMMENT_ID}" \
+              -X PATCH \
+              -f body="${BODY}" \
+              --silent
+          else
+            echo "Creating new comment on PR #${PR_NUMBER}"
+            gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+              -X POST \
+              -f body="${BODY}" \
+              --silent
+          fi
+
+          echo "::notice::Build comment posted on PR #${PR_NUMBER}"
+
+      # ── 5. Step summary ───────────────────────────────────────────────────
+      - name: Step summary
+        if: always()
+        env:
+          PR_FOUND: ${{ steps.pr.outputs.found }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          RUN_STATUS: ${{ steps.results.outputs.run-status }}
+          OVERALL_EMOJI: ${{ steps.results.outputs.overall-emoji }}
+          DURATION: ${{ steps.results.outputs.duration }}
+        run: |
+          {
+            echo "## Build PR Comment"
+            if [ "${PR_FOUND}" = "true" ]; then
+              echo "${OVERALL_EMOJI} Comment posted on PR #${PR_NUMBER}"
+              echo "- **Build status:** \`${RUN_STATUS}\`"
+              echo "- **Duration:** \`${DURATION}\`"
+            else
+              echo "No open PR found — comment skipped."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

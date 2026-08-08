@@ -1,0 +1,243 @@
+# ════════════════════════════════════════════════════════════════════════════
+# License Rotation — Unity License Version Check
+# ════════════════════════════════════════════════════════════════════════════
+# Standalone workflow that checks if UNITY_LICENSE_VERSION matches the
+# current Unity version and triggers license regeneration when mismatched.
+#
+# Runs weekly on schedule or manually. Uses Cuvara-BOT to trigger the
+# generate-license workflow across repos.
+#
+# Usage from a consumer repo:
+#   jobs:
+#     rotation:
+#       uses: Cuvara/unity-build-workflows/.github/workflows/license-rotation.yml@main
+#       with:
+#         unity-version: ${{ vars.UNITY_VERSION }}
+#       secrets:
+#         APP_ID: ${{ secrets.APP_ID }}
+#         APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+
+name: License Rotation
+
+on:
+  workflow_call:
+    inputs:
+      unity-version:
+        description: "Unity editor version to check against. Defaults to vars.UNITY_VERSION."
+        type: string
+        required: false
+        default: ''
+    secrets:
+      APP_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      unity-version:
+        description: "Unity editor version to check against (e.g., 6000.0.26f1). Leave empty to use UNITY_VERSION variable."
+        required: false
+        default: ''
+
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+
+jobs:
+  check-rotation:
+    name: Check License Version
+    runs-on: ubuntu-latest
+    steps:
+      # ── 1. Generate bot token ─────────────────────────────────────────────
+      - name: Generate bot token
+        id: bot
+        shell: bash
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
+            echo "::error::APP_ID or APP_PRIVATE_KEY secret is missing"
+            exit 1
+          fi
+
+          BOT_TOKEN=$(node -e "
+          const crypto = require('crypto');
+          const https  = require('https');
+
+          const APP_ID = process.env.APP_ID;
+          const PEM    = process.env.APP_PRIVATE_KEY;
+          const ORG    = process.env.GITHUB_REPOSITORY.split('/')[0];
+
+          const now     = Math.floor(Date.now() / 1000);
+          const header  = Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})).toString('base64url');
+          const payload = Buffer.from(JSON.stringify({iat: now-60, exp: now+600, iss: APP_ID})).toString('base64url');
+          const signature = crypto.sign('SHA256', Buffer.from(header+'.'+payload), PEM).toString('base64url');
+          const jwt = header+'.'+payload+'.'+signature;
+
+          function api(path, token, method, body) {
+            return new Promise((resolve, reject) => {
+              const opts = {
+                hostname: 'api.github.com', path, method: method||'GET',
+                headers: {
+                  'Authorization': 'Bearer '+token,
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'cuvara-bot',
+                  'X-GitHub-Api-Version': '2022-11-28'
+                }
+              };
+              const req = https.request(opts, res => {
+                let d=''; res.on('data', c => d+=c);
+                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d||'{}')}));
+              });
+              req.on('error', reject);
+              if (body) req.write(JSON.stringify(body));
+              req.end();
+            });
+          }
+
+          (async () => {
+            const instRes = await api('/app/installations', jwt);
+            const inst = instRes.data.find(i => i.account.login === ORG);
+            if (!inst) { console.error('App not installed on '+ORG); process.exit(1); }
+            const tokenRes = await api('/app/installations/'+inst.id+'/access_tokens', jwt, 'POST', {});
+            if (tokenRes.status !== 201) { console.error('Token error:', JSON.stringify(tokenRes.data)); process.exit(1); }
+            console.log(tokenRes.data.token);
+          })();
+          ")
+
+          if [ -z "${BOT_TOKEN}" ]; then
+            echo "::error::Failed to generate bot token"
+            exit 1
+          fi
+
+          echo "::add-mask::${BOT_TOKEN}"
+          echo "token=${BOT_TOKEN}" >> "$GITHUB_OUTPUT"
+
+      # ── 2. Resolve Unity version ──────────────────────────────────────────
+      - name: Resolve Unity version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          INPUT_VERSION: ${{ inputs.unity-version }}
+          FALLBACK_VERSION: ${{ vars.UNITY_VERSION }}
+        run: |
+          set -euo pipefail
+
+          UNITY_VERSION="${INPUT_VERSION:-${FALLBACK_VERSION:-}}"
+
+          if [ -z "${UNITY_VERSION}" ]; then
+            echo "::error::No Unity version provided and vars.UNITY_VERSION is not set."
+            exit 1
+          fi
+
+          echo "Resolved Unity version: ${UNITY_VERSION}"
+          echo "unity-version=${UNITY_VERSION}" >> "$GITHUB_OUTPUT"
+
+      # ── 3. Check UNITY_LICENSE_VERSION variable ───────────────────────────
+      - name: Check license version match
+        id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          UNITY_VERSION: ${{ steps.version.outputs.unity-version }}
+        run: |
+          set -euo pipefail
+
+          REPO="${GITHUB_REPOSITORY}"
+          ORG=$(echo "${REPO}" | cut -d/ -f1)
+
+          # Try org-level variable first, then repo-level
+          LICENSE_VERSION=""
+
+          LICENSE_VERSION=$(gh api "orgs/${ORG}/actions/variables/UNITY_LICENSE_VERSION" \
+            -q '.value' 2>/dev/null) || true
+
+          if [ -z "${LICENSE_VERSION}" ]; then
+            LICENSE_VERSION=$(gh api "repos/${REPO}/actions/variables/UNITY_LICENSE_VERSION" \
+              -q '.value' 2>/dev/null) || true
+          fi
+
+          echo "Current UNITY_LICENSE_VERSION: '${LICENSE_VERSION}'"
+          echo "Required Unity version:        '${UNITY_VERSION}'"
+
+          if [ -z "${LICENSE_VERSION}" ]; then
+            echo "::warning::UNITY_LICENSE_VERSION variable not found — license may not be set up."
+            echo "match=missing" >> "$GITHUB_OUTPUT"
+            echo "license-version=(not set)" >> "$GITHUB_OUTPUT"
+          elif [ "${LICENSE_VERSION}" = "${UNITY_VERSION}" ]; then
+            echo "License version matches — no rotation needed."
+            echo "match=true" >> "$GITHUB_OUTPUT"
+            echo "license-version=${LICENSE_VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::License version mismatch: have '${LICENSE_VERSION}', need '${UNITY_VERSION}'"
+            echo "match=false" >> "$GITHUB_OUTPUT"
+            echo "license-version=${LICENSE_VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 4. Trigger generate-license if mismatched ─────────────────────────
+      - name: Trigger license regeneration
+        if: steps.check.outputs.match != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          UNITY_VERSION: ${{ steps.version.outputs.unity-version }}
+          MATCH_STATUS: ${{ steps.check.outputs.match }}
+        run: |
+          set -euo pipefail
+
+          REPO="${GITHUB_REPOSITORY}"
+          ORG=$(echo "${REPO}" | cut -d/ -f1)
+          TOOLKIT_REPO="${ORG}/unity-build-workflows"
+
+          echo "Triggering generate-license workflow for Unity ${UNITY_VERSION}..."
+
+          # Dispatch the generate-license workflow
+          gh api "repos/${TOOLKIT_REPO}/actions/workflows/unity-generate-license.yml/dispatches" \
+            -X POST \
+            -f ref="main" \
+            -f "inputs[unity-version]=${UNITY_VERSION}" \
+            -f "inputs[secret-scope]=org" \
+            --silent \
+            && echo "::notice::generate-license workflow dispatched for Unity ${UNITY_VERSION}" \
+            || {
+              echo "::error::Failed to dispatch generate-license workflow"
+              exit 1
+            }
+
+      - name: Log — no action needed
+        if: steps.check.outputs.match == 'true'
+        run: |
+          echo "::notice::License version matches (${UNITY_VERSION}) — no regeneration needed."
+        env:
+          UNITY_VERSION: ${{ steps.version.outputs.unity-version }}
+
+      # ── 5. Step summary ───────────────────────────────────────────────────
+      - name: Step summary
+        if: always()
+        env:
+          UNITY_VERSION: ${{ steps.version.outputs.unity-version }}
+          MATCH_STATUS: ${{ steps.check.outputs.match }}
+          LICENSE_VERSION: ${{ steps.check.outputs.license-version }}
+        run: |
+          {
+            echo "## License Rotation Check"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Unity Version | \`${UNITY_VERSION:-unknown}\` |"
+            echo "| License Version | \`${LICENSE_VERSION:-unknown}\` |"
+            echo "| Match | \`${MATCH_STATUS:-unknown}\` |"
+            echo ""
+            if [ "${MATCH_STATUS}" = "true" ]; then
+              echo "No action taken — license is up to date."
+            elif [ "${MATCH_STATUS}" = "missing" ]; then
+              echo "**UNITY_LICENSE_VERSION** variable not found. Triggered \`generate-license\` workflow."
+            else
+              echo "Version mismatch detected. Triggered \`generate-license\` workflow for Unity \`${UNITY_VERSION}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
