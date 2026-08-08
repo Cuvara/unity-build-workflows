@@ -38,17 +38,17 @@ on:
         description: Docker image registry
         type: string
         required: false
-        default: ghcr.io
+        default: ''
       image-namespace:
         description: Docker image namespace
         type: string
         required: false
-        default: cuvara
+        default: unityci
       image-name:
         description: Docker image name
         type: string
         required: false
-        default: unity-editor
+        default: editor
       secret-scope:
         description: "Where to set the secret: 'org' or 'repo'"
         type: string
@@ -84,7 +84,20 @@ jobs:
     steps:
       - name: Pull Unity Docker image
         run: |
-          IMAGE="${{ inputs.image-registry }}/${{ inputs.image-namespace }}/${{ inputs.image-name }}:${{ inputs.unity-version }}-linux"
+          REGISTRY="${{ inputs.image-registry }}"
+          NAMESPACE="${{ inputs.image-namespace }}"
+          NAME="${{ inputs.image-name }}"
+          VERSION="${{ inputs.unity-version }}"
+
+          # Build image tag: registry/namespace/name:tag
+          # GameCI default: unityci/editor:ubuntu-VERSION-linux-il2cpp-3
+          # Custom registry: registry/namespace/name:VERSION-linux
+          if [ -n "${REGISTRY}" ]; then
+            IMAGE="${REGISTRY}/${NAMESPACE}/${NAME}:${VERSION}-linux"
+          else
+            IMAGE="${NAMESPACE}/${NAME}:ubuntu-${VERSION}-linux-il2cpp-3"
+          fi
+
           echo "Pulling: ${IMAGE}"
           docker pull "${IMAGE}"
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
