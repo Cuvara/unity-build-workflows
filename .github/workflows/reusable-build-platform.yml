@@ -196,6 +196,9 @@ on:
       UNITY_PASSWORD:
         description: Unity account password. Required for docker lane activation.
         required: false
+      UNITY_SERIAL:
+        description: Unity serial key. Optional — Pro/Plus serial-based activation.
+        required: false
 
     outputs:
       result:
@@ -370,6 +373,7 @@ jobs:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
         run: |
           set -euo pipefail
           SCRIPT="scripts/common/resolve_activation_strategy.sh"
@@ -438,6 +442,7 @@ jobs:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
         with:
           projectPath: ${{ inputs.project-path }}
           unityVersion: ${{ inputs.unity-version }}
@@ -534,6 +539,7 @@ jobs:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
         with:
           projectPath: ${{ inputs.project-path }}
           unityVersion: ${{ inputs.unity-version }}
@@ -555,6 +561,7 @@ jobs:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
         with:
           projectPath: ${{ inputs.project-path }}
           unityVersion: ${{ inputs.unity-version }}
@@ -590,6 +597,7 @@ jobs:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
         run: |
           $ErrorActionPreference = "Stop"
 

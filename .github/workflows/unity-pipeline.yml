@@ -132,6 +132,9 @@ on:
       UNITY_PASSWORD:
         description: "Unity account password. Optional — docker lane activation."
         required: false
+      UNITY_SERIAL:
+        description: "Unity serial key. Optional — Pro/Plus serial-based activation."
+        required: false
       DISCORD_WEBHOOK_URL:
         description: "Discord webhook URL for build notifications. Optional — no-op when absent."
         required: false
@@ -560,6 +563,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 4: build-addressables
@@ -601,6 +605,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 5: build-android
@@ -644,6 +649,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 6: build-webgl
@@ -686,6 +692,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 7: build-linux64
@@ -728,6 +735,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 8: build-linuxserver
@@ -770,6 +778,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 9: build-windows64
@@ -816,6 +825,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 10: build-ios
