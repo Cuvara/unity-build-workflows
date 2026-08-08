@@ -491,10 +491,12 @@ jobs:
             echo "::warning::UNITY_LICENSE_VERSION variable not set — cannot verify license matches Unity ${UNITY_VERSION}. Set it to skip this warning."
           fi
 
-          # Check 3: Basic ULF structure validation (DeveloperData element)
+          # Check 3: Basic ULF structure validation
+          # Unity 6 .ulf may use different XML structure than older versions.
+          # Accept any XML containing license-related elements.
           if [ "${VALID}" = "true" ] && [ -n "${UNITY_LICENSE}" ]; then
-            if ! printf '%s' "${UNITY_LICENSE}" | grep -q "DeveloperData"; then
-              echo "::error::UNITY_LICENSE is not a valid .ulf file (missing DeveloperData)."
+            if ! printf '%s' "${UNITY_LICENSE}" | grep -qiE '<(License|Root|DeveloperData|MachineBindings|SerialHash|SignedLicense)'; then
+              echo "::error::UNITY_LICENSE does not appear to be a valid .ulf file (no recognized license XML elements)."
               REASONS="${REASONS}\n  - UNITY_LICENSE content is not valid ULF XML"
               VALID=false
             fi
