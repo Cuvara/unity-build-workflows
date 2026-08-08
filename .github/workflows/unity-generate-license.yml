@@ -1,31 +1,16 @@
 name: Generate Unity License
 
-# Generate a Docker-compatible .ulf license file and optionally auto-set
-# it as an org/repo secret via a GitHub App bot.
+# Generate a Docker-compatible .ulf license file using game-ci/unity-activate.
 #
-# Unity 6 .ulf files are machine-bound. A .ulf generated on a local machine
-# will fail in Docker with "TimeStamp validation failed" because the Docker
-# container has different machine identifiers.
+# This uses GameCI's official activation action which handles Unity Personal
+# licensing correctly (including Unity 6).
 #
-# This workflow generates a .ulf INSIDE the Docker image so it matches
-# the container's machine bindings, then optionally saves it as a secret
-# using a GitHub App installation token.
+# When APP_ID + APP_PRIVATE_KEY secrets are present, the .ulf is automatically
+# set as UNITY_LICENSE org/repo secret via GitHub App bot.
 #
 # Prerequisites:
 #   - UNITY_EMAIL and UNITY_PASSWORD secrets must be set
-#   - Docker image must exist for the specified unity-version
 #   - (Optional) APP_ID and APP_PRIVATE_KEY secrets for auto-set
-#
-# Auto-set flow (when APP_ID + APP_PRIVATE_KEY are present):
-#   1. Generate .ulf inside Docker
-#   2. Bot generates installation token
-#   3. Bot sets UNITY_LICENSE secret + UNITY_LICENSE_VERSION variable
-#   4. No manual steps needed
-#
-# Manual fallback (when bot secrets are missing or only .alf generated):
-#   1. Download the 'unity-docker-license' artifact
-#   2. Upload .alf to https://license.unity3d.com/manual → get .ulf
-#   3. gh secret set UNITY_LICENSE < Unity_lic.ulf
 
 on:
   workflow_call:
@@ -34,21 +19,6 @@ on:
         description: Unity editor version
         type: string
         required: true
-      image-registry:
-        description: Docker image registry
-        type: string
-        required: false
-        default: ''
-      image-namespace:
-        description: Docker image namespace
-        type: string
-        required: false
-        default: unityci
-      image-name:
-        description: Docker image name
-        type: string
-        required: false
-        default: editor
       secret-scope:
         description: "Where to set the secret: 'org' or 'repo'"
         type: string
@@ -82,110 +52,45 @@ jobs:
     name: Generate Docker License
     runs-on: ubuntu-latest
     steps:
-      - name: Pull Unity Docker image
-        run: |
-          REGISTRY="${{ inputs.image-registry }}"
-          NAMESPACE="${{ inputs.image-namespace }}"
-          NAME="${{ inputs.image-name }}"
-          VERSION="${{ inputs.unity-version }}"
-
-          # Build image tag: registry/namespace/name:tag
-          # GameCI default: unityci/editor:ubuntu-VERSION-linux-il2cpp-3
-          # Custom registry: registry/namespace/name:VERSION-linux
-          if [ -n "${REGISTRY}" ]; then
-            IMAGE="${REGISTRY}/${NAMESPACE}/${NAME}:${VERSION}-linux"
-          else
-            IMAGE="${NAMESPACE}/${NAME}:ubuntu-${VERSION}-linux-il2cpp-3"
-          fi
-
-          echo "Pulling: ${IMAGE}"
-          docker pull "${IMAGE}"
-          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
-
-      - name: Activate Unity inside container and extract .ulf
+      - name: Activate Unity and generate .ulf
         id: activate
+        uses: game-ci/unity-activate@v2
+        with:
+          unityVersion: ${{ inputs.unity-version }}
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
+      - name: Find generated .ulf
+        id: find-ulf
         run: |
-          mkdir -p license-output
-
-          # Deterministic machine identity — MUST match run_unity_container.py
-          # (UNITY_CI_MACHINE_ID / UNITY_CI_HOSTNAME / UNITY_CI_MAC) so the
-          # license generated here binds to the same identity every build
-          # container presents, avoiding "TimeStamp validation failed".
-          MACHINE_ID="a1b2c3d4e5f64718293a4b5c6d7e8f90"
-          CI_HOSTNAME="unity-ci-builder"
-          CI_MAC="02:42:ac:11:00:42"
-          printf '%s\n' "${MACHINE_ID}" > machine-id
-          chmod 644 machine-id
-
-          # Run activation inside the container (override entrypoint)
-          docker run --rm \
-            --entrypoint bash \
-            --hostname "${CI_HOSTNAME}" \
-            --mac-address "${CI_MAC}" \
-            -v "$(pwd)/machine-id:/etc/machine-id:ro" \
-            -v "$(pwd)/machine-id:/var/lib/dbus/machine-id:ro" \
-            -e UNITY_EMAIL \
-            -e UNITY_PASSWORD \
-            -v "$(pwd)/license-output:/license-output" \
-            "${IMAGE}" \
-            -c '
-              set -e
-              echo "Attempting Unity activation with email/password..."
-
-              /usr/bin/unity-editor \
-                -batchmode \
-                -nographics \
-                -username "${UNITY_EMAIL}" \
-                -password "${UNITY_PASSWORD}" \
-                -logFile /dev/stdout \
-                -quit || true
-
-              echo ""
-              echo "Searching for generated license files..."
-
-              # Unity writes .ulf to various locations
-              for dir in \
-                "/tmp/unity-home/.local/share/unity3d/Unity" \
-                "/root/.local/share/unity3d/Unity" \
-                "${HOME}/.local/share/unity3d/Unity" \
-                "/tmp/.unity3d"; do
-                if [ -d "$dir" ]; then
-                  echo "Checking: $dir"
-                  ls -la "$dir/" 2>/dev/null || true
-                  find "$dir" -name "*.ulf" -exec cp {} /license-output/ \; 2>/dev/null || true
-                fi
-              done
-
-              # Also try the manual activation approach
-              if [ ! -f /license-output/*.ulf ] 2>/dev/null; then
-                echo "No .ulf from login activation, trying -createManualActivationFile..."
-                /usr/bin/unity-editor \
-                  -batchmode \
-                  -nographics \
-                  -createManualActivationFile \
-                  -logFile /dev/stdout \
-                  -quit || true
-
-                find / -name "*.alf" -exec cp {} /license-output/ \; 2>/dev/null || true
+          # game-ci/unity-activate writes .ulf to Unity config directory
+          ULF=$(find /home/runner -name "*.ulf" -o -name "Unity_lic.ulf" 2>/dev/null | head -1)
+          if [ -z "${ULF}" ]; then
+            ULF=$(find /tmp -name "*.ulf" 2>/dev/null | head -1)
+          fi
+          if [ -z "${ULF}" ]; then
+            # Check Unity license paths
+            for dir in \
+              "${HOME}/.local/share/unity3d/Unity" \
+              "${HOME}/.config/unity3d/Unity" \
+              "/usr/share/unity3d/config"; do
+              if [ -d "$dir" ]; then
+                ULF=$(find "$dir" -name "*.ulf" 2>/dev/null | head -1)
+                [ -n "${ULF}" ] && break
               fi
+            done
+          fi
 
-              echo ""
-              echo "License output directory:"
-              ls -la /license-output/ 2>/dev/null || echo "(empty)"
-            '
-
-          echo ""
-          echo "Host license-output directory:"
-          ls -la license-output/ 2>/dev/null || echo "(empty)"
-
-          # Determine result
-          if ls license-output/*.ulf 1>/dev/null 2>&1; then
+          if [ -n "${ULF}" ]; then
+            echo "ulf-path=${ULF}" >> "$GITHUB_OUTPUT"
             echo "ulf-found=true" >> "$GITHUB_OUTPUT"
+            mkdir -p license-output
+            cp "${ULF}" license-output/Unity_lic.ulf
+            echo "Found .ulf: ${ULF}"
           else
             echo "ulf-found=false" >> "$GITHUB_OUTPUT"
+            echo "::error::No .ulf file found after activation"
           fi
 
       - name: Upload license artifact
@@ -193,25 +98,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unity-docker-license
-          path: |
-            license-output/*.ulf
-            license-output/*.alf
+          path: license-output/
           retention-days: 1
           if-no-files-found: warn
 
       - name: Auto-set UNITY_LICENSE secret via bot
-        if: steps.activate.outputs.ulf-found == 'true'
+        if: steps.find-ulf.outputs.ulf-found == 'true'
         env:
           APP_ID: ${{ secrets.APP_ID }}
           APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
           UNITY_VERSION: ${{ inputs.unity-version }}
           SECRET_SCOPE: ${{ inputs.secret-scope }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
-          ULF_FILE=$(ls license-output/*.ulf | head -1)
-          echo "Found .ulf: ${ULF_FILE}"
+          ULF_FILE="license-output/Unity_lic.ulf"
 
           if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
             echo "::warning::APP_ID or APP_PRIVATE_KEY not set — cannot auto-set secret."
@@ -220,18 +121,14 @@ jobs:
             exit 0
           fi
 
-          # Generate GitHub App installation token using Node.js
-          node - <<'SCRIPT'
+          # Generate GitHub App installation token
+          BOT_TOKEN=$(node -e "
           const crypto = require('crypto');
           const https = require('https');
-          const fs = require('fs');
 
           const APP_ID = process.env.APP_ID;
           const PEM = process.env.APP_PRIVATE_KEY;
-          const REPO = process.env.GITHUB_REPOSITORY;
-          const ORG = REPO.split('/')[0];
-          const SCOPE = process.env.SECRET_SCOPE;
-          const VERSION = process.env.UNITY_VERSION;
+          const ORG = process.env.GITHUB_REPOSITORY.split('/')[0];
 
           const now = Math.floor(Date.now() / 1000);
           const header = Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})).toString('base64url');
@@ -239,10 +136,10 @@ jobs:
           const signature = crypto.sign('SHA256', Buffer.from(header+'.'+payload), PEM).toString('base64url');
           const jwt = header+'.'+payload+'.'+signature;
 
-          function api(path, token, method='GET', body=null) {
+          function api(path, token, method, body) {
             return new Promise((resolve, reject) => {
               const opts = {
-                hostname: 'api.github.com', path, method,
+                hostname: 'api.github.com', path, method: method||'GET',
                 headers: {
                   'Authorization': 'Bearer '+token,
                   'Accept': 'application/vnd.github+json',
@@ -250,10 +147,9 @@ jobs:
                   'X-GitHub-Api-Version': '2022-11-28'
                 }
               };
-              if (body) opts.headers['Content-Type'] = 'application/json';
               const req = https.request(opts, res => {
                 let d=''; res.on('data', c => d+=c);
-                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d || '{}')}));
+                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d||'{}')}));
               });
               req.on('error', reject);
               if (body) req.write(JSON.stringify(body));
@@ -262,110 +158,53 @@ jobs:
           }
 
           (async () => {
-            // Get installation
             const instRes = await api('/app/installations', jwt);
             const inst = instRes.data.find(i => i.account.login === ORG);
             if (!inst) { console.error('App not installed on '+ORG); process.exit(1); }
-
-            // Get installation token
             const tokenRes = await api('/app/installations/'+inst.id+'/access_tokens', jwt, 'POST', {});
             if (tokenRes.status !== 201) { console.error('Token error:', JSON.stringify(tokenRes.data)); process.exit(1); }
-            const token = tokenRes.data.token;
-
-            // Read .ulf content
-            const ulf = fs.readFileSync(process.argv[2], 'utf8');
-
-            // Get public key for secret encryption
-            let pkRes;
-            if (SCOPE === 'org') {
-              pkRes = await api('/orgs/'+ORG+'/actions/secrets/public-key', token);
-            } else {
-              pkRes = await api('/repos/'+REPO+'/actions/secrets/public-key', token);
-            }
-            if (pkRes.status !== 200) { console.error('Public key error:', JSON.stringify(pkRes.data)); process.exit(1); }
-
-            // Encrypt secret using libsodium (tweetnacl)
-            // GitHub requires secrets to be encrypted with the repo/org public key
-            // Use sodium sealed box encryption
-            const sodiumPK = Buffer.from(pkRes.data.key, 'base64');
-            const keyId = pkRes.data.key_id;
-
-            // Use tweetnacl-sealedbox for encryption
-            // Since we can't install npm packages, use the GitHub CLI approach instead
-            // Write the token and ulf to temp files for the shell to use
-            fs.writeFileSync('/tmp/bot-token', token);
-            fs.writeFileSync('/tmp/key-id', keyId);
-            fs.writeFileSync('/tmp/public-key', pkRes.data.key);
-
-            console.log('BOT_TOKEN_READY');
-            console.log('SCOPE='+SCOPE);
-            console.log('ORG='+ORG);
-            console.log('REPO='+REPO);
-            console.log('KEY_ID='+keyId);
+            console.log(tokenRes.data.token);
           })();
-          SCRIPT
+          ")
 
-          # Use gh CLI with the bot token to set the secret
-          BOT_TOKEN=$(cat /tmp/bot-token 2>/dev/null || true)
           if [ -z "${BOT_TOKEN}" ]; then
             echo "::error::Failed to generate bot token"
             exit 1
           fi
 
           export GH_TOKEN="${BOT_TOKEN}"
+          REPO="${GITHUB_REPOSITORY}"
+          ORG=$(echo "${REPO}" | cut -d/ -f1)
 
           if [ "${SECRET_SCOPE}" = "org" ]; then
-            ORG=$(echo "${GITHUB_REPOSITORY}" | cut -d/ -f1)
             echo "Setting UNITY_LICENSE org secret for ${ORG}..."
             gh secret set UNITY_LICENSE --org "${ORG}" --visibility all < "${ULF_FILE}"
             echo "Setting UNITY_LICENSE_VERSION org variable..."
             gh variable set UNITY_LICENSE_VERSION --org "${ORG}" --visibility all --body "${UNITY_VERSION}"
           else
             echo "Setting UNITY_LICENSE repo secret..."
-            gh secret set UNITY_LICENSE --repo "${GITHUB_REPOSITORY}" < "${ULF_FILE}"
+            gh secret set UNITY_LICENSE --repo "${REPO}" < "${ULF_FILE}"
             echo "Setting UNITY_LICENSE_VERSION repo variable..."
-            gh variable set UNITY_LICENSE_VERSION --repo "${GITHUB_REPOSITORY}" --body "${UNITY_VERSION}"
+            gh variable set UNITY_LICENSE_VERSION --repo "${REPO}" --body "${UNITY_VERSION}"
           fi
 
-          echo "::notice::UNITY_LICENSE secret and UNITY_LICENSE_VERSION variable set automatically for Unity ${UNITY_VERSION}"
+          echo "::notice::UNITY_LICENSE and UNITY_LICENSE_VERSION set for Unity ${UNITY_VERSION}"
 
       - name: Report result
         if: always()
         env:
-          ULF_FOUND: ${{ steps.activate.outputs.ulf-found }}
+          ULF_FOUND: ${{ steps.find-ulf.outputs.ulf-found }}
         run: |
           if [ "${ULF_FOUND}" = "true" ]; then
-            echo "SUCCESS: .ulf file generated"
             {
               echo "## License Generated Successfully"
-              echo "Unity \`${{ inputs.unity-version }}\` license generated and set automatically."
-            } >> "$GITHUB_STEP_SUMMARY"
-          elif ls license-output/*.alf 2>/dev/null | head -1 > /dev/null; then
-            echo "PARTIAL: .alf file generated (manual activation needed)"
-            {
-              echo "## Manual License Activation Required"
-              echo ""
-              echo "Auto-activation produced an **.alf** file (not .ulf)."
-              echo "Unity 6 Personal often requires manual activation."
-              echo ""
-              echo "**Steps:**"
-              echo "1. Download the \`unity-docker-license\` artifact"
-              echo "2. Upload the .alf to https://license.unity3d.com/manual"
-              echo "3. Download the .ulf and set as secret:"
-              echo '   ```bash'
-              echo "   gh secret set UNITY_LICENSE --org <ORG> --visibility all < Unity_lic.ulf"
-              echo "   gh variable set UNITY_LICENSE_VERSION --org <ORG> --visibility all --body \"${{ inputs.unity-version }}\""
-              echo '   ```'
+              echo "Unity \`${{ inputs.unity-version }}\` license generated."
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "FAILED: No license files generated"
             {
               echo "## License Generation Failed"
-              echo ""
-              echo "No .ulf or .alf files were generated."
-              echo "Options:"
-              echo "1. Use a self-hosted runner with Unity Hub pre-installed"
-              echo "2. Upgrade to Unity Pro (serial-based activation)"
+              echo "game-ci/unity-activate could not generate a .ulf file."
+              echo "Check Unity credentials (UNITY_EMAIL, UNITY_PASSWORD)."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
