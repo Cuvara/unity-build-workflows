@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Activate Unity and generate .ulf
         id: activate
-        uses: game-ci/unity-activate@v2
+        uses: game-ci/unity-activate@fbbebcb5a254e2d1dc44ad931047e3f320e4968a # main with Unity 6 fix
         with:
           unityVersion: ${{ inputs.unity-version }}
         env:
