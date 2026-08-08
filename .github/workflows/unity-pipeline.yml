@@ -448,14 +448,96 @@ jobs:
           echo "Project validation passed."
 
   # ════════════════════════════════════════════════════════════════════════════
+  # JOB 2.5: validate-license
+  # ════════════════════════════════════════════════════════════════════════════
+  # Validates UNITY_LICENSE before any Docker-based job runs.
+  # Compares UNITY_LICENSE_VERSION variable (set by generate-license) against
+  # the project's Unity version. Fails fast with clear regeneration instructions
+  # when the license is missing, malformed, or version-mismatched.
+  validate-license:
+    name: Validate License
+    needs: [resolve-config]
+    if: >-
+      needs.resolve-config.result == 'success' &&
+      needs.resolve-config.outputs.build-engine == 'docker'
+    runs-on: ubuntu-latest
+    outputs:
+      license-valid: ${{ steps.check.outputs.valid }}
+    steps:
+      - name: Check license validity
+        id: check
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_VERSION: ${{ needs.resolve-config.outputs.unity-version }}
+          LICENSE_VERSION: ${{ vars.UNITY_LICENSE_VERSION }}
+        run: |
+          set -euo pipefail
+          VALID=true
+          REASONS=""
+
+          # Check 1: UNITY_LICENSE secret is present and non-empty
+          if [ -z "${UNITY_LICENSE}" ]; then
+            echo "::error::UNITY_LICENSE secret is empty or not set."
+            REASONS="${REASONS}\n  - UNITY_LICENSE secret is missing or empty"
+            VALID=false
+          fi
+
+          # Check 2: License version matches Unity version
+          if [ -n "${LICENSE_VERSION}" ] && [ "${LICENSE_VERSION}" != "${UNITY_VERSION}" ]; then
+            echo "::error::License version mismatch: UNITY_LICENSE_VERSION=${LICENSE_VERSION}, project uses Unity ${UNITY_VERSION}"
+            REASONS="${REASONS}\n  - License generated for ${LICENSE_VERSION}, but project uses ${UNITY_VERSION}"
+            VALID=false
+          elif [ -z "${LICENSE_VERSION}" ] && [ -n "${UNITY_LICENSE}" ]; then
+            echo "::warning::UNITY_LICENSE_VERSION variable not set — cannot verify license matches Unity ${UNITY_VERSION}. Set it to skip this warning."
+          fi
+
+          # Check 3: Basic ULF structure validation (DeveloperData element)
+          if [ "${VALID}" = "true" ] && [ -n "${UNITY_LICENSE}" ]; then
+            if ! printf '%s' "${UNITY_LICENSE}" | grep -q "DeveloperData"; then
+              echo "::error::UNITY_LICENSE is not a valid .ulf file (missing DeveloperData)."
+              REASONS="${REASONS}\n  - UNITY_LICENSE content is not valid ULF XML"
+              VALID=false
+            fi
+          fi
+
+          echo "valid=${VALID}" >> "$GITHUB_OUTPUT"
+
+          if [ "${VALID}" = "false" ]; then
+            {
+              echo "## License Validation Failed"
+              echo ""
+              echo "**Problems:**"
+              printf '%b\n' "${REASONS}"
+              echo ""
+              echo "**Fix:**"
+              echo "1. Run the **Generate Docker License** workflow for Unity \`${UNITY_VERSION}\`"
+              echo "2. Download the artifact (**.alf** file)"
+              echo "3. Upload to https://license.unity3d.com/manual → download **.ulf**"
+              echo "4. Set the secret:"
+              echo '   ```bash'
+              echo "   gh secret set UNITY_LICENSE --org <ORG> --visibility all < Unity_lic.ulf"
+              echo "   gh variable set UNITY_LICENSE_VERSION --org <ORG> --visibility all --body \"${UNITY_VERSION}\""
+              echo '   ```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "License validation passed (Unity ${UNITY_VERSION})"
+          {
+            echo "## License Validation"
+            echo "License valid for Unity \`${UNITY_VERSION}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ════════════════════════════════════════════════════════════════════════════
   # JOB 3: unity-tests
   # ════════════════════════════════════════════════════════════════════════════
   unity-tests:
     name: Unity Tests (${{ needs.resolve-config.outputs.test-mode }})
-    needs: [resolve-config, validate-project]
+    needs: [resolve-config, validate-project, validate-license]
     if: >-
       !cancelled() &&
       needs.validate-project.result == 'success' &&
+      (needs.validate-license.result == 'success' || needs.validate-license.result == 'skipped') &&
       needs.resolve-config.outputs.run-tests == 'true'
     uses: ./.github/workflows/reusable-unity-tests.yml
     with:
@@ -484,10 +566,11 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   build-addressables:
     name: Build Addressables
-    needs: [resolve-config, validate-project]
+    needs: [resolve-config, validate-project, validate-license]
     if: >-
       !cancelled() &&
       needs.validate-project.result == 'success' &&
+      (needs.validate-license.result == 'success' || needs.validate-license.result == 'skipped') &&
       needs.resolve-config.outputs.build-addressables == 'true'
     uses: ./.github/workflows/reusable-build-platform.yml
     with:
@@ -524,10 +607,11 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   build-android:
     name: Build Android
-    needs: [resolve-config, validate-project, build-addressables]
+    needs: [resolve-config, validate-project, validate-license, build-addressables]
     if: >-
       !cancelled() &&
       needs.validate-project.result == 'success' &&
+      (needs.validate-license.result == 'success' || needs.validate-license.result == 'skipped') &&
       (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
       needs.resolve-config.outputs.build-android == 'true'
     uses: ./.github/workflows/reusable-build-platform.yml
@@ -566,10 +650,11 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   build-webgl:
     name: Build WebGL
-    needs: [resolve-config, validate-project, build-addressables]
+    needs: [resolve-config, validate-project, validate-license, build-addressables]
     if: >-
       !cancelled() &&
       needs.validate-project.result == 'success' &&
+      (needs.validate-license.result == 'success' || needs.validate-license.result == 'skipped') &&
       (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
       needs.resolve-config.outputs.build-webgl == 'true'
     uses: ./.github/workflows/reusable-build-platform.yml
@@ -607,10 +692,11 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   build-linux64:
     name: Build Linux64
-    needs: [resolve-config, validate-project, build-addressables]
+    needs: [resolve-config, validate-project, validate-license, build-addressables]
     if: >-
       !cancelled() &&
       needs.validate-project.result == 'success' &&
+      (needs.validate-license.result == 'success' || needs.validate-license.result == 'skipped') &&
       (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
       needs.resolve-config.outputs.build-linux64 == 'true'
     uses: ./.github/workflows/reusable-build-platform.yml
@@ -648,10 +734,11 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   build-linuxserver:
     name: Build LinuxServer
-    needs: [resolve-config, validate-project, build-addressables]
+    needs: [resolve-config, validate-project, validate-license, build-addressables]
     if: >-
       !cancelled() &&
       needs.validate-project.result == 'success' &&
+      (needs.validate-license.result == 'success' || needs.validate-license.result == 'skipped') &&
       (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
       needs.resolve-config.outputs.build-linuxserver == 'true'
     uses: ./.github/workflows/reusable-build-platform.yml
@@ -693,10 +780,11 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   build-windows64:
     name: Build Windows64
-    needs: [resolve-config, validate-project, build-addressables]
+    needs: [resolve-config, validate-project, validate-license, build-addressables]
     if: >-
       !cancelled() &&
       needs.validate-project.result == 'success' &&
+      (needs.validate-license.result == 'success' || needs.validate-license.result == 'skipped') &&
       (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
       needs.resolve-config.outputs.build-windows64 == 'true'
     uses: ./.github/workflows/reusable-build-platform.yml
@@ -737,10 +825,11 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   build-ios:
     name: Build iOS
-    needs: [resolve-config, validate-project, build-addressables]
+    needs: [resolve-config, validate-project, validate-license, build-addressables]
     if: >-
       !cancelled() &&
       needs.validate-project.result == 'success' &&
+      (needs.validate-license.result == 'success' || needs.validate-license.result == 'skipped') &&
       (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
       needs.resolve-config.outputs.build-ios == 'true'
     uses: ./.github/workflows/reusable-build-platform.yml

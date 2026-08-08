@@ -33,7 +33,7 @@ on:
         description: Docker image namespace
         type: string
         required: false
-        default: dycuong03
+        default: cuvara
       image-name:
         description: Docker image name
         type: string
