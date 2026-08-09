@@ -52,6 +52,9 @@ ALLOWED_PATHS = frozenset({
     # (unity-editor -batchmode -buildTarget X -version). This verifies the
     # image, it is not a project build invocation.
     ".github/workflows/build-unity-image.yml",
+    # License generation runs unity-editor -batchmode inside Docker to
+    # produce a .ulf activation file. Not a project build invocation.
+    ".github/workflows/unity-generate-license.yml",
     # Explicit-platform-jobs reusable workflows: docker lane uses game-ci
     # (approved Personal/free path); self-hosted lanes invoke the local Unity
     # editor in batchmode by design.
