@@ -132,9 +132,6 @@ on:
       UNITY_PASSWORD:
         description: "Unity account password. Optional — docker lane activation."
         required: false
-      UNITY_SERIAL:
-        description: "Unity serial key. Optional — Pro/Plus serial-based activation."
-        required: false
       DISCORD_WEBHOOK_URL:
         description: "Discord webhook URL for build notifications. Optional — no-op when absent."
         required: false
@@ -473,7 +470,6 @@ jobs:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_VERSION: ${{ needs.resolve-config.outputs.unity-version }}
           LICENSE_VERSION: ${{ vars.UNITY_LICENSE_VERSION }}
         run: |
@@ -485,19 +481,17 @@ jobs:
           HAS_LICENSE=$( [ -n "${UNITY_LICENSE}" ] && echo true || echo false )
           HAS_EMAIL=$( [ -n "${UNITY_EMAIL}" ] && echo true || echo false )
           HAS_PASSWORD=$( [ -n "${UNITY_PASSWORD}" ] && echo true || echo false )
-          HAS_SERIAL=$( [ -n "${UNITY_SERIAL}" ] && echo true || echo false )
 
-          echo "Credentials: license=${HAS_LICENSE} email=${HAS_EMAIL} password=${HAS_PASSWORD} serial=${HAS_SERIAL}"
+          echo "Credentials: license=${HAS_LICENSE} email=${HAS_EMAIL} password=${HAS_PASSWORD}"
 
           # Activation requires at least email+password (account activation)
           # or UNITY_LICENSE (.ulf for personal-combined)
-          # or UNITY_SERIAL+email+password (serial activation)
-          if [ "${HAS_LICENSE}" = "false" ] && [ "${HAS_SERIAL}" = "false" ]; then
+          if [ "${HAS_LICENSE}" = "false" ]; then
             if [ "${HAS_EMAIL}" = "true" ] && [ "${HAS_PASSWORD}" = "true" ]; then
-              echo "::notice::No UNITY_LICENSE or UNITY_SERIAL — GameCI will attempt account activation with email+password."
+              echo "::notice::No UNITY_LICENSE — GameCI will attempt account activation with email+password."
             else
-              echo "::error::No valid activation credentials found. Need: (UNITY_EMAIL+UNITY_PASSWORD) or (UNITY_LICENSE) or (UNITY_SERIAL+UNITY_EMAIL+UNITY_PASSWORD)"
-              REASONS="${REASONS}\n  - No activation credentials (license, serial, or email+password)"
+              echo "::error::No valid activation credentials found. Need: (UNITY_EMAIL+UNITY_PASSWORD) or (UNITY_LICENSE)"
+              REASONS="${REASONS}\n  - No activation credentials (license or email+password)"
               VALID=false
             fi
           fi
@@ -574,7 +568,6 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 4: build-addressables
@@ -616,7 +609,6 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 5: build-android
@@ -660,7 +652,6 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 6: build-webgl
@@ -703,7 +694,6 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 7: build-linux64
@@ -746,7 +736,6 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 8: build-linuxserver
@@ -789,7 +778,6 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 9: build-windows64
@@ -836,7 +824,6 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      UNITY_SERIAL:   ${{ secrets.UNITY_SERIAL }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 10: build-ios
