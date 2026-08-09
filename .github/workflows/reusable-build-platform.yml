@@ -437,7 +437,7 @@ jobs:
       - name: Build Addressables pre-step (docker)
         id: addressables-pre-docker
         if: ${{ inputs.build-addressables == true && inputs.platform != 'Addressables' && inputs.build-engine == 'docker' && steps.ios-guard.outputs.blocked != 'true' }}
-        uses: game-ci/unity-builder@v4
+        uses: game-ci/unity-builder@v5
         env:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
@@ -534,7 +534,7 @@ jobs:
       - name: Build with GameCI (docker)
         id: build-docker
         if: ${{ inputs.build-engine == 'docker' && inputs.platform != 'Addressables' && runner.os != 'Windows' && steps.ios-guard.outputs.blocked != 'true' }}
-        uses: game-ci/unity-builder@v4
+        uses: game-ci/unity-builder@v5
         env:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
@@ -556,7 +556,7 @@ jobs:
       - name: Build Addressables only (docker)
         id: build-addressables-docker
         if: ${{ inputs.build-engine == 'docker' && inputs.platform == 'Addressables' && runner.os != 'Windows' && steps.ios-guard.outputs.blocked != 'true' }}
-        uses: game-ci/unity-builder@v4
+        uses: game-ci/unity-builder@v5
         env:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}

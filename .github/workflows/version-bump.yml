@@ -1,0 +1,248 @@
+name: Version Bump
+
+# Reusable workflow that bumps the version in Unity ProjectSettings.
+#
+# Reads the current bundleVersion from ProjectSettings/ProjectSettings.asset,
+# bumps it according to semver (patch/minor/major), increments Android
+# versionCode by 1, commits the change, and pushes using bot token.
+#
+# Outputs the new version for downstream consumption.
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        description: "Semver bump type: patch, minor, or major"
+        type: string
+        required: true
+      project-path:
+        description: Path to the Unity project root relative to the repo root
+        type: string
+        required: false
+        default: '.'
+    secrets:
+      APP_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
+    outputs:
+      new-version:
+        description: The new version after bumping (e.g. 1.2.4)
+        value: ${{ jobs.bump.outputs.new-version }}
+      previous-version:
+        description: The version before bumping
+        value: ${{ jobs.bump.outputs.previous-version }}
+      new-version-code:
+        description: The new Android versionCode
+        value: ${{ jobs.bump.outputs.new-version-code }}
+
+  workflow_dispatch:
+    inputs:
+      bump-type:
+        description: "Semver bump type"
+        required: true
+        type: choice
+        options: [patch, minor, major]
+      project-path:
+        description: Path to the Unity project root
+        required: false
+        default: '.'
+
+jobs:
+  bump:
+    name: Bump version (${{ inputs.bump-type }})
+    runs-on: ubuntu-latest
+    outputs:
+      new-version: ${{ steps.bump.outputs.new-version }}
+      previous-version: ${{ steps.bump.outputs.previous-version }}
+      new-version-code: ${{ steps.bump.outputs.new-version-code }}
+
+    steps:
+      - name: Generate bot installation token
+        id: bot-token
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BOT_TOKEN=$(node -e "
+          const crypto = require('crypto');
+          const https = require('https');
+
+          const APP_ID = process.env.APP_ID;
+          const PEM = process.env.APP_PRIVATE_KEY;
+          const ORG = process.env.GITHUB_REPOSITORY.split('/')[0];
+
+          const now = Math.floor(Date.now() / 1000);
+          const header = Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})).toString('base64url');
+          const payload = Buffer.from(JSON.stringify({iat: now-60, exp: now+600, iss: APP_ID})).toString('base64url');
+          const signature = crypto.sign('SHA256', Buffer.from(header+'.'+payload), PEM).toString('base64url');
+          const jwt = header+'.'+payload+'.'+signature;
+
+          function api(path, token, method, body) {
+            return new Promise((resolve, reject) => {
+              const opts = {
+                hostname: 'api.github.com', path, method: method||'GET',
+                headers: {
+                  'Authorization': 'Bearer '+token,
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'cuvara-bot',
+                  'X-GitHub-Api-Version': '2022-11-28'
+                }
+              };
+              const req = https.request(opts, res => {
+                let d=''; res.on('data', c => d+=c);
+                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d||'{}')}));
+              });
+              req.on('error', reject);
+              if (body) req.write(JSON.stringify(body));
+              req.end();
+            });
+          }
+
+          (async () => {
+            const instRes = await api('/app/installations', jwt);
+            const inst = instRes.data.find(i => i.account.login === ORG);
+            if (!inst) { console.error('App not installed on '+ORG); process.exit(1); }
+            const tokenRes = await api('/app/installations/'+inst.id+'/access_tokens', jwt, 'POST', {});
+            if (tokenRes.status !== 201) { console.error('Token error:', JSON.stringify(tokenRes.data)); process.exit(1); }
+            console.log(tokenRes.data.token);
+          })();
+          ")
+
+          if [ -z "${BOT_TOKEN}" ]; then
+            echo "::error::Failed to generate bot installation token"
+            exit 1
+          fi
+          echo "::add-mask::${BOT_TOKEN}"
+          echo "token=${BOT_TOKEN}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.bot-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Parse current version and bump
+        id: bump
+        shell: bash
+        env:
+          BUMP_TYPE: ${{ inputs.bump-type }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+        run: |
+          set -euo pipefail
+
+          PS_FILE="${PROJECT_PATH%/}/ProjectSettings/ProjectSettings.asset"
+
+          if [ ! -f "${PS_FILE}" ]; then
+            echo "::error::ProjectSettings.asset not found at ${PS_FILE}"
+            exit 1
+          fi
+
+          # Parse bundleVersion
+          CURRENT_VERSION=$(grep -oP '^\s*bundleVersion:\s*\K[0-9]+\.[0-9]+\.[0-9]+' "${PS_FILE}" || true)
+          if [ -z "${CURRENT_VERSION}" ]; then
+            echo "::error::Could not parse bundleVersion from ${PS_FILE}"
+            echo "::error::Expected format: bundleVersion: X.Y.Z"
+            exit 1
+          fi
+          echo "Current version: ${CURRENT_VERSION}"
+          echo "previous-version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
+
+          # Parse into components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT_VERSION}"
+
+          # Bump according to type
+          case "${BUMP_TYPE}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+            *)
+              echo "::error::Invalid bump-type: ${BUMP_TYPE}. Must be patch, minor, or major."
+              exit 1
+              ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "New version: ${NEW_VERSION}"
+          echo "new-version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+          # Update bundleVersion in ProjectSettings.asset
+          sed -i "s/^\(\s*bundleVersion:\s*\)[0-9]\+\.[0-9]\+\.[0-9]\+/\1${NEW_VERSION}/" "${PS_FILE}"
+
+          # Parse and bump Android versionCode (AndroidBundleVersionCode)
+          CURRENT_CODE=$(grep -oP '^\s*AndroidBundleVersionCode:\s*\K[0-9]+' "${PS_FILE}" || true)
+          if [ -n "${CURRENT_CODE}" ]; then
+            NEW_CODE=$((CURRENT_CODE + 1))
+            echo "Android versionCode: ${CURRENT_CODE} → ${NEW_CODE}"
+            sed -i "s/^\(\s*AndroidBundleVersionCode:\s*\)[0-9]\+/\1${NEW_CODE}/" "${PS_FILE}"
+            echo "new-version-code=${NEW_CODE}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::AndroidBundleVersionCode not found in ${PS_FILE} — skipping versionCode bump."
+            echo "new-version-code=" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Verify the changes
+          echo "--- Verification ---"
+          grep -E '(bundleVersion|AndroidBundleVersionCode)' "${PS_FILE}" || true
+
+      - name: Commit and push
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NEW_VERSION="${{ steps.bump.outputs.new-version }}"
+          PREVIOUS_VERSION="${{ steps.bump.outputs.previous-version }}"
+          PS_FILE="${{ inputs.project-path && format('{0}/ProjectSettings/ProjectSettings.asset', inputs.project-path) || 'ProjectSettings/ProjectSettings.asset' }}"
+
+          # Configure git as the bot
+          git config user.name "Cuvara-BOT[bot]"
+          git config user.email "cuvara-bot[bot]@users.noreply.github.com"
+
+          git add "${PS_FILE}"
+
+          # Only commit if there are actual changes
+          if git diff --cached --quiet; then
+            echo "::warning::No changes detected after version bump — file may already be at target version."
+            exit 0
+          fi
+
+          git commit -m "chore: bump version ${PREVIOUS_VERSION} → ${NEW_VERSION}"
+          git push
+
+          echo "::notice::Version bumped from ${PREVIOUS_VERSION} to ${NEW_VERSION} and pushed."
+
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new-version }}
+          PREVIOUS_VERSION: ${{ steps.bump.outputs.previous-version }}
+          NEW_VERSION_CODE: ${{ steps.bump.outputs.new-version-code }}
+          BUMP_TYPE: ${{ inputs.bump-type }}
+        run: |
+          {
+            echo "## Version Bump (${BUMP_TYPE})"
+            echo ""
+            echo "| Field | Before | After |"
+            echo "|-------|--------|-------|"
+            echo "| bundleVersion | \`${PREVIOUS_VERSION}\` | \`${NEW_VERSION}\` |"
+            if [ -n "${NEW_VERSION_CODE}" ]; then
+              echo "| AndroidBundleVersionCode | \`$((NEW_VERSION_CODE - 1))\` | \`${NEW_VERSION_CODE}\` |"
+            fi
+            echo ""
+            echo "Commit: \`$(git rev-parse --short HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"

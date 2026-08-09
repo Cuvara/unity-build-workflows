@@ -471,6 +471,9 @@ jobs:
         id: check
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
           UNITY_VERSION: ${{ needs.resolve-config.outputs.unity-version }}
           LICENSE_VERSION: ${{ vars.UNITY_LICENSE_VERSION }}
         run: |
@@ -478,28 +481,36 @@ jobs:
           VALID=true
           REASONS=""
 
-          # Check 1: UNITY_LICENSE secret is present and non-empty
-          if [ -z "${UNITY_LICENSE}" ]; then
-            echo "::error::UNITY_LICENSE secret is empty or not set."
-            REASONS="${REASONS}\n  - UNITY_LICENSE secret is missing or empty"
-            VALID=false
+          # Determine available credentials
+          HAS_LICENSE=$( [ -n "${UNITY_LICENSE}" ] && echo true || echo false )
+          HAS_EMAIL=$( [ -n "${UNITY_EMAIL}" ] && echo true || echo false )
+          HAS_PASSWORD=$( [ -n "${UNITY_PASSWORD}" ] && echo true || echo false )
+          HAS_SERIAL=$( [ -n "${UNITY_SERIAL}" ] && echo true || echo false )
+
+          echo "Credentials: license=${HAS_LICENSE} email=${HAS_EMAIL} password=${HAS_PASSWORD} serial=${HAS_SERIAL}"
+
+          # Activation requires at least email+password (account activation)
+          # or UNITY_LICENSE (.ulf for personal-combined)
+          # or UNITY_SERIAL+email+password (serial activation)
+          if [ "${HAS_LICENSE}" = "false" ] && [ "${HAS_SERIAL}" = "false" ]; then
+            if [ "${HAS_EMAIL}" = "true" ] && [ "${HAS_PASSWORD}" = "true" ]; then
+              echo "::notice::No UNITY_LICENSE or UNITY_SERIAL — GameCI will attempt account activation with email+password."
+            else
+              echo "::error::No valid activation credentials found. Need: (UNITY_EMAIL+UNITY_PASSWORD) or (UNITY_LICENSE) or (UNITY_SERIAL+UNITY_EMAIL+UNITY_PASSWORD)"
+              REASONS="${REASONS}\n  - No activation credentials (license, serial, or email+password)"
+              VALID=false
+            fi
           fi
 
-          # Check 2: License version matches Unity version
-          if [ -n "${LICENSE_VERSION}" ] && [ "${LICENSE_VERSION}" != "${UNITY_VERSION}" ]; then
-            echo "::error::License version mismatch: UNITY_LICENSE_VERSION=${LICENSE_VERSION}, project uses Unity ${UNITY_VERSION}"
-            REASONS="${REASONS}\n  - License generated for ${LICENSE_VERSION}, but project uses ${UNITY_VERSION}"
-            VALID=false
-          elif [ -z "${LICENSE_VERSION}" ] && [ -n "${UNITY_LICENSE}" ]; then
-            echo "::warning::UNITY_LICENSE_VERSION variable not set — cannot verify license matches Unity ${UNITY_VERSION}. Set it to skip this warning."
+          # If UNITY_LICENSE is set, check version match
+          if [ "${HAS_LICENSE}" = "true" ] && [ -n "${LICENSE_VERSION}" ] && [ "${LICENSE_VERSION}" != "${UNITY_VERSION}" ]; then
+            echo "::warning::License version mismatch: UNITY_LICENSE_VERSION=${LICENSE_VERSION}, project uses Unity ${UNITY_VERSION}. License may need regeneration."
           fi
 
-          # Check 3: Content hints (warning only — GameCI does real validation)
-          if [ "${VALID}" = "true" ] && [ -n "${UNITY_LICENSE}" ]; then
+          # Content hints (warning only)
+          if [ "${HAS_LICENSE}" = "true" ]; then
             if printf '%s' "${UNITY_LICENSE}" | grep -qiE '<ActivationRequest|\.alf'; then
-              echo "::warning::UNITY_LICENSE looks like an .alf (activation request), not a .ulf (license). You may have set the wrong file. Upload .alf to https://license.unity3d.com/manual to get the .ulf."
-            elif ! printf '%s' "${UNITY_LICENSE}" | grep -qE '<|xml|License'; then
-              echo "::warning::UNITY_LICENSE does not look like XML. It may not be a valid .ulf file."
+              echo "::warning::UNITY_LICENSE looks like an .alf (activation request), not a .ulf (license)."
             fi
           fi
 

@@ -1,0 +1,394 @@
+name: Auto Release
+
+# Reusable workflow for release automation after merge to main.
+#
+# Reads the version from ProjectSettings/ProjectSettings.asset, creates a
+# git tag (v{version}), and creates a GitHub Release with auto-generated
+# release notes and links to the latest build artifacts.
+#
+# Uses bot token (Cuvara-BOT) for all git and GitHub API operations.
+
+on:
+  workflow_call:
+    inputs:
+      create-tag:
+        description: Create a git tag (v{version}) for this release
+        type: boolean
+        required: false
+        default: true
+      draft:
+        description: Create the release as a draft
+        type: boolean
+        required: false
+        default: false
+      project-path:
+        description: Path to the Unity project root relative to the repo root
+        type: string
+        required: false
+        default: '.'
+    secrets:
+      APP_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
+    outputs:
+      version:
+        description: The release version (e.g. 1.2.3)
+        value: ${{ jobs.release.outputs.version }}
+      tag:
+        description: The git tag created (e.g. v1.2.3)
+        value: ${{ jobs.release.outputs.tag }}
+      release-url:
+        description: URL of the created GitHub Release
+        value: ${{ jobs.release.outputs.release-url }}
+
+  workflow_dispatch:
+    inputs:
+      create-tag:
+        description: Create a git tag for this release
+        required: false
+        type: boolean
+        default: true
+      draft:
+        description: Create the release as a draft
+        required: false
+        type: boolean
+        default: false
+      project-path:
+        description: Path to the Unity project root
+        required: false
+        default: '.'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      release-url: ${{ steps.create-release.outputs.release-url }}
+
+    steps:
+      - name: Generate bot installation token
+        id: bot-token
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BOT_TOKEN=$(node -e "
+          const crypto = require('crypto');
+          const https = require('https');
+
+          const APP_ID = process.env.APP_ID;
+          const PEM = process.env.APP_PRIVATE_KEY;
+          const ORG = process.env.GITHUB_REPOSITORY.split('/')[0];
+
+          const now = Math.floor(Date.now() / 1000);
+          const header = Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})).toString('base64url');
+          const payload = Buffer.from(JSON.stringify({iat: now-60, exp: now+600, iss: APP_ID})).toString('base64url');
+          const signature = crypto.sign('SHA256', Buffer.from(header+'.'+payload), PEM).toString('base64url');
+          const jwt = header+'.'+payload+'.'+signature;
+
+          function api(path, token, method, body) {
+            return new Promise((resolve, reject) => {
+              const opts = {
+                hostname: 'api.github.com', path, method: method||'GET',
+                headers: {
+                  'Authorization': 'Bearer '+token,
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'cuvara-bot',
+                  'X-GitHub-Api-Version': '2022-11-28'
+                }
+              };
+              const req = https.request(opts, res => {
+                let d=''; res.on('data', c => d+=c);
+                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d||'{}')}));
+              });
+              req.on('error', reject);
+              if (body) req.write(JSON.stringify(body));
+              req.end();
+            });
+          }
+
+          (async () => {
+            const instRes = await api('/app/installations', jwt);
+            const inst = instRes.data.find(i => i.account.login === ORG);
+            if (!inst) { console.error('App not installed on '+ORG); process.exit(1); }
+            const tokenRes = await api('/app/installations/'+inst.id+'/access_tokens', jwt, 'POST', {});
+            if (tokenRes.status !== 201) { console.error('Token error:', JSON.stringify(tokenRes.data)); process.exit(1); }
+            console.log(tokenRes.data.token);
+          })();
+          ")
+
+          if [ -z "${BOT_TOKEN}" ]; then
+            echo "::error::Failed to generate bot installation token"
+            exit 1
+          fi
+          echo "::add-mask::${BOT_TOKEN}"
+          echo "token=${BOT_TOKEN}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.bot-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Read version from ProjectSettings
+        id: version
+        shell: bash
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
+        run: |
+          set -euo pipefail
+
+          PS_FILE="${PROJECT_PATH%/}/ProjectSettings/ProjectSettings.asset"
+
+          if [ ! -f "${PS_FILE}" ]; then
+            echo "::error::ProjectSettings.asset not found at ${PS_FILE}"
+            exit 1
+          fi
+
+          VERSION=$(grep -oP '^\s*bundleVersion:\s*\K[0-9]+\.[0-9]+\.[0-9]+' "${PS_FILE}" || true)
+          if [ -z "${VERSION}" ]; then
+            echo "::error::Could not parse bundleVersion from ${PS_FILE}"
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${VERSION} (tag: ${TAG})"
+
+      - name: Check if tag already exists
+        id: tag-check
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "::warning::Tag ${TAG} already exists."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create git tag
+        if: inputs.create-tag == true && steps.tag-check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+
+          git config user.name "Cuvara-BOT[bot]"
+          git config user.email "cuvara-bot[bot]@users.noreply.github.com"
+
+          git tag -a "${TAG}" -m "Release ${VERSION}"
+          git push origin "${TAG}"
+
+          echo "::notice::Created and pushed tag ${TAG}"
+
+      - name: Find latest successful build artifacts
+        id: find-artifacts
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+
+          # Find the latest successful workflow run on the current branch
+          LATEST_RUN=$(gh run list \
+            --repo "${REPO}" \
+            --branch "${GITHUB_REF_NAME}" \
+            --status success \
+            --limit 5 \
+            --json databaseId,name,conclusion \
+            --jq '[.[] | select(.conclusion == "success")] | .[0].databaseId // empty' \
+            2>/dev/null || true)
+
+          if [ -n "${LATEST_RUN}" ]; then
+            echo "run-id=${LATEST_RUN}" >> "$GITHUB_OUTPUT"
+            echo "has-run=true" >> "$GITHUB_OUTPUT"
+            echo "Found latest successful run: ${LATEST_RUN}"
+          else
+            echo "has-run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No recent successful workflow runs found for artifact linking."
+          fi
+
+      - name: Download build artifacts
+        if: steps.find-artifacts.outputs.has-run == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          RUN_ID="${{ steps.find-artifacts.outputs.run-id }}"
+
+          mkdir -p release-artifacts
+
+          # List artifacts from the run and download build artifacts
+          ARTIFACTS=$(gh api \
+            "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" \
+            --jq '.artifacts[] | select(.name | startswith("unity-build-")) | select(.name | endswith("-logs") | not) | .name' \
+            2>/dev/null || true)
+
+          if [ -n "${ARTIFACTS}" ]; then
+            while IFS= read -r ARTIFACT_NAME; do
+              echo "Downloading artifact: ${ARTIFACT_NAME}"
+              gh run download "${RUN_ID}" \
+                --repo "${REPO}" \
+                --name "${ARTIFACT_NAME}" \
+                --dir "release-artifacts/${ARTIFACT_NAME}" \
+                2>/dev/null || echo "::warning::Failed to download ${ARTIFACT_NAME}"
+            done <<< "${ARTIFACTS}"
+          else
+            echo "::notice::No build artifacts found in run ${RUN_ID}."
+          fi
+
+      - name: Generate release notes
+        id: release-notes
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # Find the previous tag for changelog
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          # Collect merged PR descriptions since last tag
+          NOTES_FILE="release-notes.md"
+
+          {
+            echo "## What's Changed"
+            echo ""
+
+            if [ -n "${PREV_TAG}" ]; then
+              # List commits since last tag
+              COMMITS=$(git log --oneline "${PREV_TAG}..HEAD" --no-merges 2>/dev/null || echo "")
+              MERGE_COMMITS=$(git log --oneline "${PREV_TAG}..HEAD" --merges --format="%s" 2>/dev/null || echo "")
+            else
+              COMMITS=$(git log --oneline -30 --no-merges 2>/dev/null || echo "")
+              MERGE_COMMITS=$(git log --oneline -30 --merges --format="%s" 2>/dev/null || echo "")
+            fi
+
+            # Extract PR references from merge commits
+            if [ -n "${MERGE_COMMITS}" ]; then
+              echo "${MERGE_COMMITS}" | while IFS= read -r line; do
+                # Extract PR numbers from "Merge pull request #N" pattern
+                PR_NUM=$(echo "${line}" | grep -oP '#\K[0-9]+' || true)
+                if [ -n "${PR_NUM}" ]; then
+                  echo "- ${line} (#${PR_NUM})"
+                else
+                  echo "- ${line}"
+                fi
+              done
+              echo ""
+            fi
+
+            if [ -n "${COMMITS}" ]; then
+              echo "<details><summary>All commits</summary>"
+              echo ""
+              echo "${COMMITS}" | while IFS= read -r line; do
+                echo "- ${line}"
+              done
+              echo ""
+              echo "</details>"
+            fi
+
+            echo ""
+            echo "---"
+            echo ""
+            echo "**Version:** \`${VERSION}\`"
+            echo "**Commit:** \`${GITHUB_SHA}\`"
+            echo "**Build:** [Actions Run #${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            if [ -n "${PREV_TAG}" ]; then
+              echo "**Full Changelog:** [\`${PREV_TAG}...${TAG}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG})"
+            fi
+          } > "${NOTES_FILE}"
+
+          echo "notes-file=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        id: create-release
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${GITHUB_REPOSITORY}"
+          NOTES_FILE="${{ steps.release-notes.outputs.notes-file }}"
+          DRAFT="${{ inputs.draft }}"
+
+          # Build the gh release create command
+          RELEASE_ARGS=(
+            "${TAG}"
+            --repo "${REPO}"
+            --title "Release ${VERSION}"
+            --notes-file "${NOTES_FILE}"
+          )
+
+          if [ "${DRAFT}" = "true" ]; then
+            RELEASE_ARGS+=(--draft)
+          fi
+
+          # Check if this is a prerelease (version contains hyphen, e.g. 1.0.0-beta)
+          if [[ "${VERSION}" == *-* ]]; then
+            RELEASE_ARGS+=(--prerelease)
+          fi
+
+          # Attach build artifacts if they exist
+          ARTIFACT_FILES=""
+          if [ -d "release-artifacts" ]; then
+            # Find all files in release-artifacts and attach them
+            while IFS= read -r -d '' file; do
+              ARTIFACT_FILES="${ARTIFACT_FILES} ${file}"
+            done < <(find release-artifacts -type f -print0 2>/dev/null || true)
+          fi
+
+          # Create the release
+          RELEASE_URL=$(gh release create "${RELEASE_ARGS[@]}" ${ARTIFACT_FILES} 2>&1) || {
+            # If tag already has a release, skip
+            if echo "${RELEASE_URL}" | grep -q "already exists"; then
+              echo "::warning::Release for ${TAG} already exists. Skipping creation."
+              EXISTING_URL="${GITHUB_SERVER_URL}/${REPO}/releases/tag/${TAG}"
+              echo "release-url=${EXISTING_URL}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Failed to create release: ${RELEASE_URL}"
+            exit 1
+          }
+
+          echo "release-url=${RELEASE_URL}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Created release: ${RELEASE_URL}"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_URL: ${{ steps.create-release.outputs.release-url }}
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          {
+            echo "## Release ${VERSION}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Tag | \`${TAG}\` |"
+            echo "| Draft | ${DRAFT} |"
+            echo "| Release | ${RELEASE_URL:-N/A} |"
+            echo "| Commit | \`${GITHUB_SHA:0:8}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
