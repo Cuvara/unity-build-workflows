@@ -76,3 +76,16 @@ jobs:
             echo "- Shellcheck: ${{ needs.shellcheck.result }}"
           } >> "$GITHUB_STEP_SUMMARY"
           [ "${{ needs.tests.result }}" = "success" ] && [ "${{ needs.shellcheck.result }}" = "success" ]
+
+  auto-merge:
+    name: Auto-merge develop → main
+    needs: [tests, shellcheck]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    uses: ./.github/workflows/auto-merge.yml
+    with:
+      source-branch: develop
+      target-branch: main
+      require-build-success: false
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
