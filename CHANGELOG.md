@@ -12,6 +12,13 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **`ARCHITECTURE.md` drew the Docker lane as running `BuildCommand.Execute`; it runs
+  `PlayerBuilder.Build`.** Both diagrams and the package-layer bullet corrected, and a *Build Entry
+  Points* section added stating the two lanes side by side. `IOS.md` was right for the iOS-native
+  lane and is left saying `BuildCommand.Execute`, now with the part that was missing: that entry
+  point is `readonly` in `scripts/ios/run_unity_ios.sh:46`, unaffected by `build-method` or
+  `UNITY_BUILD_METHOD`, and the package is a hard requirement there. Both files record that
+  `reusable-build-platform.yml` never calls that script, so the two iOS routes disagree.
 - **`docs/ADD_NEW_PROJECT.md` claimed "Your project does not need to implement build logic", which is
   false on the default lanes.** `reusable-build-platform.yml` runs `PlayerBuilder.Build` unless
   `build-method` says otherwise, and `PlayerBuilder` is implemented **by the consuming project** — so
