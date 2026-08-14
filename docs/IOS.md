@@ -38,7 +38,8 @@ macOS Runner (macos-unity-xcode executor)
   │       ├── Install provisioning profile
   │       └── Write ASC private key to temp file
   ├── 5. Unity build — Xcode project generation (scripts/ios/build_ios.sh)
-  │       └── Unity -batchmode -buildTarget iOS -executeMethod BuildCommand.Execute
+  │       └── Unity -batchmode -buildTarget iOS -executeMethod \
+  │             Company.BuildPipeline.Editor.BuildCommand.Execute
   │             └── Output: Builds/iOS/Xcode/*.xcworkspace
   ├── 6. Archive (scripts/ios/archive_ios.sh)
   │       └── xcodebuild archive -workspace ... -scheme ... -archivePath ...
@@ -62,6 +63,23 @@ macOS Runner (macos-unity-xcode executor)
 ```
 
 ---
+
+
+> **This lane's entry point is fixed, not a default.** `scripts/ios/run_unity_ios.sh:46` declares
+> `readonly BUILD_METHOD="Company.BuildPipeline.Editor.BuildCommand.Execute"` and uses it at `:268`,
+> `:300` and `:352`; there is no input, and the `build-method` input / `UNITY_BUILD_METHOD` repo
+> variable do not reach it. `com.company.build-pipeline` is therefore a hard requirement here, which
+> is why the script preflights for it.
+>
+> The other lanes work the other way round: `reusable-build-platform.yml` defaults to
+> `PlayerBuilder.Build`, supplied by the consuming project, and never calls this script — including
+> for the pipeline's own `Build iOS` job. The two iOS routes do not share an entry point. See
+> [ARCHITECTURE.md](ARCHITECTURE.md#build-entry-points--two-lanes-that-do-not-agree).
+>
+> **`BuildCommand.Execute` did not compile until the Unity 6 fix** (four `BuildPipeline.BuildPlayer`
+> call sites resolved against the enclosing `Company.BuildPipeline` namespace instead of
+> `UnityEditor.BuildPipeline`), so this lane could not have succeeded before it. It went unnoticed
+> because the lane requires manual dispatch and a self-hosted macOS runner, and had never run.
 
 ## BuildConfig iOS Section
 

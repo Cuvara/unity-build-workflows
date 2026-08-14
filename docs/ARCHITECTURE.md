@@ -46,7 +46,7 @@
 ┌───────────────────────────▼──────────────────────────────────────┐
 │  Unity Layer (inside container)                                   │
 │  • Unity Editor -batchmode -executeMethod                        │
-│    Company.BuildPipeline.BuildCommand.Execute                    │
+│    PlayerBuilder.Build  (consumer-provided; the default)          │
 │  • BuildConfigurationLoader → BuildValidator → PlatformBuilder   │
 │  • Reports and artifacts written to bind-mounted directories     │
 └───────────────────────────┬──────────────────────────────────────┘
@@ -73,7 +73,7 @@ CI Runner (ubuntu-latest)
   │       └── docker run --rm --init --user $(id -u):$(id -g)
   │             └── entrypoint.sh build --target-platform Android ...
   │                   └── activate-license.sh
-  │                   └── Unity -batchmode -executeMethod BuildCommand.Execute
+  │                   └── Unity -batchmode -executeMethod PlayerBuilder.Build
   │                   └── copy Editor.log to Logs/
   │                   └── return-license.sh
   │                   └── cleanup trap
@@ -142,11 +142,32 @@ See [PLATFORM_LIMITATIONS.md](PLATFORM_LIMITATIONS.md).
 
 ---
 
+## Build Entry Points — two lanes that do not agree
+
+Which C# method Unity executes depends on which lane runs, and the toolkit is not currently
+consistent across them:
+
+| Lane | Entry point | Where it comes from |
+|---|---|---|
+| Docker / game-ci and self-hosted — Android, WebGL, Windows, Linux, and the pipeline's `Build iOS` job | `PlayerBuilder.Build`, **implemented by the consuming project** | `reusable-build-platform.yml` `BUILD_METHOD` default (`:872`; `:812` for the Windows variant), overridable via the `build-method` input / `UNITY_BUILD_METHOD` repo variable |
+| iOS native — `unity-build-ios.yml`, `unity-release-ios.yml` | `Company.BuildPipeline.Editor.BuildCommand.Execute`, from this package | `scripts/ios/run_unity_ios.sh:46`, `readonly`, **not overridable** |
+
+`reusable-build-platform.yml` never invokes `scripts/ios/run_unity_ios.sh`, so the two iOS routes do
+not share an entry point and `UNITY_BUILD_METHOD` has no effect on the native one. Resolving this
+means teaching `run_unity_ios.sh` to accept `build-method`; that is a code change and has not been
+made. Documented here so the disagreement is visible rather than discovered.
+
+See [ADD_NEW_PROJECT.md](ADD_NEW_PROJECT.md) Step 1b for what a consumer must provide.
+
+---
+
 ## Unity Package Layer
 
 The `unity-package/` directory contains a Unity Editor package (`com.company.build-pipeline`) providing:
 
-- **BuildCommand.Execute** — C# entry point invoked via `-executeMethod`
+- **BuildCommand.Execute** — C# entry point invoked via `-executeMethod` by the **iOS-native**
+  workflows only. The Docker and self-hosted lanes default to `PlayerBuilder.Build`, which the
+  consuming project provides — see below
 - **BuildConfigurationLoader** — Loads and merges BuildConfig JSON
 - **BuildValidator** — Runs validation rules before build
 - **PlatformBuilders** — Platform-specific build logic (Android, WebGL, Linux)
