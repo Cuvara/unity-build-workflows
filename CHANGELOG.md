@@ -12,6 +12,17 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **`docs/ADD_NEW_PROJECT.md` claimed "Your project does not need to implement build logic", which is
+  false on the default lanes.** `reusable-build-platform.yml` runs `PlayerBuilder.Build` unless
+  `build-method` says otherwise, and `PlayerBuilder` is implemented **by the consuming project** — so
+  a project that installs the package and stops there has no entry point on Android, WebGL, Windows,
+  Linux or the pipeline's own `Build iOS` job. New *Step 1b* states which lane runs which entry point,
+  shows the signature `PlayerBuilder.Build` must have (public static, parameterless, global namespace,
+  Editor assembly) and the environment variables CI supplies, and documents `UNITY_BUILD_METHOD` as
+  the supported override. It also records the inconsistency rather than smoothing it: the iOS-native
+  scripts hardcode `BuildCommand.Execute` as `readonly`, `reusable-build-platform.yml` never calls
+  them, and `UNITY_BUILD_METHOD` does not reach that route.
+
 - **`com.company.build-pipeline` did not compile against Unity 6, so `BuildCommand` did not exist at
   all.** Two unrelated causes, both fatal:
   - **Namespace shadowing, not a missing reference.** All four platform builders call

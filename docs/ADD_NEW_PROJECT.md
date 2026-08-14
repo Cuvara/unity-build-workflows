@@ -26,7 +26,13 @@ The toolkit repo (`<WORKFLOW_OWNER>/unity-build-workflows`) owns all shared logi
 
 ## Step 1: Add the UPM Package Dependency
 
-This package provides the `BuildCommand.Execute` C# entry point that the reusable workflows invoke via Unity's `-executeMethod` flag. Your project does not need to implement build logic.
+This package provides the `Company.BuildPipeline.Editor.BuildCommand.Execute` C# entry point.
+
+**Your project still needs a build entry point of its own for the default lanes.** The Docker and
+self-hosted lanes invoke `PlayerBuilder.Build` unless you say otherwise — see
+[Step 1b](#step-1b-provide-the-build-entry-point) — and only the iOS-native workflows call
+`BuildCommand.Execute`. Installing the package is necessary for those workflows and for the
+validation rules; it is not sufficient on its own.
 
 **Option A — Git URL (recommended for most projects):**
 
@@ -57,6 +63,53 @@ If you have added `unity-build-workflows` as a git submodule at `tools/unity-bui
 ```
 
 The `file:` path is relative to `Packages/manifest.json`. See [SUBMODULE_INTEGRATION.md](SUBMODULE_INTEGRATION.md) for the full submodule setup guide.
+
+---
+
+## Step 1b: Provide the Build Entry Point
+
+Which C# method Unity runs depends on **which lane builds you**, and the two do not currently agree.
+
+| Lane | Entry point | Who implements it |
+|---|---|---|
+| Docker / game-ci and self-hosted — Android, WebGL, Windows, Linux, and the pipeline's own `Build iOS` job | `PlayerBuilder.Build` | **You**, in your Unity project |
+| iOS native — `unity-build-ios.yml`, `unity-release-ios.yml` | `Company.BuildPipeline.Editor.BuildCommand.Execute` | This package |
+
+The default comes from `reusable-build-platform.yml` (`BUILD_METHOD` defaults to `PlayerBuilder.Build`;
+the Windows variant does the same), so a project that adds the package and nothing else has no method
+to run on those lanes.
+
+You have two options:
+
+1. **Write a `PlayerBuilder`.** A public static parameterless method Unity can reach by name:
+
+   ```csharp
+   using UnityEditor;
+
+   public static class PlayerBuilder      // global namespace: -executeMethod PlayerBuilder.Build
+   {
+       public static void Build()
+       {
+           // Read what CI passes through the environment, then call BuildPipeline.BuildPlayer.
+           var outputRoot = System.Environment.GetEnvironmentVariable("BUILD_OUTPUT_DIR");
+           // ANDROID_APP_BUNDLE, ANDROID_KEYSTORE, ANDROID_KEYSTORE_PASS,
+           // ANDROID_KEYALIAS_NAME, ANDROID_KEYALIAS_PASS are also supplied for Android.
+       }
+   }
+   ```
+
+   It must be **in the global namespace** if you want `-executeMethod PlayerBuilder.Build` to resolve,
+   and it must live in an Editor assembly. There is no reference implementation in this repository;
+   copy one from a project that already builds with this toolkit.
+
+2. **Point the lane at this package instead**, by setting the repository variable
+   `UNITY_BUILD_METHOD` to `Company.BuildPipeline.Editor.BuildCommand.Execute`. It flows through
+   `unity-pipeline.yml` into the `build-method` input.
+
+**Known inconsistency:** `reusable-build-platform.yml` never calls `scripts/ios/run_unity_ios.sh`, and
+that script hardcodes `BuildCommand.Execute` as `readonly` with no override. So the two iOS routes use
+different entry points, and `UNITY_BUILD_METHOD` does not affect the native one. Making
+`run_unity_ios.sh` accept `build-method` would resolve it; that is a code change and has not been made.
 
 ---
 
