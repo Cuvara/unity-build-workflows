@@ -48,7 +48,7 @@ namespace Company.BuildPipeline.Editor
             };
 
             var started = DateTime.UtcNow;
-            var report = BuildPipeline.BuildPlayer(options);
+            var report = UnityEditor.BuildPipeline.BuildPlayer(options);
             var duration = DateTime.UtcNow - started;
 
             bool success = report.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded;
