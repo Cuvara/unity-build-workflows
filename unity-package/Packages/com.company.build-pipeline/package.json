@@ -1,6 +1,6 @@
 {
   "name": "com.company.build-pipeline",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "displayName": "Build Pipeline",
   "description": "Neutral, reusable Unity CI/CD build pipeline toolkit. Provides layered config loading, validation rules, platform builders, and hooks. Install this package in your consumer project so the workflow toolkit can invoke Company.BuildPipeline.Editor.BuildCommand.Execute as the Unity -executeMethod. The package name (com.company.build-pipeline) and execute-method (Company.BuildPipeline.Editor.BuildCommand.Execute) are stable, documented identifiers — do not rename them in the consumer project.",
   "unity": "2021.3",

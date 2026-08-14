@@ -10,6 +10,14 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+
+- `unity-package/Packages/com.company.build-pipeline/package.json` — version was `1.0.0` while the
+  consumer-pin tags had run to `v1.1.0`, so a package resolved by tag reported a manifest version
+  that disagreed with the tag it came from — misleading to anyone resolving a version conflict.
+  Set to `1.1.2` to match the tag that carries it. The repo-level `VERSION` (2.2.0) and the release
+  history below are a separate series and are untouched.
+
 ### Added
 
 #### Generic Consumer Integration (`feature/generic-consumer-integration`)
