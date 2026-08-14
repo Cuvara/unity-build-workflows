@@ -96,9 +96,18 @@ namespace Company.BuildPipeline.Editor
                     : iOSSdkVersion.DeviceSDK;
 
             // ── 7. Architecture ───────────────────────────────────────────────
-            // ARM64 is mandatory for App Store distribution; the config field is kept
-            // for explicitness but Universal/ARMv7 are not supported for new submissions.
-            PlayerSettings.iOS.architecture = iOSArchitecture.ARM64;
+            // Unity 6 removed both PlayerSettings.iOS.architecture and the iOSArchitecture
+            // enum: the iOS player is ARM64-only, so there is no longer a choice to express.
+            // ARM64 was already the only App Store-valid option, so no capability is lost - but
+            // a config asking for anything else is now unsatisfiable and says so rather than
+            // being silently ignored.
+            var requestedArchitecture = iosCfg?.Architecture ?? "ARM64";
+            if (!requestedArchitecture.Equals("ARM64", StringComparison.OrdinalIgnoreCase))
+            {
+                Debug.LogWarning(
+                    $"[BuildPipeline:iOS] Config requests architecture '{requestedArchitecture}', " +
+                    "but Unity 6 builds iOS as ARM64 only. Building ARM64.");
+            }
 
             // ── 8. Scripting backend — IL2CPP is mandatory for iOS ─────────────
             PlayerSettings.SetScriptingBackend(BuildTargetGroup.iOS, ScriptingImplementation.IL2CPP);
@@ -203,7 +212,7 @@ namespace Company.BuildPipeline.Editor
 
             try
             {
-                report = BuildPipeline.BuildPlayer(playerOptions);
+                report = UnityEditor.BuildPipeline.BuildPlayer(playerOptions);
             }
             catch (Exception ex)
             {

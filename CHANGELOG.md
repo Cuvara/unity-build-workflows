@@ -12,6 +12,21 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **`com.company.build-pipeline` did not compile against Unity 6, so `BuildCommand` did not exist at
+  all.** Two unrelated causes, both fatal:
+  - **Namespace shadowing, not a missing reference.** All four platform builders call
+    `BuildPipeline.BuildPlayer(...)` from inside `namespace Company.BuildPipeline.Editor`, where the
+    identifier `BuildPipeline` binds to the enclosing `Company.BuildPipeline` namespace rather than
+    to `UnityEditor.BuildPipeline` — the nearer scope wins, and `using UnityEditor;` cannot override
+    it. Hence `CS0234: 'BuildPlayer' does not exist in the namespace 'Company.BuildPipeline'`. Call
+    sites are now fully qualified as `UnityEditor.BuildPipeline.BuildPlayer(...)`. This was never
+    version-specific: the code could not have compiled on any Unity version.
+  - **Unity 6 API removal.** `PlayerSettings.iOS.architecture` and the `iOSArchitecture` enum are
+    gone (verified absent from the 6000.3.9f1 managed assemblies); the iOS player is ARM64-only, so
+    there is no setting left to write. ARM64 was already the only App Store-valid value, so no
+    capability is lost, but a config requesting anything else now logs a warning instead of being
+    silently ignored.
+
 - `unity-package/Packages/com.company.build-pipeline/package.json` — version was `1.0.0` while the
   consumer-pin tags had run to `v1.1.0`, so a package resolved by tag reported a manifest version
   that disagreed with the tag it came from — misleading to anyone resolving a version conflict.
