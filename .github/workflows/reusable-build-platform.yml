@@ -354,7 +354,12 @@ jobs:
                           echo "params="                   >> "$GITHUB_OUTPUT" ;;
             iOS)          echo "target=iOS"               >> "$GITHUB_OUTPUT"
                           echo "params="                   >> "$GITHUB_OUTPUT" ;;
-            Addressables) echo "target="                  >> "$GITHUB_OUTPUT"
+            # Explicit, not empty. An empty target let GameCI fall back to its own
+            # default, which IS StandaloneLinux64 — confirmed from a build log
+            # (`-buildTarget StandaloneLinux64`) rather than from its docs. Naming it
+            # here means the lane's actual target is readable from this file instead
+            # of having to be recovered from a log.
+            Addressables) echo "target=StandaloneLinux64"  >> "$GITHUB_OUTPUT"
                           echo "params="                   >> "$GITHUB_OUTPUT" ;;
             *)            echo "::error::Unsupported platform: ${{ inputs.platform }}"; exit 1 ;;
           esac
@@ -388,7 +393,33 @@ jobs:
         with:
           path: ${{ inputs.project-path }}/Library
           key: Library-${{ inputs.platform }}-${{ hashFiles(format('{0}/ProjectSettings/ProjectVersion.txt', inputs.project-path), format('{0}/Packages/manifest.json', inputs.project-path)) }}
-          restore-keys: Library-${{ inputs.platform }}-
+          # Two fallbacks, widest last. The platform-scoped one is preferred; the
+          # bare `Library-` prefix is what rescues a lane that has never completed.
+          #
+          # MEASURED on Cuvara/IndieRPGMMOAdventure, 2026-08-21. The key's hash is
+          # hashFiles(ProjectVersion.txt, manifest.json) — the SAME value for every
+          # platform, because neither file is platform-specific. Only the label in
+          # front of it differs. So the repo held:
+          #
+          #   Library-Android-ba667c16…    3666 MB
+          #   Library-WebGL-ba667c16…      1649 MB
+          #   Library-test-All-ba667c16…   1334 MB
+          #
+          # …and the Addressables lane asked for `Library-Addressables-ba667c16…`,
+          # missed, fell back to `Library-Addressables-`, missed again, and did a
+          # fully cold import of 6000+ package assets on EVERY run — with 3.6 GB of
+          # a warm Library at the identical content hash sitting right there.
+          #
+          # It could not fix itself, either: actions/cache only saves in the post
+          # step of a job that finishes, and this lane was being cancelled by the
+          # 120-minute timeout, so it never wrote a cache to hit next time.
+          #
+          # A Library from another build target is not wrong, only incomplete —
+          # Unity reimports the platform-specific artefacts and keeps the rest. That
+          # is enormously cheaper than importing everything from nothing.
+          restore-keys: |
+            Library-${{ inputs.platform }}-
+            Library-
 
       # ── Step 6b: Cache Gradle (docker lane, Android only) ──────────────────
       # Best-effort — cache misses/failures never fail the build.
