@@ -1032,12 +1032,50 @@ jobs:
             echo "> Log artifacts: \`unity-build-<Platform>-logs\` (retained 14 days)"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # Gate on EVERY result the table above prints, and treat anything that is
+          # not a pass as a failure.
+          #
+          # Two defects this replaces, both of which let a red pipeline report green:
+          #
+          # 1. `[ "${result}" = "failure" ]` matched ONLY the literal string `failure`.
+          #    A `cancelled` job — the shape a timeout produces — sailed through. That
+          #    is not hypothetical: Cuvara/IndieRPGMMOAdventure collected three
+          #    cancelled Unity Build runs on `staging` in a week, one of them a
+          #    120-minute Addressables timeout that took every platform build down with
+          #    it, and this gate called each of them a pass.
+          #
+          # 2. R_TESTS, R_ADDR and R_IOS were printed in the summary table but were
+          #    absent from the loop. **Final Report went green when the tests failed.**
+          #    On `develop` that was masked, because Unity Tests is separately a
+          #    required check there. Nothing masks it on a branch where it is not.
+          #
+          # `skipped` stays a pass: platforms outside the environment's build list are
+          # legitimately skipped, and so is Addressables when the env disables it.
+          # Everything else — failure, cancelled, timed_out, or an empty/unknown value
+          # from a job that never reported — fails, and is NAMED, because "one or more
+          # build jobs failed" sent people to read seven job logs to find out which.
           FAILED=0
-          for result in "${R_VALIDATE}" "${R_ANDROID}" "${R_WEBGL}" "${R_LINUX64}" "${R_LINUXSERVER}" "${R_WINDOWS64}"; do
-            [ "${result}" = "failure" ] && FAILED=1
-          done
+          FAILED_NAMES=""
+          check_result() { # name value
+            case "$2" in
+              success|skipped) return 0 ;;
+              *)
+                FAILED=1
+                FAILED_NAMES="${FAILED_NAMES} $1=${2:-<no result>}"
+                ;;
+            esac
+          }
+          check_result validate     "${R_VALIDATE}"
+          check_result tests        "${R_TESTS}"
+          check_result addressables "${R_ADDR}"
+          check_result android      "${R_ANDROID}"
+          check_result webgl        "${R_WEBGL}"
+          check_result linux64      "${R_LINUX64}"
+          check_result linuxserver  "${R_LINUXSERVER}"
+          check_result windows64    "${R_WINDOWS64}"
+          check_result ios          "${R_IOS}"
           if [ "${FAILED}" -eq 1 ]; then
-            echo "::error::One or more build jobs failed. See individual job logs."
+            echo "::error::Pipeline failed:${FAILED_NAMES}. See the matching job logs."
             exit 1
           fi
 
@@ -1073,21 +1111,34 @@ jobs:
         shell: bash
         env:
           R_VALIDATE:    ${{ needs.validate-project.result }}
+          R_TESTS:       ${{ needs.unity-tests.result }}
+          R_ADDR:        ${{ needs.build-addressables.result }}
           R_ANDROID:     ${{ needs.build-android.result }}
           R_WEBGL:       ${{ needs.build-webgl.result }}
           R_LINUX64:     ${{ needs.build-linux64.result }}
           R_LINUXSERVER: ${{ needs.build-linuxserver.result }}
           R_WINDOWS64:   ${{ needs.build-windows64.result }}
+          R_IOS:         ${{ needs.build-ios.result }}
         run: |
+          # R_TESTS, R_ADDR and R_IOS were missing from this job's env AND from both
+          # loops below, so Discord announced a green pipeline when the tests had
+          # failed. Unlike the Final Report gate this job already handled `cancelled`
+          # correctly; the omitted results were its whole defect.
+          #
+          # Tests, validate and Addressables count toward `fail` but NOT toward `ok`:
+          # `ok` exists to detect a PARTIAL platform build (some targets up, some
+          # down), and a passing test run is not a platform that built.
           set +e
           overall=success
-          for r in "$R_VALIDATE" "$R_ANDROID" "$R_WEBGL" "$R_LINUX64" "$R_LINUXSERVER" "$R_WINDOWS64"; do
+          for r in "$R_VALIDATE" "$R_TESTS" "$R_ADDR" "$R_ANDROID" "$R_WEBGL" "$R_LINUX64" "$R_LINUXSERVER" "$R_WINDOWS64" "$R_IOS"; do
             [ "$r" = "cancelled" ] && overall=cancelled
           done
           if [ "$overall" != "cancelled" ]; then
             fail=0; ok=0
             [ "$R_VALIDATE" = "failure" ] && fail=1
-            for r in "$R_ANDROID" "$R_WEBGL" "$R_LINUX64" "$R_LINUXSERVER" "$R_WINDOWS64"; do
+            [ "$R_TESTS" = "failure" ] && fail=1
+            [ "$R_ADDR" = "failure" ] && fail=1
+            for r in "$R_ANDROID" "$R_WEBGL" "$R_LINUX64" "$R_LINUXSERVER" "$R_WINDOWS64" "$R_IOS"; do
               [ "$r" = "failure" ] && fail=1
               [ "$r" = "success" ] && ok=1
             done

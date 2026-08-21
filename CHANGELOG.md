@@ -11,6 +11,32 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 ## [Unreleased]
 
 ### Fixed
+- **`Final Report` — a required check on consumers' `develop` — passed a pipeline whose tests had
+  failed, and passed a cancelled one.** Two defects, either of which turns a red run green.
+
+  1. The gate matched only the literal string `failure`:
+     ```bash
+     [ "${result}" = "failure" ] && FAILED=1
+     ```
+     A **`cancelled`** job — the shape a timeout produces — sailed straight through. Not
+     hypothetical: `Cuvara/IndieRPGMMOAdventure` collected three cancelled Unity Build runs on
+     `staging` inside a week, one of them a 120-minute Addressables timeout that took every
+     platform build down with it, and this gate called each of them a pass.
+  2. **`R_TESTS`, `R_ADDR` and `R_IOS` were printed in the summary table but absent from the
+     loop.** Final Report went green when Unity Tests failed. On `develop` that was masked,
+     because Unity Tests is separately a required check there — nothing masks it anywhere else.
+
+  Now every result the table prints is gated, `success` and `skipped` pass, and everything else —
+  `failure`, `cancelled`, `timed_out`, or an empty value from a job that never reported — fails
+  **and is named**. The old message was "One or more build jobs failed", which sent people to read
+  seven job logs to find out which one.
+
+- **`Notify Discord` announced a green pipeline when the tests had failed.** Same missing three
+  results, in the env block and in both loops. This job already handled `cancelled` correctly, so
+  the omission was its whole defect. Tests, validate and Addressables now count toward `fail` but
+  not toward `ok` — `ok` exists to detect a *partial platform build*, and a passing test run is not
+  a platform that built.
+
 - **A build lane that has never completed can now start from another lane's warm `Library`.**
   `restore-keys` gained a bare `Library-` fallback behind the platform-scoped one.
 
