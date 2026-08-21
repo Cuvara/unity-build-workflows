@@ -11,6 +11,39 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 ## [Unreleased]
 
 ### Fixed
+- **A build lane that has never completed can now start from another lane's warm `Library`.**
+  `restore-keys` gained a bare `Library-` fallback behind the platform-scoped one.
+
+  The cache key is `Library-<platform>-<hashFiles(ProjectVersion.txt, manifest.json)>`. Neither
+  hashed file is platform-specific, so **the hash is identical for every lane** — only the label
+  in front of it differs. Measured on `Cuvara/IndieRPGMMOAdventure`, 2026-08-21:
+
+  ```
+  Library-Android-ba667c16…    3666 MB
+  Library-WebGL-ba667c16…      1649 MB
+  Library-test-All-ba667c16…   1334 MB
+  ```
+
+  The Addressables lane asked for `Library-Addressables-ba667c16…`, missed, fell back to
+  `Library-Addressables-`, missed again, and did a **fully cold import of 6000+ package assets on
+  every run** — with 3.6 GB of a warm `Library` at the *identical content hash* sitting unused.
+
+  It could not recover on its own: `actions/cache` writes only in the post step of a job that
+  finishes, and that lane was being cancelled by the 120-minute timeout, so it never saved a cache
+  to hit next time. A lane that cannot finish can never warm itself; only a cross-lane fallback
+  breaks that.
+
+  A `Library` from another build target is not wrong, only incomplete — Unity reimports the
+  platform-specific artefacts and keeps the rest, which is far cheaper than importing everything
+  from nothing.
+
+### Changed
+- **The `Addressables` lane names its build target instead of leaving it empty.** An empty target
+  let GameCI apply its own default, which *is* `StandaloneLinux64` — confirmed from a build log
+  (`-buildTarget StandaloneLinux64`), not from documentation. Behaviour is unchanged; the lane's
+  actual target is now readable from the workflow instead of recoverable only from a log.
+
+### Fixed
 
 - **`ARCHITECTURE.md` drew the Docker lane as running `BuildCommand.Execute`; it runs
   `PlayerBuilder.Build`.** Both diagrams and the package-layer bullet corrected, and a *Build Entry
