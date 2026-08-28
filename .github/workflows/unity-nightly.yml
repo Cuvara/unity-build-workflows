@@ -9,6 +9,10 @@ on:
     - cron: '0 2 * * *'   # 02:00 UTC daily
   workflow_dispatch:
     inputs:
+      unity-version:
+        description: Unity Editor version (e.g. 6000.3.9f1)
+        required: false
+        default: '6000.3.9f1'
       platforms:
         description: Comma-separated platforms (Android, WebGL, Linux64)
         required: false
@@ -33,17 +37,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Read Unity version from project
+      - name: Resolve Unity Editor version
         id: read-version
         shell: bash
         run: |
-          VERSION=$(python3 scripts/common/resolve_project_version.py \
-            --project-path "." \
-            --config-path  "BuildConfig" \
-            --environment  "development" \
-            --ref          "${{ github.ref }}")
+          # The nightly runs in the toolkit repo, which has no consumer project
+          # to read from. Unity Editor version is an explicit input with a
+          # default; resolve_project_version.py is for game build versions in
+          # consumer workflows.
+          VERSION="${{ inputs.unity-version || '6000.3.9f1' }}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Unity version: ${VERSION}"
+          echo "Unity Editor version: ${VERSION}"
 
       - name: Build Docker-only platform matrix
         id: build-matrix
