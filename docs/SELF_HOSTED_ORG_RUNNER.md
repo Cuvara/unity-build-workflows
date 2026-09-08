@@ -35,7 +35,8 @@ following before the runner is allowed near a public repo:
    `Settings → Actions → General → Fork pull request workflows from outside
    collaborators` → *Require approval for all external contributors*.
 2. **Restrict the runner group to named repositories** — never "All
-   repositories" (§3).
+   repositories" (§3). **On a free-plan organization this is not available**;
+   read §3 before relying on it.
 3. **Register the runner as `--ephemeral`** so a compromised job cannot persist
    into the next one (§2).
 4. **Keep no credentials on the machine.** No `UNITY_PASSWORD`, no signing
@@ -79,11 +80,16 @@ Windows builds require a local Windows Editor, i.e. this lane.
 
 ## 2 — Register the runner against the organization
 
-Get an **organization** registration token (valid one hour):
+Get an **organization** registration token. Verified against `Cuvara` on
+2026-09-08: returns a 29-character token, `expires_at` one hour out. Needs the
+`admin:org` scope — `gh auth refresh -h github.com -s admin:org`.
 
 ```bash
 gh api -X POST /orgs/<ORG>/actions/runners/registration-token --jq .token
 ```
+
+Treat it as a credential: it registers a machine into your organization. Do not
+paste it into a shared terminal or commit it.
 
 Download and configure. Note the URL is the **org**, with no repository path:
 
@@ -126,19 +132,50 @@ gh api -X POST /orgs/<ORG>/actions/runners/remove-token --jq .token
 # then:  .\config.cmd remove --token <REMOVE_TOKEN>
 ```
 
+Both token endpoints were exercised against `Cuvara` while writing this
+document; the runner-group creation call was not, because the org is on the free
+plan (§3).
+
 ---
 
 ## 3 — Grant the runner to specific repositories
 
-Org runners are reachable only through their runner group. Create a group scoped
-to the repositories that may use it — never "All repositories" while any of them
-is public.
+Org runners are reachable only through a runner group. **Custom runner groups are
+a GitHub Team / Enterprise feature.** Check the plan before planning around them:
 
-In the UI: `Settings → Actions → Runner groups → New runner group`, name it
-`unity-builders`, set **Repository access** to *Selected repositories*, and add
-only the consumer repo.
+```bash
+gh api /orgs/<ORG> -q .plan.name                 # free | team | enterprise
+gh api /orgs/<ORG>/actions/runner-groups \
+  -q '.runner_groups[] | "\(.id) \(.name) visibility=\(.visibility) allows_public=\(.allows_public_repositories)"'
+```
 
-Or by API (needs `admin:org`):
+On a **free** organization the only group is `Default` (id `1`, `visibility=all`),
+it cannot be narrowed to selected repositories, and a new group cannot be created.
+Every repository in the org can therefore reach the runner. Measured on `Cuvara`
+on 2026-09-08:
+
+```
+plan=free
+1 Default visibility=all allows_public=false
+```
+
+### The blocker on a free plan with public repositories
+
+`Default` ships with **`allows_public_repositories=false`**, and a runner in a
+group that disallows public repositories **never receives jobs from a public
+repository** — the job simply stays queued. Both repositories in this org are
+public, so a runner registered today would sit idle no matter how correct the
+labels are.
+
+There are only three honest ways out, and the middle one is the recommended one:
+
+| Option | Consequence |
+|---|---|
+| Flip the flag: `Settings → Actions → Runner groups → Default → Allow public repositories` | The runner becomes reachable by **every public repo in the org**, and on a free plan you cannot narrow it back to a subset. Any fork PR then runs its code on your machine. Do not do this on a machine you care about |
+| **Make the repository private** | The runner works with `Default` as shipped, no flag change, and fork-PR exposure disappears. Private repos are unlimited on the free plan (`plan.private_repos` reported 10000) |
+| Upgrade to GitHub Team | Custom runner groups become available, so you can scope a group to named repositories and keep the repo public |
+
+On Team or Enterprise, create the scoped group with:
 
 ```bash
 gh api -X POST /orgs/<ORG>/actions/runner-groups \
@@ -147,7 +184,7 @@ gh api -X POST /orgs/<ORG>/actions/runner-groups \
   -F selected_repository_ids[]="$(gh api repos/<ORG>/<CONSUMER_REPO> -q .id)"
 ```
 
-Verify the runner landed in the group and is idle:
+Verify the runner registered and is idle:
 
 ```bash
 gh api /orgs/<ORG>/actions/runners \
@@ -223,6 +260,7 @@ gh workflow run unity-build.yml --repo "<ORG>/<CONSUMER_REPO>" --ref develop \
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Job stays *Queued*, runner shows Idle | **On a free plan: the repo is public and `Default` has `allows_public_repositories=false`** — the most likely cause, and no label change fixes it | See §3: make the repo private, or accept the flag's consequences |
 | Job stays *Queued* | Requested labels are not all present on the runner, or the repo is not in the runner group | Compare `RUNNER_LABELS` with `gh api /orgs/<ORG>/actions/runners`; check the group's repository access |
 | `Unity.exe not found for version <v>` | Editor not installed, or not at the Hub default path, or a different version than `ProjectVersion.txt` | Install that exact version via Unity Hub |
 | Build "succeeds" with no player in `build/` | The project has no `PlayerBuilder.Build`; `-buildTarget` alone builds nothing | Add the method (§1) or pass `build-method` |

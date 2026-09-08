@@ -10,6 +10,28 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+- **`docs/SELF_HOSTED_ORG_RUNNER.md` recommended a mitigation that a free-plan organization cannot
+  use, and missed the reason a runner there receives no jobs at all.** Both were found by exercising
+  the org API with `admin:org` after the document was written.
+
+  Custom runner groups are a GitHub Team / Enterprise feature. `Cuvara` is on the **free** plan, so
+  the only group is `Default` (id `1`, `visibility=all`) — it cannot be narrowed to selected
+  repositories and no new group can be created. "Restrict the runner group to named repositories"
+  was therefore not actionable there, despite being listed as mitigation 2.
+
+  Worse, `Default` ships with **`allows_public_repositories=false`**, and a runner in such a group
+  never receives jobs from a public repository — the job stays queued regardless of labels. Both
+  repositories in this org are public, so a runner registered by following the original document
+  would have sat idle with no diagnosable cause. The document now leads the troubleshooting table
+  with that case and gives the three real options: flip the flag (org-wide exposure, and
+  un-narrowable on free), **make the repository private** (recommended; `plan.private_repos`
+  reports 10000), or upgrade to Team for scoped groups.
+
+  Also recorded what was and was not exercised: both token endpoints were verified against `Cuvara`
+  (29-character tokens, one-hour expiry); the runner-group creation call was not, for the plan
+  reason above.
+
 ### Added
 - **`templates/PlayerBuilder.cs`** — a working reference implementation of the build entry point the
   self-hosted lanes require. `docs/ADD_NEW_PROJECT.md` previously ended that section with "There is
