@@ -316,17 +316,21 @@ gh workflow run build-unity-image.yml --repo Cuvara/unity-build-workflows --ref 
 Published in this organization as of 2026-09-08 — mutable tag and the
 run-numbered tag resolve to the same digest, which the build now asserts:
 
-| Tag | Digest (short) |
-|---|---|
-| `6000.0.26f1-android` | `sha256:bbf4a306…`¹ |
-| `6000.0.26f1-webgl` | `sha256:b89248b5…` |
-| `6000.0.26f1-linux` | `sha256:2561e050…` |
-| `6000.3.9f1-android` | `sha256:c82e7267…` |
-| `6000.3.9f1-webgl` | `sha256:411257ff…` |
-| `6000.3.9f1-linux` | `sha256:86cabf50…` |
+| Tag | Digest | Run tag |
+|---|---|---|
+| `6000.0.26f1-android` | `sha256:dc2603d05ce4…` | `-54` |
+| `6000.0.26f1-webgl` | `sha256:b89248b5284c…` | `-43` |
+| `6000.0.26f1-linux` | `sha256:2561e0509722…` | `-44` |
+| `6000.3.9f1-android` | `sha256:c82e726735a1…` | `-45` |
+| `6000.3.9f1-webgl` | `sha256:411257fff425…` | `-50` |
+| `6000.3.9f1-linux` | `sha256:86cabf50c569…` | `-51` |
 
-¹ Rebuilt to correct a mutable tag that had been left on an older image; confirm
-the current digest before pinning:
+All six were checked directly against the registry: the mutable tag and its
+run-numbered tag resolve to the same digest in every case. `6000.0.26f1-android`
+needed a rebuild to get there — its mutable tag had been left on the image from
+run 39 while run 42 published `-42` — so the tags `-39` and `-42` still exist and
+point at superseded images. Read the current digest rather than trusting any
+printed table:
 
 ```bash
 docker buildx imagetools inspect ghcr.io/cuvara/unity-editor:6000.0.26f1-android \
