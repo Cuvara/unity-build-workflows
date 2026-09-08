@@ -10,6 +10,11 @@ repository. After following these steps your project will have:
 - Discord build notifications (optional)
 - Proper GitHub Environment gating so production secrets never reach PR runs
 
+> **New here?** [NEW\_PROJECT\_END\_TO\_END.md](NEW_PROJECT_END_TO_END.md) walks the
+> whole thing — repo requirements, secrets, first build, then your own runner — and
+> chooses between the two paths for you. This document is the detail for the path it
+> recommends.
+>
 > **This is the default onboarding path** — it wires up `unity-pipeline.yml`
 > (branch-based CI, per-platform jobs, Repository Variables) and needs no
 > `BuildConfig/`. If you instead want one explicit build per caller job with
