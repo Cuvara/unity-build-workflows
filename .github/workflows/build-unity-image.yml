@@ -153,15 +153,23 @@ jobs:
               ;;
           esac
 
+      # Unity editor images are tens of gigabytes; Trivy's default 5m analysis
+      # deadline is not enough for them. `6000.3.9f1-linux` died on exactly that
+      # in run #47 — "context deadline exceeded" — and because the scan sits
+      # before the push, a timeout meant no image was published at all.
+      #
+      # Pinned to a release rather than @master: an unpinned third-party action
+      # is a supply-chain risk and makes a green run unreproducible.
       - name: Scan for vulnerabilities
         if: inputs.run-vulnerability-scan != false
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.image-ref.outputs.repo }}:${{ steps.unity-version.outputs.unity-version }}-${{ matrix.variant }}
           format: sarif
           output: trivy-results-${{ matrix.variant }}.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          timeout: 30m
 
       - name: Upload Trivy SARIF results
         if: inputs.run-vulnerability-scan != false && always()
