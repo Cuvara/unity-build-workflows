@@ -126,10 +126,17 @@ gh secret set UNITY_PASSWORD --repo "${REPO}"   # paste password when prompted
 gh secret set UNITY_LICENSE  --repo "${REPO}" < /path/to/Unity_lic.ulf
 ```
 
-All three secrets (`UNITY_EMAIL`, `UNITY_PASSWORD`, `UNITY_LICENSE`) must be
-set together for the `personal-combined` activation strategy to work. Providing
-only credentials without the `.ulf` fails with `0 entitlements`; providing only
-the `.ulf` fails with `TimeStamp validation failed`.
+**You need either the `.ulf` or the credentials, not necessarily both.**
+`validate-license` rejects only the empty case
+(`unity-pipeline.yml:487-490`): `Need: (UNITY_EMAIL+UNITY_PASSWORD) or
+(UNITY_LICENSE)`. `Cuvara/IndieRPGMMOAdventure` builds green with
+`UNITY_LICENSE` alone.
+
+Set all three together when your `.ulf` cannot activate offline — a Unity
+Personal licence bound to another machine id fails with `TimeStamp validation
+failed`, and credentials alone fail with `0 entitlements`. That pairing is the
+`personal-combined` strategy, and it is what the toolkit's own container
+entrypoint requires on the `unity-build.yml` path.
 
 See [UNITY\_PERSONAL\_DOCKER\_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md) for
 `.ulf` generation, troubleshooting, and the full explanation.
