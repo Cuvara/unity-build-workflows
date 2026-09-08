@@ -10,7 +10,13 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+- **`CLAUDE.md` at the repository root** — onboarding notes for Claude Code sessions. Records the
+  contracts that are not discoverable from a directory listing: that the CI gates are pytest and
+  `bash -n` (shellcheck is advisory), that build logic lives in `scripts/common/resolve_build_flow.sh`
+  rather than the workflow YAML, that runner and build engine are independent axes, which guard-rail
+  tests fail on unrelated-looking changes, the documented disagreement between the two iOS entry
+  points, and the `personal-combined` licensing requirement. Documentation only — no behaviour change.
 
 ---
 
