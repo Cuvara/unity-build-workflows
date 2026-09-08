@@ -10,7 +10,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Changed
+- **`LICENSE` copyright holder is now `Cuvara`**, not `BuzzelStudio` — the original studio, left
+  over from before the repository changed hands. The MIT terms themselves are untouched; only the
+  holder line changed.
+
 ### Fixed
+- **Restored CRLF line endings on two files that were normalised to LF by accident.**
+  `examples/sample-unity-project-integration/README.md` and
+  `unity-package/Packages/com.company.build-pipeline/package.json` were committed to CRLF, and the
+  2.2.1 release edits rewrote them as LF — turning a two-line change into a 186-line whole-file
+  diff. Content is unchanged; the files are back to 68 and 25 CR bytes, matching what they carried
+  before. `.gitattributes` normalises only `*.sh` and `*.bash`, so nothing enforced this either way.
+
 - **The documented image namespace still named the pre-migration owner.**
   `config/unity-build-defaults.json` read `imageNamespace: dycuong03/unity-editor`, and `README.md`,
   `docs/GITHUB_ACTIONS_BUILD_RUNBOOK.md` and `docs/UNITY_VERSION_UPGRADE.md` all pointed at
