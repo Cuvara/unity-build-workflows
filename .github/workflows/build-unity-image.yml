@@ -54,7 +54,10 @@ concurrency:
 
 jobs:
   build-image:
-    name: Build ${{ inputs.image-variant || 'all' }} image
+    # matrix.variant, not the input: a dispatch without image-variant fans out
+    # to three jobs and a validation push builds android, so the input names
+    # neither. Every job in the Actions UI now says which image it is building.
+    name: Build ${{ matrix.variant }} image
     runs-on: ubuntu-latest
     permissions:
       contents: read

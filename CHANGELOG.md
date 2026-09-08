@@ -11,6 +11,11 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 ## [Unreleased]
 
 ### Fixed
+- **Image build jobs were labelled by an input that names neither case.** `build-unity-image.yml`
+  used `name: Build ${{ inputs.image-variant || 'all' }} image`, so a dispatch without a variant
+  showed three jobs all called "Build all image", and a validation push — which builds `android`
+  only — also read "Build all image". The label is now `matrix.variant`, so every job in the Actions
+  UI says which image it is building. Cosmetic; no behaviour change.
 - **Merging any `docker/**` change rebuilt all three Unity images and then threw them away.**
   `build-unity-image.yml` triggers on pushes to `main`, and every gated step was written as
   `if: inputs.<x> != false`. On a push event `inputs` is empty, an absent input is null, and null
