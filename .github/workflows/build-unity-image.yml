@@ -177,19 +177,63 @@ jobs:
           artifact-name: sbom-${{ matrix.variant }}-${{ steps.unity-version.outputs.unity-version }}.spdx.json
           output-file: sbom-${{ matrix.variant }}.spdx.json
 
+      # Push the image that was just validated and scanned — not a second build
+      # of it. The previous implementation invoked build-push-action again with
+      # `push: true`, which produced a different image (fresh provenance, fresh
+      # timestamps) under the same tags: Trivy and the smoke tests had inspected
+      # one artefact and the registry received another, and the mutable tag could
+      # end up on a digest nothing in this run had examined.
       - name: Push image to registry
+        id: push
         if: inputs.push-image != false
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/variants/${{ matrix.variant }}.Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            UNITY_VERSION=${{ steps.unity-version.outputs.unity-version }}
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+        shell: bash
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          PRIMARY_TAG: ${{ steps.image-ref.outputs.repo }}:${{ steps.unity-version.outputs.unity-version }}-${{ matrix.variant }}
+        run: |
+          set -Eeuo pipefail
+
+          # `load: true` on the build step tagged the local image with every tag
+          # metadata-action emitted, so each one pushes the same digest.
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Pushing ${tag}"
+            docker push "$tag"
+          done <<< "$TAGS"
+
+          # Resolve the digest from the registry, so what is recorded is what a
+          # consumer pulling that tag will actually receive.
+          DIGEST="$(docker buildx imagetools inspect "$PRIMARY_TAG" --format '{{.Manifest.Digest}}')"
+          if [ -z "$DIGEST" ]; then
+            echo "::error::Could not resolve the pushed digest for ${PRIMARY_TAG}."
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Pushed digest: ${DIGEST}"
+
+      # Every tag from this run must resolve to the digest recorded below. This
+      # catches the failure that motivated the change: a mutable tag left
+      # pointing at an older image while the run reported success.
+      - name: Verify every tag resolves to the pushed digest
+        if: inputs.push-image != false
+        shell: bash
+        env:
+          TAGS:   ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -Eeuo pipefail
+          rc=0
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            actual="$(docker buildx imagetools inspect "$tag" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+            if [ "$actual" != "$DIGEST" ]; then
+              echo "::error::${tag} resolves to '${actual:-<unresolvable>}', expected ${DIGEST}"
+              rc=1
+            else
+              echo "ok  ${tag} -> ${actual}"
+            fi
+          done <<< "$TAGS"
+          exit $rc
 
       - name: Publish image manifest
         if: inputs.push-image != false
@@ -198,7 +242,7 @@ jobs:
           IMAGE_REPO_LOWER: ${{ steps.image-ref.outputs.repo }}
           UNITY_VERSION: ${{ steps.unity-version.outputs.unity-version }}
           VARIANT: ${{ matrix.variant }}
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           MANIFEST_FILE="image-manifest-${VARIANT}.json"
           cat > "$MANIFEST_FILE" << EOF

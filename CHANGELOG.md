@@ -11,6 +11,37 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 ## [Unreleased]
 
 ### Fixed
+- **`build-unity-image.yml` pushed a different image than the one it validated, and recorded a
+  digest belonging to neither.** The workflow built twice: once with `push: false, load: true` (the
+  copy the smoke tests, Trivy scan and SBOM examined) and again through a second
+  `build-push-action` with `push: true`. The second invocation produces a fresh image — new
+  provenance, new timestamps — so the registry received an artefact nothing in the run had
+  inspected. `Publish image manifest` then recorded `steps.build.outputs.digest`, the digest of the
+  **un-pushed** local build, into `pinned_reference` — the field `unity-release.yml` pins production
+  releases to.
+
+  Observed on `ghcr.io/cuvara/unity-editor` after run #42 built the `6000.0.26f1-android` image:
+
+  | Reference | Digest |
+  |---|---|
+  | `6000.0.26f1-android` (mutable) | `sha256:1027ff7d…` |
+  | `6000.0.26f1-android-39` | `sha256:1027ff7d…` — same image, an older run |
+  | `6000.0.26f1-android-42` (that run) | `sha256:bbf4a306…` |
+  | manifest artifact from that run | `sha256:e3b988b5…` |
+
+  Three digests for one build, and a mutable tag left pointing at an older image while the run
+  reported success. Pulling `6000.0.26f1-android` did not get you what had just been built or
+  scanned.
+
+  The push step now pushes the tags already carried by the loaded, validated image and resolves the
+  digest back out of the registry, so validated, scanned, pushed and recorded are the same artefact.
+  A new step then asserts that **every** tag from the run resolves to that digest and fails the run
+  otherwise — the divergence above would not have passed silently.
+
+  Not established: why the mutable tag sat on the older run's digest rather than the second build's.
+  The double-build explains three digests existing; it does not by itself explain that assignment,
+  and the run logs no longer hold enough to say. The new verification step makes the question moot
+  going forward.
 - **`docs/SELF_HOSTED_ORG_RUNNER.md` recommended a mitigation that a free-plan organization cannot
   use, and missed the reason a runner there receives no jobs at all.** Both were found by exercising
   the org API with `admin:org` after the document was written.
