@@ -2,7 +2,7 @@
 # consumer-unity-build.yml — Thin caller template for unity-build-workflows
 #
 # Copy this file to .github/workflows/unity-build.yml in your project.
-# Pin @main to a released tag for stability (e.g. @v1.0.0) once a release
+# Pin @main to a released tag for stability (e.g. @v2.2.1) once a release
 # exists. Use @main for development. Do NOT invent tags that don't exist.
 #
 # Required secrets (set in Settings → Secrets and variables → Actions):
@@ -111,10 +111,10 @@ jobs:
   pipeline:
     name: Unity Pipeline
     # Pin the toolkit version. Recommended:
-    #   @v1          — latest stable v1.x (gets backward-compatible fixes)   ← production default
-    #   @v1.2.0      — exact release (fully reproducible)
+    #   @v2          — latest stable v2.x (gets backward-compatible fixes)   ← production default
+    #   @v2.2.1      — exact release (fully reproducible)
     #   @main        — bleeding edge (development only; may break)
-    uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1
+    uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2
     secrets: inherit
     with:
       # ── Dispatch inputs (fall back to sensible defaults for push/PR events) ──

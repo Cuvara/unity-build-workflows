@@ -64,19 +64,19 @@ curl -fsSL \
 ```
 
 The file is ready to use as-is. It calls
-`Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1`
+`Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2`
 with `secrets: inherit` — no per-secret wiring needed.
 
 **Version pinning (recommended):**
 
 | Ref | Use for | Behavior |
 |---|---|---|
-| `@v1` | **production (default)** | latest stable `v1.x`; receives backward-compatible fixes automatically |
-| `@v1.2.0` | locked / reproducible | exact release, never moves |
+| `@v2` | **production (default)** | latest stable `v2.x`; receives backward-compatible fixes automatically |
+| `@v2.2.1` | locked / reproducible | exact release, never moves |
 | `@main` | development only | bleeding edge; may break |
 
-The template ships pinned to `@v1`. For fully reproducible builds, pin to an
-exact tag (e.g. `@v1.0.0`) and bump it deliberately. Available tags:
+The template ships pinned to `@v2`. For fully reproducible builds, pin to an
+exact tag (e.g. `@v2.2.1`) and bump it deliberately. Available tags:
 `gh release list -R Cuvara/unity-build-workflows` or
 `git ls-remote --tags https://github.com/Cuvara/unity-build-workflows`.
 Set `toolkit-ref:` in the caller to the SAME ref so the toolkit scripts are
