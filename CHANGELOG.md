@@ -10,6 +10,23 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+- **The documented image namespace still named the pre-migration owner.**
+  `config/unity-build-defaults.json` read `imageNamespace: dycuong03/unity-editor`, and `README.md`,
+  `docs/GITHUB_ACTIONS_BUILD_RUNBOOK.md` and `docs/UNITY_VERSION_UPGRADE.md` all pointed at
+  `ghcr.io/dycuong03/unity-editor`. Every workflow actually pushes to
+  `ghcr.io/${{ github.repository_owner }}/unity-editor`, which is `ghcr.io/cuvara/unity-editor` —
+  so anyone following the docs looked for images in a namespace nothing publishes to.
+
+  Nothing was broken at runtime: no code reads `imageNamespace` (only
+  `tests/test_unity_version_resolution.py` asserts the field exists), and `.unityVersion` is the
+  single field `resolve_unity_version.sh` actually consumes. This was stale documentation left over
+  from the `dyCuong03` → `Cuvara` migration in `ee9a822`.
+
+  The GHCR verification snippet in `docs/UNITY_VERSION_UPGRADE.md` also called
+  `/users/dycuong03/packages/...`; `Cuvara` is an Organization, so that path is now
+  `/orgs/Cuvara/packages/...` — the `/users/` form returns 404 for an org.
+
 ### Added
 - **`CLAUDE.md` at the repository root** — onboarding notes for Claude Code sessions. Records the
   contracts that are not discoverable from a directory listing: that the CI gates are pytest and

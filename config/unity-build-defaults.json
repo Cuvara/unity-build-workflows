@@ -7,5 +7,5 @@
     "linux"
   ],
   "registry": "ghcr.io",
-  "imageNamespace": "dycuong03/unity-editor"
+  "imageNamespace": "cuvara/unity-editor"
 }
