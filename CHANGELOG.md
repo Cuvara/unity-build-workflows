@@ -11,6 +11,29 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 ## [Unreleased]
 
 ### Fixed
+- **Merging any `docker/**` change rebuilt all three Unity images and then threw them away.**
+  `build-unity-image.yml` triggers on pushes to `main`, and every gated step was written as
+  `if: inputs.<x> != false`. On a push event `inputs` is empty, an absent input is null, and null
+  loosely equals false in GitHub expressions — so the condition evaluated **false** and the push,
+  the manifest, the SBOM upload *and the vulnerability scan* were all skipped. Three matrix jobs
+  built a Unity editor image each, ~18 minutes apiece, published nothing, scanned nothing, and
+  reported success. Roughly 55 runner-minutes per merge for a green tick that verified less than it
+  appeared to.
+
+  Both flags are now resolved in bash from `github.event_name` and printed to the step summary, so
+  what a run will do is stated rather than implied:
+
+  | Trigger | Builds | Scans | Publishes |
+  |---|---|---|---|
+  | push to `main` (`docker/**` or this file) | `android` only | yes | **no** — a push is never a release |
+  | `workflow_dispatch` | the chosen variant, or all three | unless `run-vulnerability-scan=false` | unless `push-image=false` |
+
+  A validation push now costs one job instead of three, and it actually scans. Publishing stays
+  deliberate: it requires a dispatch.
+
+  A `concurrency` group was added at the same time, cancelling superseded **push** runs while
+  leaving dispatches alone — this session accumulated several overlapping image builds, one of
+  which had to be cancelled by hand.
 - **A Trivy timeout stopped an image from being published at all.** `build-unity-image.yml` ran
   `aquasecurity/trivy-action` with no `timeout`, so it used the 5-minute default. Unity editor
   images are tens of gigabytes, and the `6000.3.9f1-linux` build died on it in run #47 after 19m46s:
