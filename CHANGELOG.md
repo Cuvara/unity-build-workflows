@@ -32,6 +32,23 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   your machine.
 
 ### Fixed
+- **`6000.0.26f1-android`'s mutable tag pointed at a superseded image; rebuilt.** It resolved to the
+  image from run 39 while run 42 had published `-42`, so `docker pull ...:6000.0.26f1-android`
+  returned neither the newest build nor the one that had been scanned. Rebuilt under the corrected
+  push logic (run 54): the mutable tag and `-54` now resolve to the same digest, and the run's own
+  verification step asserted it. All six published tags were then checked directly against the
+  registry and are consistent.
+
+  The superseded `-39` and `-42` tags still exist and still point at the old images.
+  `docs/NEW_PROJECT_END_TO_END.md` now carries the measured digests for all six tags and tells you
+  to re-read them from the registry rather than trust a printed table.
+
+  This also narrows the earlier claim about the double-build defect: four of the five variants built
+  under the old code had consistent tags. The divergence needed a **pre-existing** tag on the same
+  image name, which only `6000.0.26f1-android` had. The fix in `build-unity-image.yml` remains
+  correct — it guarantees the pushed bytes are the scanned bytes — but the blast radius was one
+  variant, not all of them.
+
 - **Image build jobs were labelled by an input that names neither case.** `build-unity-image.yml`
   used `name: Build ${{ inputs.image-variant || 'all' }} image`, so a dispatch without a variant
   showed three jobs all called "Build all image", and a validation push — which builds `android`
