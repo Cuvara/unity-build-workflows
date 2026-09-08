@@ -17,6 +17,17 @@ _No unreleased changes._
 ## [2.2.1] — 2026-09-08
 
 ### Fixed
+- **`Unity Release` announced a production release on this repository's own tags, having built
+  nothing.** `pre-release-checks` carries `if: github.repository != 'Cuvara/unity-build-workflows'`
+  — the toolkit repo is not a Unity project, so the gates and every build job that needs them skip
+  correctly. `notify` was `if: always()`, so it alone survived and posted a Discord embed with
+  `environment: production`, `status: skipped`, and an empty build-version and platform. It now
+  also requires that the gates actually ran.
+
+  This is what the ten failed `production` deployments dated 2026-06-30 to 2026-07-13 were the tail
+  of. Their own cause — `image-digest is required for production releases` on tag-push — was fixed
+  in `4bdf851`, and the repository guard in `ee9a822` stopped the chain from running here at all;
+  the misleading notification was the last piece still firing.
 - **`Final Report` — a required check on consumers' `develop` — passed a pipeline whose tests had
   failed, and passed a cancelled one.** Two defects, either of which turns a red run green.
 
