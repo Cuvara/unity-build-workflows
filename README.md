@@ -297,6 +297,7 @@ Current version: **2.2.1** — see [CHANGELOG.md](CHANGELOG.md).
 | [docs/PLATFORM_LIMITATIONS.md](docs/PLATFORM_LIMITATIONS.md) | iOS (macOS lane, supported), Windows (unsupported), GPU/native plugin limits |
 | [docs/RELEASE_FLOW.md](docs/RELEASE_FLOW.md) | Tag-based release, environments, digest enforcement |
 | [docs/SELF_HOSTED_RUNNER.md](docs/SELF_HOSTED_RUNNER.md) | Runner setup with Docker requirements |
+| **[docs/SELF\_HOSTED\_ORG\_RUNNER.md](docs/SELF_HOSTED_ORG_RUNNER.md)** | **Register your own machine as an organization runner and route builds to it — runner groups, org variables, public-repo risks** |
 | [docs/SECURITY.md](docs/SECURITY.md) | Secret handling, iOS credentials, image trust, fork safety |
 | [docs/DISCORD_NOTIFICATIONS.md](docs/DISCORD_NOTIFICATIONS.md) | Discord build-completion notifications: setup, security, embed format |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Docker, Unity, and iOS errors; cert rotation; Xcode migration |

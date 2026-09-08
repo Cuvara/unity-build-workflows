@@ -10,6 +10,41 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+- **`docs/SELF_HOSTED_ORG_RUNNER.md`** — how to register your own machine as an
+  *organization* runner and route this toolkit's builds to it. Covers the org registration token,
+  runner groups and repository access, `RUNNER_TYPE`/`BUILD_ENGINE`/`RUNNER_LABELS` set at org or
+  repo scope, which jobs actually move to the runner (the orchestration jobs stay on
+  `ubuntu-latest`), and the local-lane prerequisites — the exact Unity Editor version at the Hub
+  default path, and a `PlayerBuilder.Build` method, which the docker lane does not need.
+
+  It opens with the public-repository risk, because both repositories in this org are currently
+  public and the consumer caller runs on `pull_request`: a fork PR on a public repo executes its
+  own workflow code on the runner. The mitigations (approval for outside contributors, a runner
+  group scoped to named repos, `--ephemeral`, no credentials on the machine, low-privilege service
+  account) are stated before the registration commands.
+
+- **`runner-type`, `build-engine` and `runner-labels` inputs on the caller template**, plus
+  `self-hosted-macos` in `runner-mode`. Previously the template exposed only `runner-mode`
+  `[docker, self-hosted-windows, auto]`, so a consumer could not select the two-axis runner
+  configuration per run — only through repository variables.
+
+### Fixed
+- **`docs/SELF_HOSTED_WINDOWS_RUNNER.md` demanded a `unity` runner label that nothing requests.**
+  It stated "All three labels must be present" (`self-hosted,Windows,unity`) and its troubleshooting
+  table blamed queued jobs on a missing `unity` label. `grep '"unity"'` over `.github/workflows/`
+  and `scripts/` returns nothing; the resolver requests `self-hosted,windows`. An extra label is
+  harmless — `runs-on` needs a superset — so no runner needs re-registering, but the diagnosis was
+  wrong.
+
+- **The same document described a `runs-on` mechanism that no longer exists.** §5 showed
+  "pseudo-logic implemented in reusable-build-platform.yml" picking labels from `runner-mode`. The
+  build job consumes the resolver's label list verbatim (`reusable-build-platform.yml:230`).
+
+- **No self-hosted document mentioned `PlayerBuilder.Build`**, which the local lane substitutes
+  when `build-method` is empty (`:842-843` Windows, `:903` bash). A project moved to a self-hosted
+  runner without that method builds nothing while the job reports success.
+
 ### Fixed
 - **The consumer caller template pinned the workflow at `@v2` but the toolkit scripts at `v1`.**
   `templates/consumer-unity-build.yml` carried `toolkit-ref: 'v1'` next to
