@@ -84,35 +84,47 @@ Which C# method Unity runs depends on **which lane builds you**, and the two do 
 
 | Lane | Entry point | Who implements it |
 |---|---|---|
-| Docker / game-ci and self-hosted — Android, WebGL, Windows, Linux, and the pipeline's own `Build iOS` job | `PlayerBuilder.Build` | **You**, in your Unity project |
+| Docker / game-ci — the default | game-ci's own builder (`build-method` defaults to `''`) | Nobody: **no project-side method needed** |
+| Self-hosted (`BUILD_ENGINE=local`) — Android, WebGL, Windows, Linux | `PlayerBuilder.Build` | **You**, in your Unity project |
 | iOS native — `unity-build-ios.yml`, `unity-release-ios.yml` | `Company.BuildPipeline.Editor.BuildCommand.Execute` | This package |
 
-The default comes from `reusable-build-platform.yml` (`BUILD_METHOD` defaults to `PlayerBuilder.Build`;
-the Windows variant does the same), so a project that adds the package and nothing else has no method
-to run on those lanes.
+The self-hosted lanes substitute `PlayerBuilder.Build` when `build-method` is empty
+(`reusable-build-platform.yml:842-843` for Windows, `:903` for bash), so a project that moves onto
+your own runner without that method builds nothing while the job still reports success. The docker
+lane is unaffected.
 
 You have two options:
 
 1. **Write a `PlayerBuilder`.** A public static parameterless method Unity can reach by name:
 
-   ```csharp
-   using UnityEditor;
+   **A working reference implementation ships with this toolkit** —
+   [`templates/PlayerBuilder.cs`](../templates/PlayerBuilder.cs). Copy it and adjust:
 
-   public static class PlayerBuilder      // global namespace: -executeMethod PlayerBuilder.Build
-   {
-       public static void Build()
-       {
-           // Read what CI passes through the environment, then call BuildPipeline.BuildPlayer.
-           var outputRoot = System.Environment.GetEnvironmentVariable("BUILD_OUTPUT_DIR");
-           // ANDROID_APP_BUNDLE, ANDROID_KEYSTORE, ANDROID_KEYSTORE_PASS,
-           // ANDROID_KEYALIAS_NAME, ANDROID_KEYALIAS_PASS are also supplied for Android.
-       }
-   }
+   ```bash
+   mkdir -p Assets/BuildScripts/Editor
+   cp path/to/unity-build-workflows/templates/PlayerBuilder.cs Assets/BuildScripts/Editor/
+
+   # or, without the submodule:
+   curl -fsSL https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/PlayerBuilder.cs \
+     -o Assets/BuildScripts/Editor/PlayerBuilder.cs
    ```
 
    It must be **in the global namespace** if you want `-executeMethod PlayerBuilder.Build` to resolve,
-   and it must live in an Editor assembly. There is no reference implementation in this repository;
-   copy one from a project that already builds with this toolkit.
+   and it must live in an Editor assembly (the same `BuildScripts.Editor` asmdef as
+   `AddressableBuilder.cs` — see [CONSUMER_SETUP.md](CONSUMER_SETUP.md) Step 5).
+
+   **What CI actually passes**, verified against `reusable-build-platform.yml`:
+
+   | Variable | Value | Set at |
+   |---|---|---|
+   | `BUILD_OUTPUT_DIR` | always `build` — the artifact upload takes `build/` | `:737`, `:846`, `:906` |
+   | `ANDROID_APP_BUNDLE` | `true` for an `.aab`, otherwise `.apk` | `:770` |
+
+   That is the whole contract. **No keystore variables reach the Editor** on this path: Android
+   signing is a post-build host step (`scripts/android/sign_android_build.sh`, invoked from
+   `unity-build-android.yml:348`), so a `PlayerBuilder` that reads `ANDROID_KEYSTORE*` finds nothing.
+   The template also exits non-zero when `BuildPipeline.BuildPlayer` reports a failed result —
+   necessary because Unity started with `-quit` otherwise exits 0 on a failed build.
 
 2. **Point the lane at this package instead**, by setting the repository variable
    `UNITY_BUILD_METHOD` to `Company.BuildPipeline.Editor.BuildCommand.Execute`. It flows through

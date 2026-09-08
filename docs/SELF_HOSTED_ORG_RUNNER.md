@@ -58,7 +58,7 @@ The self-hosted lane runs Unity directly; there is no container. Verified agains
 |---|---|---|
 | Unity Editor installed at the Hub default path | `C:\Program Files\Unity\Hub\Editor\<UNITY_VERSION>\Editor\Unity.exe`, or the fallback `C:\Program Files\Unity <UNITY_VERSION>\Editor\Unity.exe` | `:794`, `:797` — anything else is a hard error at `:800` |
 | The **exact** Editor version the project pins | `UNITY_VERSION` comes from the consumer's `ProjectSettings/ProjectVersion.txt`; a different installed version fails the path check | resolver → `inputs.unity-version` |
-| A `PlayerBuilder.Build` method in the project | `-buildTarget` only switches the active target; an `-executeMethod` that calls `BuildPipeline.BuildPlayer` is what produces a build. When `build-method` is empty the lane substitutes `PlayerBuilder.Build` | `:842-843` (Windows), `:903` (bash) |
+| A `PlayerBuilder.Build` method in the project | `-buildTarget` only switches the active target; an `-executeMethod` that calls `BuildPipeline.BuildPlayer` is what produces a build. When `build-method` is empty the lane substitutes `PlayerBuilder.Build`. Copy [`templates/PlayerBuilder.cs`](../templates/PlayerBuilder.cs) if the project has none | `:842-843` (Windows), `:903` (bash) |
 | An `AddressableBuilder.Build` method, if you build Addressables | The Addressables-only path calls it directly | `:806` |
 | Unity activated once through Unity Hub | The local lane never touches `UNITY_LICENSE` / `UNITY_EMAIL` / `UNITY_PASSWORD` | activation step is skipped for `build-engine=local` |
 | Git and Git LFS on `PATH` | `actions/checkout` needs them | — |

@@ -11,6 +11,30 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 ## [Unreleased]
 
 ### Added
+- **`templates/PlayerBuilder.cs`** — a working reference implementation of the build entry point the
+  self-hosted lanes require. `docs/ADD_NEW_PROJECT.md` previously ended that section with "There is
+  no reference implementation in this repository; copy one from a project that already builds with
+  this toolkit", which left the one mandatory project-side piece as an exercise.
+
+  It reads the real contract and nothing else — `BUILD_OUTPUT_DIR` (always `build`) and
+  `ANDROID_APP_BUNDLE` — builds the enabled `EditorBuildSettings` scenes for
+  `EditorUserBuildSettings.activeBuildTarget`, names the output per target (`.aab`/`.apk`, `.exe`,
+  extensionless Linux, `.app`, WebGL directory), and **exits non-zero when
+  `BuildPipeline.BuildPlayer` reports a failed result** — necessary because an Editor started with
+  `-quit` otherwise exits 0 on a failed build, which is how a red build reaches CI as a green one.
+
+### Fixed
+- **`docs/ADD_NEW_PROJECT.md` promised Android keystore variables that never arrive.** Its
+  `PlayerBuilder` sketch said `ANDROID_KEYSTORE`, `ANDROID_KEYSTORE_PASS`, `ANDROID_KEYALIAS_NAME`
+  and `ANDROID_KEYALIAS_PASS` "are also supplied for Android". On this path they are not:
+  `reusable-build-platform.yml` passes only `ANDROID_APP_BUNDLE` (`:770`) and `BUILD_OUTPUT_DIR`,
+  and signing happens after the build on the host (`scripts/android/sign_android_build.sh`, invoked
+  from `unity-build-android.yml:348`). A `PlayerBuilder` written against that sketch would read
+  empty strings and silently produce an unsigned build.
+
+- **The same document still described the docker lane as needing a consumer `PlayerBuilder`.** Its
+  entry-point table now matches `ARCHITECTURE.md`: docker/game-ci uses game-ci's own builder, and
+  only the self-hosted lanes substitute `PlayerBuilder.Build`.
 - **`docs/SELF_HOSTED_ORG_RUNNER.md`** — how to register your own machine as an
   *organization* runner and route this toolkit's builds to it. Covers the org registration token,
   runner groups and repository access, `RUNNER_TYPE`/`BUILD_ENGINE`/`RUNNER_LABELS` set at org or
