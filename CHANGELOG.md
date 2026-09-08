@@ -10,6 +10,27 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+- **`docs/NEW_PROJECT_END_TO_END.md`** — the guide that did not exist: one ordered pass from an
+  empty Unity repository to a green build, and from there to building on your own machine. Repo
+  requirements, the caller workflow, the three Unity secrets and why all three are needed, the first
+  dispatch, what the artifacts are called, the optional variables with their real defaults, then the
+  runner setup, then troubleshooting keyed to the errors this toolkit actually emits.
+
+  It opens by choosing between the two consumption paths, because they **do not use the same Docker
+  images** and that is not obvious anywhere else: the `unity-pipeline.yml` path builds through
+  `game-ci/unity-builder@v5`, or `docker run unityci/editor:ubuntu-<version>-<variant>-3` on a
+  self-hosted Windows runner (`reusable-build-platform.yml:642`). It never touches this
+  organization's `ghcr.io/<org>/unity-editor` images — only the `unity-build.yml` workflows do, via
+  the `resolve-unity-image` action. A new project on the recommended path therefore needs no
+  published image at all.
+
+  Also records, in one place, the traps found while verifying the toolkit this cycle: `toolkit-ref`
+  must match the `uses:` ref; a green run can still mean an empty artifact; `RUNNER_LABELS` left
+  empty falls back to `self-hosted,windows` whatever the machine's OS; a `unity` runner label is not
+  required; and a self-hosted runner on a public repository lets fork pull requests execute code on
+  your machine.
+
 ### Fixed
 - **Image build jobs were labelled by an input that names neither case.** `build-unity-image.yml`
   used `name: Build ${{ inputs.image-variant || 'all' }} image`, so a dispatch without a variant
