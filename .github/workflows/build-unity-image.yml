@@ -1,5 +1,17 @@
 name: Build Unity Docker Image
 
+# Two triggers, two different jobs of work:
+#
+#   push to main (docker/** or this file)
+#       Validation only — build ONE variant, smoke-test it, scan it, publish
+#       nothing. A push carries no `inputs`, so it can never be a deliberate
+#       release, and rebuilding all three variants to throw them away cost
+#       roughly 55 runner-minutes per merge.
+#
+#   workflow_dispatch
+#       The publishing path. Builds the requested variant (or all three) and
+#       pushes, unless push-image is set to false.
+#
 on:
   push:
     branches: [main]
@@ -33,6 +45,13 @@ env:
   REGISTRY: ghcr.io
   IMAGE_REPO: ${{ github.repository_owner }}/unity-editor
 
+# A later push to main supersedes an earlier one; there is no value in
+# finishing a validation build for a commit that is already history. Dispatches
+# are never cancelled — each one is deliberate.
+concurrency:
+  group: build-unity-image-${{ github.event_name }}-${{ github.ref }}-${{ inputs.image-variant || 'all' }}-${{ inputs.unity-version || 'default' }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   build-image:
     name: Build ${{ inputs.image-variant || 'all' }} image
@@ -45,7 +64,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ inputs.image-variant && fromJson(format('["{0}"]', inputs.image-variant)) || fromJson('["android","webgl","linux"]') }}
+        # Dispatch with a variant → that one. Dispatch without → all three.
+        # Validation push → android only; it exercises the shared toolkit layer
+        # and the entrypoint, which is what a docker/** change can break.
+        variant: ${{ inputs.image-variant && fromJson(format('["{0}"]', inputs.image-variant)) || (github.event_name == 'push' && fromJson('["android"]') || fromJson('["android","webgl","linux"]')) }}
 
     steps:
       - name: Checkout repository
@@ -62,6 +84,38 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A condition of the form "input != false" reads as "unless told
+      # otherwise", but on a push event `inputs` is empty, an absent input is
+      # null, null loosely equals false in GitHub expressions, and the whole
+      # condition evaluates false. That is why validation runs silently skipped
+      # the vulnerability scan as well as the push while reporting success.
+      # Resolve both flags explicitly instead.
+      - name: Resolve run flags
+        id: flags
+        shell: bash
+        env:
+          EVENT:   ${{ github.event_name }}
+          IN_PUSH: ${{ inputs.push-image }}
+          IN_SCAN: ${{ inputs.run-vulnerability-scan }}
+        run: |
+          set -Eeuo pipefail
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            push=false          # a push is never a release
+            scan=true           # but it should still catch a new CVE
+          else
+            push=true; [ "$IN_PUSH" = "false" ] && push=false
+            scan=true; [ "$IN_SCAN" = "false" ] && scan=false
+          fi
+          echo "push=${push}" >> "$GITHUB_OUTPUT"
+          echo "scan=${scan}" >> "$GITHUB_OUTPUT"
+          echo "event=${EVENT} publish=${push} scan=${scan}"
+          {
+            echo "### Build Unity image"
+            echo "- event: ${EVENT}"
+            echo "- publish to registry: ${push}"
+            echo "- vulnerability scan: ${scan}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Resolve Unity version
         id: unity-version
@@ -161,7 +215,7 @@ jobs:
       # Pinned to a release rather than @master: an unpinned third-party action
       # is a supply-chain risk and makes a green run unreproducible.
       - name: Scan for vulnerabilities
-        if: inputs.run-vulnerability-scan != false
+        if: steps.flags.outputs.scan == 'true'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.image-ref.outputs.repo }}:${{ steps.unity-version.outputs.unity-version }}-${{ matrix.variant }}
@@ -172,7 +226,7 @@ jobs:
           timeout: 30m
 
       - name: Upload Trivy SARIF results
-        if: inputs.run-vulnerability-scan != false && always()
+        if: steps.flags.outputs.scan == 'true' && always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results-${{ matrix.variant }}.sarif
@@ -193,7 +247,7 @@ jobs:
       # end up on a digest nothing in this run had examined.
       - name: Push image to registry
         id: push
-        if: inputs.push-image != false
+        if: steps.flags.outputs.push == 'true'
         shell: bash
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
@@ -223,7 +277,7 @@ jobs:
       # catches the failure that motivated the change: a mutable tag left
       # pointing at an older image while the run reported success.
       - name: Verify every tag resolves to the pushed digest
-        if: inputs.push-image != false
+        if: steps.flags.outputs.push == 'true'
         shell: bash
         env:
           TAGS:   ${{ steps.meta.outputs.tags }}
@@ -244,7 +298,7 @@ jobs:
           exit $rc
 
       - name: Publish image manifest
-        if: inputs.push-image != false
+        if: steps.flags.outputs.push == 'true'
         shell: bash
         env:
           IMAGE_REPO_LOWER: ${{ steps.image-ref.outputs.repo }}
@@ -272,7 +326,7 @@ jobs:
           cat "$MANIFEST_FILE"
 
       - name: Upload image manifest artifact
-        if: inputs.push-image != false
+        if: steps.flags.outputs.push == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: image-manifest-${{ matrix.variant }}-${{ steps.unity-version.outputs.unity-version }}
