@@ -149,8 +149,14 @@ consistent across them:
 
 | Lane | Entry point | Where it comes from |
 |---|---|---|
-| Docker / game-ci and self-hosted — Android, WebGL, Windows, Linux, and the pipeline's `Build iOS` job | `PlayerBuilder.Build`, **implemented by the consuming project** | `reusable-build-platform.yml` `BUILD_METHOD` default (`:872`; `:812` for the Windows variant), overridable via the `build-method` input / `UNITY_BUILD_METHOD` repo variable |
+| **Docker / game-ci** — the default for Android, WebGL, Linux, and the pipeline's `Build iOS` job | **game-ci's own default builder.** No consumer method is required | `reusable-build-platform.yml:146` — `build-method` defaults to `''`, and `:574` passes it straight through as `buildMethod`. Empty means game-ci decides. Set the `build-method` input or the `UNITY_BUILD_METHOD` repo variable to override |
+| **Self-hosted** (Windows and Linux/macOS local-engine lanes) | `PlayerBuilder.Build`, **implemented by the consuming project** | Hardcoded fallback: `reusable-build-platform.yml:843` (Windows `.bat`) and `:903` (bash) substitute `PlayerBuilder.Build` when `build-method` is empty |
 | iOS native — `unity-build-ios.yml`, `unity-release-ios.yml` | `Company.BuildPipeline.Editor.BuildCommand.Execute`, from this package | `scripts/ios/run_unity_ios.sh:46`, `readonly`, **not overridable** |
+
+A project that only ever builds on the docker lane therefore needs **no** `PlayerBuilder` — the
+consumer `Cuvara/IndieRPGMMOAdventure` sets `BUILD_ENGINE=docker` and no `UNITY_BUILD_METHOD`, so
+its own `PlayerBuilder.cs` is never the method game-ci invokes. Provide one before moving a build to
+a self-hosted runner.
 
 `reusable-build-platform.yml` never invokes `scripts/ios/run_unity_ios.sh`, so the two iOS routes do
 not share an entry point and `UNITY_BUILD_METHOD` has no effect on the native one. Resolving this

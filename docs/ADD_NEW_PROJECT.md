@@ -1,5 +1,17 @@
 # Adding a New Project
 
+> **Which onboarding guide do I want?** There are two, and they wire up different
+> workflows:
+>
+> | Guide | Calls | Use when |
+> |---|---|---|
+> | **[CONSUMER\_SETUP.md](CONSUMER_SETUP.md)** | `unity-pipeline.yml` | **Default.** Branch-based CI on `develop`/`staging`/`release-*`, per-platform jobs, Repository Variables for configuration. No `BuildConfig/` needed. |
+> | **This file** | `unity-build.yml` | You want one explicit build per caller job with `target-platform` / `test-level` / `cache-mode` inputs, and you are supplying `BuildConfig/*.json` yourself. Also the reference for writing `PlayerBuilder` and for the iOS lane. |
+>
+> `BuildConfig/` is required for the flow described here. It is **not** read by
+> `unity-pipeline.yml` or `reusable-build-platform.yml` — verified: zero references
+> in either file — so a project on the CONSUMER_SETUP path does not need it.
+
 This guide walks through integrating a new Unity project as a **consumer** of the `unity-build-workflows` toolkit. As a consumer, you provide:
 
 1. Your Unity project
@@ -253,8 +265,8 @@ jobs:
 
 > **`<ref>` / `<WORKFLOW_REF>` values:**
 > - **Development / pre-release:** use `@main` to track the latest toolkit changes, or pin to a specific commit SHA for reproducibility.
-> - **Stable release:** use an exact published tag (e.g. `@vX.Y.Z`) — **no tags have been published yet**; check [CHANGELOG.md](../CHANGELOG.md) and the repository Releases page for the first available tag.
-> - A floating `@vMAJOR` tag (e.g. `@v2`) does not exist yet — will be created alongside the first stable release of that major version.
+> - **Stable release:** use an exact published tag — the latest is `@v2.2.1`; see [CHANGELOG.md](../CHANGELOG.md) and the repository Releases page.
+> - `@v2` is the floating major tag and moves with each `v2.x.y` release. `@v1` is frozen at `v1.1.3` and receives no further releases.
 >
 > **Toolkit checkout:** The reusable workflow internally checks out the toolkit repository to access shared scripts and actions. Your project repository is also checked out in the correct workspace. No additional setup is needed in your caller workflow.
 
