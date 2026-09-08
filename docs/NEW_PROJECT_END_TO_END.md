@@ -84,26 +84,42 @@ requests against them now build; `workflow_dispatch` gives you manual control.
 
 ## 3 — Secrets
 
-Three, and the docker lane needs **all three together** — this is Unity's
-`personal-combined` activation:
+The pipeline path needs **either** a `.ulf` **or** account credentials — not
+necessarily both. That is what `validate-license` enforces
+(`unity-pipeline.yml:487-490`):
+
+```
+Need: (UNITY_EMAIL+UNITY_PASSWORD) or (UNITY_LICENSE)
+```
+
+Measured, not inferred: `Cuvara/IndieRPGMMOAdventure` builds Android and WebGL
+green on this toolkit with **`UNITY_LICENSE` alone** — its only other secret is
+`DISCORD_WEBHOOK_URL` (run `34189744276`, 45m17s, `Build Android` and
+`Build WebGL` both `success`).
 
 ```bash
 REPO="YOUR_ORG/YOUR_REPO"
+
+# Simplest working setup — a .ulf and nothing else:
+gh secret set UNITY_LICENSE  --repo "$REPO" < /path/to/Unity_lic.ulf
+
+# Or account activation instead, with no .ulf:
 gh secret set UNITY_EMAIL    --repo "$REPO"
 gh secret set UNITY_PASSWORD --repo "$REPO"
-gh secret set UNITY_LICENSE  --repo "$REPO" < /path/to/Unity_lic.ulf
 ```
 
-`UNITY_LICENSE` is the **raw `.ulf` XML** — do not base64-encode it. The
-workflow interface marks all three `required: false`
-(`unity-pipeline.yml:125-134`) because other lanes do not need them; on the
-docker lane, omitting any one of them fails activation:
+`UNITY_LICENSE` is the **raw `.ulf` XML** — do not base64-encode it. All three
+are declared `required: false` (`unity-pipeline.yml:125-134`); the job above is
+what actually rejects an empty combination.
 
-| What you provide | Failure |
-|---|---|
-| `.ulf` only | `TimeStamp validation failed` |
-| credentials only | `0 entitlements` |
-| all three | activation succeeds |
+**When you do need all three.** Set the `.ulf` *and* the credentials together if
+your `.ulf` cannot activate offline — a Unity **Personal** licence bound to a
+different machine id fails with `TimeStamp validation failed`, and credentials
+alone fail with `0 entitlements`. That combination is the `personal-combined`
+strategy described in
+[UNITY_PERSONAL_DOCKER_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md), and it is
+also what the toolkit's **own** container entrypoint requires on Path B. Start
+with the `.ulf` alone; add credentials if activation fails.
 
 Optional: `DISCORD_WEBHOOK_URL` for build-completion embeds — absent means the
 notification step is a no-op, not an error.

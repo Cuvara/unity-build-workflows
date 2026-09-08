@@ -32,6 +32,25 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   your machine.
 
 ### Fixed
+- **The onboarding docs demanded three Unity secrets where the pipeline needs one.**
+  `CONSUMER_SETUP.md` and `NEW_PROJECT_END_TO_END.md` both stated that `UNITY_EMAIL`,
+  `UNITY_PASSWORD` and `UNITY_LICENSE` "must be set together", quoting the `personal-combined`
+  failure table. The pipeline's own gate says otherwise (`unity-pipeline.yml:487-490`):
+
+  ```
+  Need: (UNITY_EMAIL+UNITY_PASSWORD) or (UNITY_LICENSE)
+  ```
+
+  And it is not just the code: `Cuvara/IndieRPGMMOAdventure` builds Android and WebGL green on this
+  toolkit with **`UNITY_LICENSE` as its only Unity secret** — run `34189744276`, 45m17s, both build
+  jobs `success`, with `DISCORD_WEBHOOK_URL` the only other secret in the repository. The
+  requirement was carried over from the toolkit's own container entrypoint on the `unity-build.yml`
+  path, where it does hold, and applied to a path that delegates activation to
+  `game-ci/unity-builder`.
+
+  Both documents now lead with "a `.ulf` **or** credentials", show the one-secret setup first, and
+  keep the all-three case where it belongs: a `.ulf` that cannot activate offline.
+
 - **`6000.0.26f1-android`'s mutable tag pointed at a superseded image; rebuilt.** It resolved to the
   image from run 39 while run 42 had published `-42`, so `docker pull ...:6000.0.26f1-android`
   returned neither the newest build nor the one that had been scanned. Rebuilt under the corrected
