@@ -10,6 +10,40 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+- **The consumer caller template pinned the workflow at `@v2` but the toolkit scripts at `v1`.**
+  `templates/consumer-unity-build.yml` carried `toolkit-ref: 'v1'` next to
+  `uses: ...unity-pipeline.yml@v2` — a combination its own comment and
+  `docs/CONSUMER_SETUP.md` Step 2 both forbid. `v1` is frozen at `v1.1.3`, so every new repository
+  copying the template ran v2 workflows against v1 scripts. Introduced by the 2.2.1 release edits,
+  which repointed `uses:` and the comments but missed `toolkit-ref`.
+
+- **`BUILD_CLEAN` could not take effect through the caller template.** The template declared
+  `clean-build` as `type: boolean, default: false` while `unity-pipeline.yml` takes a tri-state
+  string (`auto|true|false`, default `auto`, where `auto` defers to the `BUILD_CLEAN` repo
+  variable). `${{ inputs.clean-build || false }}` resolved to `"false"` on every push and pull
+  request, so `auto` was unreachable and the documented variable did nothing. It is now a choice
+  input defaulting to `auto`.
+
+- **`docs/CONSUMER_SETUP.md` Step 4 omitted `Windows64`** from the staging and release platform
+  defaults, contradicting both `resolve_build_flow.sh:230-231` and the "What You Get" table in the
+  same file. It also taught the deprecated ungrouped variable names
+  (`DEVELOP_BUILD_PLATFORMS`, `DEVELOP_RUN_TESTS`, `DEFAULT_RUNNER_MODE`); it now uses the current
+  grouped names and states that legacy names still resolve as a fallback.
+
+- **`docs/ARCHITECTURE.md` named the wrong entry point for the default build lane.** It said the
+  docker/game-ci lane runs `PlayerBuilder.Build` "implemented by the consuming project", citing
+  `:872` and `:812` — line numbers that point at the macOS Unity-binary lookup and the Windows
+  Addressables block. In fact `build-method` defaults to `''` (`:146`) and is passed straight to
+  game-ci (`:574`), which means game-ci's own builder; the `PlayerBuilder.Build` fallback exists
+  only in the self-hosted lanes (`:843`, `:903`). A docker-only project needs no `PlayerBuilder`.
+  `CLAUDE.md` repeated the same error and is corrected too.
+
+- **`docs/ADD_NEW_PROJECT.md` still said no tags were published** and that `@v2` did not exist.
+  Both guides now open by stating which workflow they wire up, so it is clear that
+  `CONSUMER_SETUP.md` (→ `unity-pipeline.yml`, no `BuildConfig/`) is the default path and
+  `ADD_NEW_PROJECT.md` (→ `unity-build.yml`, `BuildConfig/` required) is the explicit-build path.
+
 ### Changed
 - **`LICENSE` copyright holder is now `Cuvara`**, not `BuzzelStudio` — the original studio, left
   over from before the repository changed hands. The MIT terms themselves are untouched; only the

@@ -10,6 +10,12 @@ repository. After following these steps your project will have:
 - Discord build notifications (optional)
 - Proper GitHub Environment gating so production secrets never reach PR runs
 
+> **This is the default onboarding path** — it wires up `unity-pipeline.yml`
+> (branch-based CI, per-platform jobs, Repository Variables) and needs no
+> `BuildConfig/`. If you instead want one explicit build per caller job with
+> `target-platform` / `test-level` / `cache-mode` inputs and your own
+> `BuildConfig/*.json`, follow [ADD\_NEW\_PROJECT.md](ADD_NEW_PROJECT.md).
+
 Related docs:
 - [BRANCH\_FLOW\_CONTRACT.md](BRANCH_FLOW_CONTRACT.md) — branch → flow rules and Repository Variables reference
 - [GITHUB\_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md) — environment protection rules, deployment hygiene
@@ -154,31 +160,45 @@ workflow file. All are optional — hardcoded defaults apply when unset.
 REPO="YOUR_ORG/YOUR_REPO"
 
 # Platform lists per branch (comma-separated, no spaces)
-# Defaults: develop=Android,WebGL  staging=Android,WebGL,Linux64,LinuxServer
-#           release=Android,WebGL,Linux64,LinuxServer
-gh variable set DEVELOP_BUILD_PLATFORMS  --repo "${REPO}" --body "Android,WebGL"
-gh variable set STAGING_BUILD_PLATFORMS  --repo "${REPO}" --body "Android,WebGL,Linux64,LinuxServer"
-gh variable set RELEASE_BUILD_PLATFORMS  --repo "${REPO}" --body "Android,WebGL,Linux64,LinuxServer"
+# Defaults, from scripts/common/resolve_build_flow.sh:
+#   develop = Android,WebGL
+#   staging = Android,WebGL,Linux64,LinuxServer,Windows64
+#   release = Android,WebGL,Linux64,LinuxServer,Windows64
+gh variable set BUILD_DEVELOP_PLATFORMS  --repo "${REPO}" --body "Android,WebGL"
+gh variable set BUILD_STAGING_PLATFORMS  --repo "${REPO}" --body "Android,WebGL,Linux64,LinuxServer,Windows64"
+gh variable set BUILD_RELEASE_PLATFORMS  --repo "${REPO}" --body "Android,WebGL,Linux64,LinuxServer,Windows64"
 
 # Test toggles per branch (default: true for all)
-gh variable set DEVELOP_RUN_TESTS  --repo "${REPO}" --body "true"
-gh variable set STAGING_RUN_TESTS  --repo "${REPO}" --body "true"
-gh variable set RELEASE_RUN_TESTS  --repo "${REPO}" --body "true"
+gh variable set TEST_DEVELOP_ENABLED  --repo "${REPO}" --body "true"
+gh variable set TEST_STAGING_ENABLED  --repo "${REPO}" --body "true"
+gh variable set TEST_RELEASE_ENABLED  --repo "${REPO}" --body "true"
 
 # Addressables toggles per branch (default: false for develop/staging, true for release)
-gh variable set DEVELOP_BUILD_ADDRESSABLES  --repo "${REPO}" --body "false"
-gh variable set STAGING_BUILD_ADDRESSABLES  --repo "${REPO}" --body "false"
-gh variable set RELEASE_BUILD_ADDRESSABLES  --repo "${REPO}" --body "true"
+gh variable set ADDRESSABLES_DEVELOP_ENABLED  --repo "${REPO}" --body "false"
+gh variable set ADDRESSABLES_STAGING_ENABLED  --repo "${REPO}" --body "false"
+gh variable set ADDRESSABLES_RELEASE_ENABLED  --repo "${REPO}" --body "true"
 
 # Default runner mode (default: docker)
-gh variable set DEFAULT_RUNNER_MODE  --repo "${REPO}" --body "docker"
+gh variable set RUNNER_DEFAULT_MODE  --repo "${REPO}" --body "docker"
+
+# Clean Library cache before building (default: false; the caller's clean-build
+# input defaults to `auto`, which defers to this variable)
+gh variable set BUILD_CLEAN  --repo "${REPO}" --body "false"
 
 # Discord thread ID (optional — pin notifications to a specific forum thread)
 gh variable set DISCORD_THREAD_ID  --repo "${REPO}" --body "1234567890123456789"
 ```
 
-For the full variable reference and validation rules, see
-[BRANCH\_FLOW\_CONTRACT.md](BRANCH_FLOW_CONTRACT.md).
+> **These are the current, grouped variable names** (`BUILD_*`, `TEST_*`,
+> `ADDRESSABLES_*`, `RUNNER_*`). The older ungrouped names —
+> `DEVELOP_BUILD_PLATFORMS`, `DEVELOP_RUN_TESTS`, `DEFAULT_RUNNER_MODE`, … — are
+> deprecated but still honoured: the resolver reads a legacy name only when the new
+> one is unset, and logs a note naming the replacement. Use the new names in a new
+> repository.
+
+For the full variable reference, the legacy → new migration table, and validation
+rules, see [BRANCH\_FLOW\_CONTRACT.md](BRANCH_FLOW_CONTRACT.md) and
+[REPOSITORY\_VARIABLES.md](REPOSITORY_VARIABLES.md).
 
 ---
 
