@@ -153,8 +153,8 @@ jobs:
 
 > **Choosing `<ref>`:**
 > - Development / pre-release: `@main` (tracks latest) or `@<commit-sha>` (pinned)
-> - Stable release: use an exact released tag (e.g. `@vX.Y.Z`) — **no tags have been published yet**; check [CHANGELOG.md](CHANGELOG.md) and the repository Releases page for the first published tag.
-> - A floating `@vMAJOR` tag (e.g. `@v2`) is published only after the first stable release of that major version. It does not yet exist — do not reference it until announced.
+> - Stable release: use an exact released tag (e.g. `@vX.Y.Z`) — the latest is `@v2.2.1`; see [CHANGELOG.md](CHANGELOG.md) and the repository Releases page.
+> - A floating `@vMAJOR` tag tracks the newest release of that major version. `@v2` is published and moves with each `v2.x.y` release; `@v1` is frozen at `v1.1.3` and receives no further updates.
 
 The executor (Docker or macOS) is selected automatically from `target-platform`. No `executor-mode` input exists.
 
@@ -260,9 +260,11 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@a
 uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@vX.Y.Z
 ```
 
-> **No floating major-version tags exist yet** (e.g. `@v2`). Floating major tags will be published alongside stable releases. Until then, use `@main` for development or an exact SHA/tag for reproducibility.
+> **`@v2` is the current floating major tag**, repointed at each `v2.x.y` release. `@v1` is
+> frozen at `v1.1.3`. Use `@main` for development, `@v2` to track stable, or an exact SHA/tag
+> for full reproducibility.
 >
-> To create release tags (run when ready to ship — NOT executed yet):
+> Release tags are created by hand:
 > ```bash
 > git tag vX.Y.Z && git push origin vX.Y.Z           # e.g. git tag v2.0.0
 > git tag -f vMAJOR && git push -f origin vMAJOR     # e.g. git tag -f v2 — only after first vMAJOR.x.x tag
@@ -270,7 +272,7 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@v
 
 Major version increments indicate breaking changes to the workflow input interface.
 
-Current version: **2.2.0** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **2.2.1** — see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -408,10 +410,10 @@ git push
 ```
 
 The caller workflow (`consumer-unity-build.yml`) uses a single
-`uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v1`
+`uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2`
 call with `secrets: inherit` — no per-secret wiring, no build scripts to copy.
 
-**Pin the version**: `@v1` (latest stable, auto-fixes) or `@v1.2.0` (exact) for
+**Pin the version**: `@v2` (latest stable, auto-fixes) or `@v2.2.1` (exact) for
 production; `@main` only for development. Keep `toolkit-ref:` set to the same
 ref. See [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md).
 

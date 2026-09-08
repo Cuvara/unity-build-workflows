@@ -10,7 +10,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [2.2.1] — 2026-09-08
+
 ### Fixed
+- **`Unity Release` announced a production release on this repository's own tags, having built
+  nothing.** `pre-release-checks` carries `if: github.repository != 'Cuvara/unity-build-workflows'`
+  — the toolkit repo is not a Unity project, so the gates and every build job that needs them skip
+  correctly. `notify` was `if: always()`, so it alone survived and posted a Discord embed with
+  `environment: production`, `status: skipped`, and an empty build-version and platform. It now
+  also requires that the gates actually ran.
+
+  This is what the ten failed `production` deployments dated 2026-06-30 to 2026-07-13 were the tail
+  of. Their own cause — `image-digest is required for production releases` on tag-push — was fixed
+  in `4bdf851`, and the repository guard in `ee9a822` stopped the chain from running here at all;
+  the misleading notification was the last piece still firing.
 - **`Final Report` — a required check on consumers' `develop` — passed a pipeline whose tests had
   failed, and passed a cancelled one.** Two defects, either of which turns a red run green.
 
@@ -136,6 +153,22 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 - **`@v2` / `@v2.0.0` tag claims** — All references claiming a specific version tag (e.g. `@v2`, `@v2.0.0`, `@v2.1.0`) is currently valid have been corrected. No version tags have been published yet. Documentation now distinguishes `@main` (dev), exact SHA (pinned), and `@vX.Y.Z` (stable — use once a release is published).
 - **Package ID / UPM path** — `com.example.build-pipeline` was incorrectly used; corrected to `com.company.build-pipeline` (the canonical, intentionally neutral identifier). UPM path corrected to `/unity-package/Packages/com.company.build-pipeline#<WORKFLOW_REF>` (verified against on-disk structure).
 - **Registry namespace** — Image references now use `ghcr.io/<IMAGE_NAMESPACE>/unity-builder` (configurable via `--image-namespace`) rather than a hardcoded org name.
+
+### Changed
+
+- **The git tag series now matches this changelog.** Tags and GitHub releases had run on a `v1.x`
+  series (latest `v1.1.3`) while `VERSION`, `README.md` and this file documented `2.2.0` — two
+  version numbers for one commit. Tags are the series consumers pin, so the tags move to the
+  documented number: this release is tagged `v2.2.1`, and `@v2` is published as the floating major
+  tag.
+
+  **`@v1` is frozen at `v1.1.3` and receives no further releases.** Consumers pinned to `@v1` or
+  `@v1.x` keep building against that commit until they repin to `@v2`. Every shipped pin — the
+  `templates/`, `examples/` and `docs/CONSUMER_SETUP.md` references — now reads `@v2`.
+
+- **`unity-package/.../package.json` bumped `1.1.3` → `2.2.1`** to stay aligned with the tag that
+  carries it, since the UPM pin is a tag reference (`?path=…#<tag>`). The `v1.1.3` tag is untouched,
+  so an existing `#v1.1.3` pin keeps resolving.
 
 ---
 

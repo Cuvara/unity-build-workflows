@@ -340,7 +340,11 @@ jobs:
   notify:
     name: Discord Notification
     needs: [pre-release-checks, release-test, release-build, create-github-release]
-    if: always()
+    # always(), but not when the gates never ran. pre-release-checks is skipped
+    # on the toolkit repo itself (it is not a Unity project), which skips every
+    # build job with it — announcing a production release that was never
+    # attempted, with an empty version and platform, is worse than silence.
+    if: always() && needs.pre-release-checks.result != 'skipped'
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
