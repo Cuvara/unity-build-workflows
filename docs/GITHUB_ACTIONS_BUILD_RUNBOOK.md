@@ -361,7 +361,7 @@ gh run download <RUN_ID> \
 
 ## 6. Rebuilding Docker Images
 
-Docker images are hosted at `ghcr.io/dycuong03/unity-editor:<version>-<variant>`.
+Docker images are hosted at `ghcr.io/cuvara/unity-editor:<version>-<variant>`.
 Rebuild whenever the Unity version changes or the `docker/` directory is modified.
 
 Image build workflow: `build-unity-image.yml` in the toolkit repo.

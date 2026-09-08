@@ -326,7 +326,7 @@ for full setup instructions, secret commands, and a troubleshooting table.
 
 ## Docker Image Variants
 
-Images are published to `ghcr.io/dycuong03/unity-editor:<version>-<variant>`.
+Images are published to `ghcr.io/cuvara/unity-editor:<version>-<variant>`.
 
 | Variant | Build targets | Image suffix |
 |---|---|---|

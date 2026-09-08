@@ -17,7 +17,7 @@ Before upgrading, or when diagnosing a broken build, check three sources:
 |---|---|---|
 | Project version (truth) | `ProjectSettings/ProjectVersion.txt` | `m_EditorVersion: <version>` |
 | Toolkit default | `unity-build-workflows/config/unity-build-defaults.json` | `"unityVersion": "<version>"` |
-| Docker image tag | `ghcr.io/dycuong03/unity-editor:<version>-<variant>` | Check GHCR packages page |
+| Docker image tag | `ghcr.io/cuvara/unity-editor:<version>-<variant>` | Check GHCR packages page |
 
 **How the build fails on mismatch:** The CI workflow resolves the Unity version
 from the consumer's `build.yml` (`unity-version` input, currently hard-coded to
@@ -95,7 +95,7 @@ File: `unity-build-workflows/config/unity-build-defaults.json`
   "unityChangeset": "<NEW_CHANGESET>",
   "imageVariants": ["android", "webgl", "linux"],
   "registry": "ghcr.io",
-  "imageNamespace": "dycuong03/unity-editor"
+  "imageNamespace": "cuvara/unity-editor"
 }
 ```
 
@@ -106,7 +106,7 @@ Example for a hypothetical upgrade to `6000.0.47f1`:
   "unityChangeset": "abcdef123456",
   "imageVariants": ["android", "webgl", "linux"],
   "registry": "ghcr.io",
-  "imageNamespace": "dycuong03/unity-editor"
+  "imageNamespace": "cuvara/unity-editor"
 }
 ```
 
@@ -173,7 +173,7 @@ NEW_VERSION="<NEW_VERSION>"
 
 # List tags for the unity-editor package
 gh api \
-  /users/dycuong03/packages/container/unity-editor/versions \
+  /orgs/Cuvara/packages/container/unity-editor/versions \
   --jq '.[] | {tags: .metadata.container.tags, digest: .name}' \
   | grep -A2 "${NEW_VERSION}"
 ```

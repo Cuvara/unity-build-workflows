@@ -97,7 +97,7 @@ it is dispatch-only.
 ### Unity version SSOT
 
 The consumer's `ProjectSettings/ProjectVersion.txt` is authoritative. `config/unity-build-defaults.json`
-(currently `6000.0.26f1`, namespace `dycuong03/unity-editor`) is only the fallback. A workflow that
+(currently `6000.0.26f1`, namespace `cuvara/unity-editor`) is only the fallback. A workflow that
 hardcodes a Unity version is a bug.
 
 ## Constraints the test suite enforces
