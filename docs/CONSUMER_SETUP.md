@@ -249,6 +249,12 @@ git push
 If you do **not** use Addressables, skip this step entirely and keep
 `build-addressables=false` (the default).
 
+> **Moving builds to your own runner later?** The self-hosted lanes also need a
+> `PlayerBuilder.Build` method, which the default docker lane does not.
+> [`templates/PlayerBuilder.cs`](../templates/PlayerBuilder.cs) is a working
+> implementation — drop it in the same Editor assembly. See
+> [SELF\_HOSTED\_ORG\_RUNNER.md](SELF_HOSTED_ORG_RUNNER.md).
+
 ---
 
 ## Step 6: Configure GitHub Environments
