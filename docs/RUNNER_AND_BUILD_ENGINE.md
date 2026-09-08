@@ -124,6 +124,11 @@ option** for Personal licenses too — it's just more setup.
 
 ## Registering a self-hosted Windows runner
 
+> Registering at the **organization** level instead (one runner serving several
+> repos, granted through a runner group) is covered in
+> [SELF_HOSTED_ORG_RUNNER.md](SELF_HOSTED_ORG_RUNNER.md), together with the
+> public-repository risks that setup carries.
+
 1. Provision a Windows machine, install Unity Hub + the required Editor
    version/modules, Git, and Git LFS. Activate Unity once via Unity Hub. Full
    step-by-step in [SELF_HOSTED_WINDOWS_RUNNER.md](SELF_HOSTED_WINDOWS_RUNNER.md).

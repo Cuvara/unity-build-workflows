@@ -15,6 +15,11 @@
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASS, ANDROID_KEY_ALIAS,
 #   ANDROID_KEY_PASS       — Android release signing (production only)
 #
+# Building on your own machine instead of GitHub-hosted runners: leave the
+# runner inputs blank here and set the RUNNER_TYPE / BUILD_ENGINE /
+# RUNNER_LABELS variables, or pass them per run. The self-hosted lane requires
+# a PlayerBuilder.Build method in the project — see docs/SELF_HOSTED_ORG_RUNNER.md.
+#
 # See docs/CONSUMER_SETUP.md for the full onboarding walkthrough.
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -64,11 +69,31 @@ on:
         options: [auto, manual-license, account, serial, preactivated, none]
 
       runner-mode:
-        description: "Execution lane"
+        description: "Legacy single-axis lane selector (prefer runner-type + build-engine below)"
         required: false
         default: docker
         type: choice
-        options: [docker, self-hosted-windows, auto]
+        options: [docker, self-hosted-windows, self-hosted-macos, auto]
+
+      runner-type:
+        description: "WHERE the job runs (blank = repo/org variable RUNNER_TYPE, else github-hosted)"
+        required: false
+        default: ''
+        type: choice
+        options: ['', github-hosted, self-hosted]
+
+      build-engine:
+        description: "HOW Unity builds (blank = repo/org variable BUILD_ENGINE, else docker)"
+        required: false
+        default: ''
+        type: choice
+        options: ['', docker, local]
+
+      runner-labels:
+        description: "Comma-separated runs-on labels for a self-hosted runner, e.g. self-hosted,windows"
+        required: false
+        default: ''
+        type: string
 
       unity-version:
         description: "Override Unity version (leave blank to read from ProjectVersion.txt)"
@@ -126,6 +151,9 @@ jobs:
       build-addressables:   ${{ inputs.build-addressables  || false }}
       activation-strategy:  ${{ inputs.activation-strategy || 'auto' }}
       runner-mode:          ${{ inputs.runner-mode         || 'docker' }}
+      runner-type:          ${{ inputs.runner-type         || '' }}
+      build-engine:         ${{ inputs.build-engine        || '' }}
+      runner-labels:        ${{ inputs.runner-labels       || '' }}
       unity-version:        ${{ inputs.unity-version       || '' }}
       clean-build:          ${{ inputs.clean-build         || 'auto' }}
       android-export:       ${{ inputs.android-export      || 'apk' }}

@@ -54,25 +54,31 @@ The reusable workflow `reusable-build-platform.yml` routes the job to this lane
 via:
 
 ```yaml
-runs-on: [self-hosted, Windows, unity]
+runs-on: ["self-hosted", "windows"]
 ```
 
-All three labels must be present on the runner. Apply them during registration
-with the `--labels` flag:
+Those two labels are what the resolver requests, and `runs-on` requires the
+runner to carry **every** requested label. Apply them during registration:
 
 ```cmd
 .\config.cmd --url https://github.com/<org-or-user>/<repo> ^
              --token <REGISTRATION_TOKEN> ^
              --name unity-windows-runner-01 ^
-             --labels self-hosted,Windows,unity ^
+             --labels self-hosted,windows ^
              --runasservice
 ```
 
-> **Note:** GitHub automatically adds the `self-hosted` and `Windows` labels to
-> any Windows runner. You still need to pass them explicitly via `--labels` to
-> ensure the `unity` label is included in the same registration command. Verify
-> all three labels appear in
-> **Repository / Organization Settings → Actions → Runners** after registration.
+> **A `unity` label is not required.** Earlier revisions of this document asked
+> for a third `unity` label; nothing in this repository ever requests it —
+> `grep '"unity"'` over `.github/workflows/` and `scripts/` returns nothing.
+> A runner registered with the extra label still matches (extra labels are
+> harmless), so no re-registration is needed, but do not add it expecting the
+> lane to depend on it.
+>
+> The labels must equal `RUNNER_LABELS` after comma-split, trim and dedup — see
+> [RUNNER_AND_BUILD_ENGINE.md](RUNNER_AND_BUILD_ENGINE.md#registering-a-self-hosted-windows-runner).
+> To register at the **organization** level instead, see
+> [SELF_HOSTED_ORG_RUNNER.md](SELF_HOSTED_ORG_RUNNER.md).
 
 ---
 
@@ -204,17 +210,18 @@ gh workflow run unity-build.yml \
 
 ### How the reusable workflow uses the input
 
-From the contract (`reusable-build-platform.yml` internal structure):
+`runs-on` is **not** derived from `runner-mode` inside the build job. The
+resolver computes a label list and the job consumes it verbatim
+(`reusable-build-platform.yml:230`):
 
 ```yaml
-# runner selection pseudo-logic (implemented in reusable-build-platform.yml)
-runs-on: >-
-  ${{
-    inputs.runner-mode == 'self-hosted-windows' && fromJSON('["self-hosted","Windows","unity"]') ||
-    inputs.runner-mode == 'self-hosted-macos'   && fromJSON('["self-hosted","macOS","unity"]')   ||
-    'ubuntu-latest'
-  }}
+runs-on: ${{ fromJSON(inputs.runner-labels != '' && inputs.runner-labels || '["ubuntu-latest"]') }}
 ```
+
+`runner-labels` comes from `RUNNER_LABELS`, or — for the legacy
+`runner-mode: self-hosted-windows` path — from the hardcoded
+`self-hosted,windows` mapping at `resolve_build_flow.sh:538-541`. So the labels
+the job asks for are those two, not the three this document previously showed.
 
 Build step shell selection:
 
@@ -314,19 +321,24 @@ If the path is missing or wrong, see Troubleshooting §8.3.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Runner shows **Offline** in GitHub | Service stopped or machine rebooted without service | `.\svc.cmd start` (run as Administrator in runner dir) |
-| Runner shows **Idle** but job queues indefinitely | Label mismatch — runner lacks `unity` label | Re-register with `--labels self-hosted,Windows,unity`; check Settings → Actions → Runners |
-| Job error: `No runner matching the required labels` | No Windows runner with `unity` label is registered | Register runner with all three labels (§2) |
+| Runner shows **Idle** but job queues indefinitely | The runner is missing one of the requested labels, or `RUNNER_LABELS` names a label the runner does not have | Compare `RUNNER_LABELS` with the runner's registered labels; they must match after comma-split/trim/dedup |
+| Job error: `No runner matching the required labels` | No runner carries every label in `RUNNER_LABELS` | Re-register with `--labels self-hosted,windows`, or correct `RUNNER_LABELS` |
+| Job runs but produces no player | The project has no `PlayerBuilder.Build`; this lane substitutes it when `build-method` is empty (`reusable-build-platform.yml:842-843`) and `-buildTarget` alone builds nothing | Add the method, or pass `build-method` |
 
 ### 8.2 Wrong Labels
 
 Verify labels via GitHub CLI:
 
 ```bash
+# repository runner
 gh api repos/<owner>/<repo>/actions/runners --jq '.runners[] | {name: .name, labels: [.labels[].name]}'
+# organization runner
+gh api /orgs/<org>/actions/runners --jq '.runners[] | {name: .name, labels: [.labels[].name]}'
 ```
 
-If `unity` is missing, remove the runner and re-register with
-`--labels self-hosted,Windows,unity`.
+Every label in `RUNNER_LABELS` must appear in that list. If one is missing,
+either re-register with `--labels self-hosted,windows` or change
+`RUNNER_LABELS` to match what the runner already has.
 
 ### 8.3 Unity Not Found / Wrong Version
 
