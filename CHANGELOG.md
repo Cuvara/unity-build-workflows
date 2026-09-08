@@ -11,6 +11,25 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 ## [Unreleased]
 
 ### Fixed
+- **A Trivy timeout stopped an image from being published at all.** `build-unity-image.yml` ran
+  `aquasecurity/trivy-action` with no `timeout`, so it used the 5-minute default. Unity editor
+  images are tens of gigabytes, and the `6000.3.9f1-linux` build died on it in run #47 after 19m46s:
+
+  ```
+  FATAL Fatal error run error: image scan error: scan error: scan failed:
+  failed analysis: analyze error: pipeline error: context deadline exceeded
+  ```
+
+  The build, the smoke tests and the target check had all passed; only the scan timed out. Because
+  the scan sits before the push, the job failed and **no image was published** — the same variant at
+  `6000.0.26f1` had scanned fine minutes earlier, so the failure looked arbitrary. `timeout` is now
+  `30m`.
+
+  The action was also referenced as `@master`. That is an unpinned third-party action — a
+  supply-chain risk and a reason a green run cannot be reproduced — so it is pinned to `v0.36.0`.
+  `CONTRIBUTING.md` asks for SHA pins on all action references; the rest of this repository uses
+  major-version tags, and this change matches that de-facto convention rather than being the only
+  SHA-pinned entry.
 - **`build-unity-image.yml` pushed a different image than the one it validated, and recorded a
   digest belonging to neither.** The workflow built twice: once with `push: false, load: true` (the
   copy the smoke tests, Trivy scan and SBOM examined) and again through a second
