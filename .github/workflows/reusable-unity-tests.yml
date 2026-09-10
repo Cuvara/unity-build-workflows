@@ -43,6 +43,19 @@ on:
         default: 'auto'
         type: string
 
+      submodule-auth:
+        description: >-
+          How git submodules are authenticated. 'token' (the default, and the
+          historical behaviour) lets actions/checkout fetch them, which rewrites
+          every submodule URL to HTTPS and injects GITHUB_TOKEN — that token only
+          reaches submodules inside the calling repository. 'ssh' skips that and
+          fetches them in a separate step over SSH, using the SUBMODULE_SSH_KEY
+          secret when one is set and the runner's own SSH credentials otherwise.
+          'ssh' is the only route to a private submodule in another organization.
+        required: false
+        default: token
+        type: string
+
       toolkit-ref:
         description: Git ref of the toolkit repo (used when calling toolkit scripts).
         required: false
@@ -116,6 +129,12 @@ on:
       UNITY_LICENSE:
         description: Raw .ulf file contents (personal-combined strategy). Optional.
         required: false
+      SUBMODULE_SSH_KEY:
+        description: >-
+          Private SSH key used to fetch submodules when submodule-auth is 'ssh'.
+          Optional — when unset, the runner's own SSH credentials are used, which
+          is usually what a self-hosted runner already has.
+        required: false
       UNITY_EMAIL:
         description: Unity account email. Required for docker lane activation.
         required: false
@@ -175,7 +194,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           lfs: true
-          submodules: recursive
+          submodules: ${{ inputs.submodule-auth == 'ssh' && 'false' || 'recursive' }}
+
+      - name: Fetch submodules over SSH
+        if: ${{ inputs.submodule-auth == 'ssh' }}
+        shell: bash
+        env:
+          SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          # actions/checkout rewrites submodule URLs to HTTPS and injects
+          # GITHUB_TOKEN, which cannot see a private submodule in another
+          # organization — git reports it as "not found". Fetch them here instead,
+          # so the URLs in .gitmodules are used exactly as written.
+          _key_file=""
+          cleanup() { [[ -n "${_key_file}" ]] && rm -f "${_key_file}"; }
+          trap cleanup EXIT
+
+          _ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+          if [[ -n "${SUBMODULE_SSH_KEY:-}" ]]; then
+            _key_file="$(mktemp)"
+            printf '%s\n' "${SUBMODULE_SSH_KEY}" > "${_key_file}"
+            chmod 600 "${_key_file}"
+            _ssh_opts="-i ${_key_file} -o IdentitiesOnly=yes ${_ssh_opts}"
+            echo "Authenticating submodules with SUBMODULE_SSH_KEY."
+          else
+            echo "SUBMODULE_SSH_KEY is not set — using the runner's own SSH credentials."
+          fi
+
+          export GIT_SSH_COMMAND="ssh ${_ssh_opts}"
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       # ── 3. Cache Library ──────────────────────────────────────────────────────
       - name: Cache Library

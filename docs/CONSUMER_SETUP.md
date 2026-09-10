@@ -163,6 +163,39 @@ gh secret set ANDROID_KEY_PASS        --repo "${REPO}" --env production
 
 ---
 
+### Private git submodules (optional)
+
+`actions/checkout` fetches submodules by rewriting every URL in `.gitmodules` to HTTPS and
+injecting `GITHUB_TOKEN`. That token is scoped to the repository being built, so a submodule
+that lives in **another organization and is private** cannot be read, and git reports it the
+same way it reports a typo:
+
+```
+fatal: repository 'https://github.com/<other-org>/<repo>.git/' not found
+fatal: clone of 'git@github.com:<other-org>/<repo>.git' into submodule path '...' failed
+```
+
+Set `submodule-auth: ssh` on the pipeline to fetch submodules in a separate step over SSH
+instead, leaving the URLs in `.gitmodules` exactly as written:
+
+```yaml
+    with:
+      submodule-auth: ssh
+```
+
+Where the key comes from:
+
+| Runner | What to provide |
+|---|---|
+| Self-hosted | Nothing. The runner's own SSH credentials are used — if `git ls-remote git@github.com:<org>/<repo>.git` works for the account the runner service runs as, the build works. |
+| GitHub-hosted | A `SUBMODULE_SSH_KEY` secret holding a private key that can read every private submodule. |
+
+A **deploy key** authenticates one repository only, so it covers a single private submodule.
+For several, use one key belonging to a machine account that has read access to all of them.
+
+The public submodules of a public parent need none of this — leave `submodule-auth` at its
+default `token`.
+
 ## Step 4: Set Optional Repository Variables
 
 Repository Variables control per-branch build behaviour without touching the

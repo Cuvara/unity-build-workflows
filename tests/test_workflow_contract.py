@@ -635,3 +635,59 @@ class TestProjectVersionParsingIsCRLFSafe:
             "stripping CR, so a CRLF file yields a version with a trailing \\r:\n"
             + "\n".join(offenders)
         )
+
+
+# ---------------------------------------------------------------------------
+# submodule-auth must reach every job that checks the project out
+# ---------------------------------------------------------------------------
+
+class TestSubmoduleAuthIsForwarded:
+    """
+    `submodule-auth` only works if every job that checks the consumer repository
+    out receives it. A new build job that forgets the passthrough silently falls
+    back to the token lane, and a private submodule in another organization
+    fails there with a misleading "repository not found".
+    """
+
+    def test_pipeline_forwards_submodule_auth_to_every_callee_that_takes_it(self, workflows_dir):
+        pipeline = load_workflow(workflows_dir / "unity-pipeline.yml")
+        missing = []
+        for job_id, job in pipeline["jobs"].items():
+            uses = job.get("uses")
+            if not uses or not uses.startswith("./"):
+                continue
+            callee = load_workflow(workflows_dir / Path(uses).name)
+            declared = get_triggers(callee)["workflow_call"]["inputs"]
+            if "submodule-auth" not in declared:
+                continue
+            if "submodule-auth" not in (job.get("with") or {}):
+                missing.append(f"  {job_id} -> {Path(uses).name}")
+
+        assert not missing, (
+            "These jobs call a workflow that accepts submodule-auth but do not pass it:\n"
+            + "\n".join(missing)
+        )
+
+    def test_ssh_lane_disables_the_checkout_action_submodule_fetch(self, workflows_dir):
+        """Both lanes must be mutually exclusive, or checkout re-rewrites the URLs."""
+        for name in ("reusable-build-platform.yml", "reusable-unity-tests.yml"):
+            workflow = load_workflow(workflows_dir / name)
+            declared = get_triggers(workflow)["workflow_call"]["inputs"]
+            assert "submodule-auth" in declared, f"{name} does not declare submodule-auth"
+
+            checkouts = [
+                s for s in iter_steps(workflow)
+                if str(s.get("uses", "")).startswith("actions/checkout")
+                and "submodules" in (s.get("with") or {})
+            ]
+            assert checkouts, f"{name} has no submodule checkout to gate"
+            for step in checkouts:
+                value = str(step["with"]["submodules"])
+                assert "submodule-auth" in value, (
+                    f"{name}: checkout still fetches submodules unconditionally ({value!r}); "
+                    "the ssh lane would fetch them twice, the second time over HTTPS"
+                )
+
+            assert any(
+                s.get("name") == "Fetch submodules over SSH" for s in iter_steps(workflow)
+            ), f"{name} disables the checkout fetch but never fetches over SSH"
