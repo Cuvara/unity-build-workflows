@@ -10,6 +10,8 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+## [2.2.4] — 2026-09-10
+
 ### Added
 - **`submodule-auth` — a way to fetch a private submodule that lives in another organization.**
   `actions/checkout` does not simply fetch submodules; before it does, it writes
@@ -761,7 +763,8 @@ This release migrates the entire build platform from native Unity Editor executi
 
 ---
 
-[Unreleased]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.3...HEAD
+[Unreleased]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.4...HEAD
+[2.2.4]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.0...v2.2.1

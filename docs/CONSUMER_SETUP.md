@@ -83,11 +83,11 @@ with `secrets: inherit` — no per-secret wiring needed.
 | Ref | Use for | Behavior |
 |---|---|---|
 | `@v2` | **production (default)** | latest stable `v2.x`; receives backward-compatible fixes automatically |
-| `@v2.2.3` | locked / reproducible | exact release, never moves |
+| `@v2.2.4` | locked / reproducible | exact release, never moves |
 | `@main` | development only | bleeding edge; may break |
 
 The template ships pinned to `@v2`. For fully reproducible builds, pin to an
-exact tag (e.g. `@v2.2.3`) and bump it deliberately. Available tags:
+exact tag (e.g. `@v2.2.4`) and bump it deliberately. Available tags:
 `gh release list -R Cuvara/unity-build-workflows` or
 `git ls-remote --tags https://github.com/Cuvara/unity-build-workflows`.
 Set `toolkit-ref:` in the caller to the SAME ref so the toolkit scripts are
