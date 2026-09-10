@@ -277,7 +277,7 @@ jobs:
 
 > **`<ref>` / `<WORKFLOW_REF>` values:**
 > - **Development / pre-release:** use `@main` to track the latest toolkit changes, or pin to a specific commit SHA for reproducibility.
-> - **Stable release:** use an exact published tag — the latest is `@v2.2.4`; see [CHANGELOG.md](../CHANGELOG.md) and the repository Releases page.
+> - **Stable release:** use an exact published tag — the latest is `@v2.2.5`; see [CHANGELOG.md](../CHANGELOG.md) and the repository Releases page.
 > - `@v2` is the floating major tag and moves with each `v2.x.y` release. `@v1` is frozen at `v1.1.3` and receives no further releases.
 >
 > **Toolkit checkout:** The reusable workflow internally checks out the toolkit repository to access shared scripts and actions. Your project repository is also checked out in the correct workspace. No additional setup is needed in your caller workflow.

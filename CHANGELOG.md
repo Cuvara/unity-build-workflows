@@ -10,6 +10,8 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+## [2.2.5] — 2026-09-10
+
 ### Fixed
 - **The ssh submodule lane left a reused workspace's submodules empty.** `actions/checkout` runs
   `git clean -ffdx` before fetching, which empties each submodule's working tree while leaving its
@@ -784,7 +786,8 @@ This release migrates the entire build platform from native Unity Editor executi
 
 ---
 
-[Unreleased]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.4...HEAD
+[Unreleased]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.5...HEAD
+[2.2.5]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.4...v2.2.5
 [2.2.4]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.1...v2.2.2
