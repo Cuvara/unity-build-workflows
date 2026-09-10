@@ -19,7 +19,7 @@
 # Workflow reference (REQUIRED):
 #   Replace <WORKFLOW_OWNER> with the GitHub org/user that hosts unity-build-workflows.
 #   The @main ref is suitable for development. In PRODUCTION, pin to an exact released
-#   tag or commit SHA once a release exists (e.g., @v2.2.4 or @abc1234).
+#   tag or commit SHA once a release exists (e.g., @v2.2.5 or @abc1234).
 #   No v1/v2 tag currently exists — do NOT invent tags.
 #
 #   IMPORTANT: workflow-repository and workflow-ref MUST be passed in every job's 'with:'
