@@ -10,6 +10,27 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+- **A CRLF `ProjectVersion.txt` failed the Unity version check against a value equal to it.**
+  Unity writes `ProjectSettings/ProjectVersion.txt` with CRLF on Windows, so consumers commit it
+  that way. `resolve-config` extracted the version with `awk '{print $2}'`, keeping the trailing
+  CR, then compared it against the `unity-version` input / `UNITY_VERSION` variable — which has no
+  CR. The two are unequal, and the error prints them as identical because the log swallows the CR:
+
+  ```
+  ::error::Unity version mismatch:
+  ::error::  ProjectVersion.txt: 6000.3.9f1
+  ::error::  Pin (input/UNITY_VERSION var): 6000.3.9f1
+  ```
+
+  Every shell reader now strips CR: `unity-pipeline.yml`, `unity-build-gameci.yml`,
+  `unity-release.yml`, `unity-release-ios.yml` and `scripts/common/ensure_repo_variables.sh`.
+  `resolve_build_flow.sh` already did (`tr -d '[:space:]'`), and `resolve_project_version.py`
+  is safe through `.strip()`. Without the fix the CR also travelled into `$GITHUB_OUTPUT` as the
+  resolved version, so it would have corrupted image tags and Editor paths downstream even when
+  no pin was set. `tests/test_workflow_contract.py::TestProjectVersionParsingIsCRLFSafe` pins it.
+
+
 ## [2.2.2] — 2026-09-10
 
 ### Added

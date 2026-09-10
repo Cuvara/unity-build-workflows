@@ -73,7 +73,7 @@ TSV
 
 # UNITY_VERSION default is the project's editor version (SSOT: ProjectVersion.txt),
 # not a hardcoded constant. Substitute the placeholder, or drop it if not found.
-_uv="$(grep '^m_EditorVersion:' ProjectSettings/ProjectVersion.txt 2>/dev/null | awk '{print $2}' || true)"
+_uv="$(grep '^m_EditorVersion:' ProjectSettings/ProjectVersion.txt 2>/dev/null | awk '{print $2}' | tr -d '\r' || true)"
 if [ -n "${_uv}" ]; then
   DEFAULTS="${DEFAULTS/_UNITY_VERSION_PLACEHOLDER_/UNITY_VERSION	${_uv}}"
 else
