@@ -204,8 +204,14 @@ jobs:
       - name: Checkout (shallow — only needs ProjectVersion.txt)
         uses: actions/checkout@v4
         with:
+          # `project-path` may be '.' (project at the repo root) or a subdirectory,
+          # and the next step reads "${PROJECT_PATH}/ProjectSettings/ProjectVersion.txt".
+          # A non-cone pattern containing a slash is anchored to the repo root, so the
+          # bare 'ProjectSettings/...' pattern checked out nothing for a project in a
+          # subdirectory and the resolve step failed. A leading '**/' matches the file
+          # at any depth, the repo root included, which covers every project-path.
           sparse-checkout: |
-            ProjectSettings/ProjectVersion.txt
+            **/ProjectSettings/ProjectVersion.txt
           sparse-checkout-cone-mode: false
 
       - name: Resolve Unity version
