@@ -20,6 +20,17 @@ on:
         default: '.'
         type: string
 
+      submodule-auth:
+        description: >-
+          How git submodules are authenticated: 'token' (default) lets
+          actions/checkout fetch them with GITHUB_TOKEN, 'ssh' fetches them in a
+          separate step over SSH. Use 'ssh' when a submodule is a private
+          repository in another organization — GITHUB_TOKEN cannot see it, and
+          git reports it as "not found".
+        required: false
+        default: token
+        type: string
+
       toolkit-repo:
         description: "Toolkit repository (owner/repo) for resolve_build_flow.sh."
         required: false
@@ -134,6 +145,12 @@ on:
         required: false
       DISCORD_WEBHOOK_URL:
         description: "Discord webhook URL for build notifications. Optional — no-op when absent."
+        required: false
+      SUBMODULE_SSH_KEY:
+        description: >-
+          Private SSH key for fetching submodules when submodule-auth is 'ssh'.
+          Optional — falls back to the runner's own SSH credentials, which a
+          self-hosted runner usually already has.
         required: false
 
 jobs:
@@ -566,6 +583,7 @@ jobs:
       build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
       activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
@@ -577,6 +595,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 4: build-addressables
@@ -602,6 +621,7 @@ jobs:
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       build-addressables:  false
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
@@ -618,6 +638,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 5: build-android
@@ -645,6 +666,7 @@ jobs:
       build-addressables:  false
       android-export-type: ${{ needs.resolve-config.outputs.android-export-type }}
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
@@ -661,6 +683,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 6: build-webgl
@@ -687,6 +710,7 @@ jobs:
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       build-addressables:  false
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
@@ -703,6 +727,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 7: build-linux64
@@ -729,6 +754,7 @@ jobs:
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       build-addressables:  false
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
@@ -745,6 +771,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 8: build-linuxserver
@@ -771,6 +798,7 @@ jobs:
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       build-addressables:  false
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
@@ -787,6 +815,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 9: build-windows64
@@ -817,6 +846,7 @@ jobs:
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       build-addressables:  false
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
@@ -833,6 +863,7 @@ jobs:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 10: build-ios
@@ -863,6 +894,7 @@ jobs:
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       build-addressables:  false
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}

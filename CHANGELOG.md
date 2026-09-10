@@ -10,6 +10,33 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+- **`submodule-auth` — a way to fetch a private submodule that lives in another organization.**
+  `actions/checkout` does not simply fetch submodules; before it does, it writes
+
+  ```
+  git config --global --add url.https://github.com/.insteadOf git@github.com:
+  ```
+
+  which rewrites every SSH URL in `.gitmodules` to HTTPS and authenticates with `GITHUB_TOKEN`.
+  That token is scoped to the repository being built, so a private submodule in another
+  organization is unreachable and git reports it the way it reports a typo:
+
+  ```
+  fatal: repository 'https://github.com/<other-org>/<repo>.git/' not found
+  ```
+
+  No key on the runner helps, because the rewrite happens before git chooses a transport — the
+  `ssh` binary is never invoked. `submodule-auth: ssh` skips the checkout action's submodule pass
+  and fetches them in a separate step under `GIT_SSH_COMMAND`, so the URLs in `.gitmodules` are
+  used as written: the `SUBMODULE_SSH_KEY` secret when one is set, the runner's own SSH
+  credentials otherwise (what a self-hosted runner usually already has).
+
+  The default is `token`, which is the historical behaviour line for line, so existing consumers
+  are untouched. `tests/test_workflow_contract.py::TestSubmoduleAuthIsForwarded` pins the
+  passthrough across every job, since one build job missing it would silently fall back.
+
+
 ## [2.2.3] — 2026-09-10
 
 ### Fixed
