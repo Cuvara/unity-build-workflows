@@ -2,7 +2,7 @@
 # consumer-unity-build.yml — Thin caller template for unity-build-workflows
 #
 # Copy this file to .github/workflows/unity-build.yml in your project.
-# Pinned to @v2 (latest stable v2.x). Use @v2.2.1 for an exact pin, or @main
+# Pinned to @v2 (latest stable v2.x). Use @v2.2.2 for an exact pin, or @main
 # for development. Keep `toolkit-ref` below on the SAME ref as `uses`.
 #
 # Required secrets (set in Settings → Secrets and variables → Actions):
@@ -138,7 +138,7 @@ jobs:
     name: Unity Pipeline
     # Pin the toolkit version. Recommended:
     #   @v2          — latest stable v2.x (gets backward-compatible fixes)   ← production default
-    #   @v2.2.1      — exact release (fully reproducible)
+    #   @v2.2.2      — exact release (fully reproducible)
     #   @main        — bleeding edge (development only; may break)
     uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2
     secrets: inherit
@@ -160,4 +160,4 @@ jobs:
 
       # ── Fixed per-project values ───────────────────────────────────────────
       project-path: '.'
-      toolkit-ref:  'v2'   # MUST match the @ref above (use 'v2.2.1' for exact pin; 'main' for dev)
+      toolkit-ref:  'v2'   # MUST match the @ref above (use 'v2.2.2' for exact pin; 'main' for dev)
