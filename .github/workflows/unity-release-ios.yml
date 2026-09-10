@@ -98,7 +98,7 @@ jobs:
             echo "unity-version=${{ inputs.unity-version }}" >> "$GITHUB_OUTPUT"
           else
             UNITY_VERSION=$(grep -r "m_EditorVersion:" "${{ inputs.project-path || '.' }}/ProjectSettings/ProjectVersion.txt" \
-              2>/dev/null | awk '{print $2}' || echo "")
+              2>/dev/null | awk '{print $2}' | tr -d '\r' || echo "")
             if [[ -z "${UNITY_VERSION}" ]]; then
               echo "::error::Cannot resolve Unity version from ProjectVersion.txt — use workflow_dispatch and specify unity-version."
               exit 1

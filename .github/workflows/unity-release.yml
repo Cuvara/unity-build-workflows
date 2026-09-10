@@ -115,7 +115,7 @@ jobs:
           UNITY_VERSION=$(python3 scripts/common/resolve_project_version.py \
             --config-path "BuildConfig" \
             --output-field unity-version 2>/dev/null || \
-            grep -r "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}')
+            grep -r "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}' | tr -d '\r')
           echo "unity-version=${UNITY_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Unity version: ${UNITY_VERSION}"
 

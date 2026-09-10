@@ -583,3 +583,55 @@ class TestSparseCheckoutHonoursProjectPath:
             "resolve-config reads ${PROJECT_PATH}/ProjectSettings/ProjectVersion.txt, "
             f"so it must sparsely check it out at any depth. Patterns found: {patterns}"
         )
+
+
+# ---------------------------------------------------------------------------
+# ProjectVersion.txt parsing must survive CRLF
+# ---------------------------------------------------------------------------
+
+class TestProjectVersionParsingIsCRLFSafe:
+    """
+    Unity writes `ProjectSettings/ProjectVersion.txt` with CRLF on Windows, so a
+    consumer repository routinely commits it that way. Any shell reader that
+    pulls the version out with `awk`/`cut` keeps the trailing CR unless it is
+    stripped, and the result compares unequal to a clean string while printing
+    identically — the failure is invisible in the log:
+
+        ::error::Unity version mismatch:
+        ::error::  ProjectVersion.txt: 6000.3.9f1
+        ::error::  Pin (input/UNITY_VERSION var): 6000.3.9f1
+    """
+
+    SEARCH_DIRS = ("scripts", ".github/workflows")
+    STRIPPERS = ("tr -d '\\r'", 'tr -d "\\r"', "tr -d '[:space:]'", "sed 's/\\r//'", "${_v//$'\\r'/}")
+
+    def _reader_lines(self, repo_root: Path):
+        for rel in self.SEARCH_DIRS:
+            base = repo_root / rel
+            if not base.exists():
+                continue
+            for path in sorted(base.rglob("*")):
+                if path.suffix not in (".sh", ".yml", ".yaml") or not path.is_file():
+                    continue
+                lines = path.read_text(encoding="utf-8").splitlines()
+                for i, line in enumerate(lines, start=1):
+                    if "m_EditorVersion" not in line:
+                        continue
+                    # the extraction may wrap onto the following line
+                    window = " ".join(lines[i - 1:i + 1])
+                    yield path.relative_to(repo_root), i, window
+
+    def test_every_shell_reader_strips_carriage_returns(self, repo_root):
+        offenders = []
+        for rel, lineno, window in self._reader_lines(repo_root):
+            if not any(op in window for op in ("awk", "cut", "sed")):
+                continue  # not an extraction
+            if any(s in window for s in self.STRIPPERS):
+                continue
+            offenders.append(f"  {rel}:{lineno}")
+
+        assert not offenders, (
+            "These read the Unity version out of ProjectVersion.txt without "
+            "stripping CR, so a CRLF file yields a version with a trailing \\r:\n"
+            + "\n".join(offenders)
+        )

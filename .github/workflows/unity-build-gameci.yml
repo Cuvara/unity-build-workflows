@@ -82,7 +82,8 @@ jobs:
             echo "::error::ProjectVersion.txt not found at ${PV}"
             exit 1
           fi
-          PROJECT_VERSION=$(grep '^m_EditorVersion:' "$PV" | awk '{print $2}')
+          # CRLF-safe: Unity on Windows writes ProjectVersion.txt with CRLF.
+          PROJECT_VERSION=$(grep '^m_EditorVersion:' "$PV" | awk '{print $2}' | tr -d '\r')
           echo "Project Unity version: ${PROJECT_VERSION}"
           if [ -n "${OVERRIDE}" ] && [ "${OVERRIDE}" != "${PROJECT_VERSION}" ]; then
             if [ "${{ inputs.allow-version-mismatch }}" = "true" ]; then

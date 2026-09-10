@@ -231,7 +231,10 @@ jobs:
             echo "::error::ProjectVersion.txt not found at ${PV}"
             exit 1
           fi
-          PROJECT_VERSION=$(grep '^m_EditorVersion:' "$PV" | awk '{print $2}')
+          # Unity on Windows writes ProjectVersion.txt with CRLF, so awk's field
+          # keeps a trailing CR. Strip it, or the comparison below rejects two
+          # versions that print identically.
+          PROJECT_VERSION=$(grep '^m_EditorVersion:' "$PV" | awk '{print $2}' | tr -d '\r')
           echo "Project Unity version (SSOT): ${PROJECT_VERSION}"
           if [ -n "${OVERRIDE}" ] && [ "${OVERRIDE}" != "${PROJECT_VERSION}" ]; then
             echo "::error::Unity version mismatch:"
