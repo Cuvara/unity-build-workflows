@@ -429,7 +429,13 @@ jobs:
           # recorded commit. Without --force, `submodule update` sees the right SHA,
           # concludes there is nothing to do, and leaves the directory empty — Unity
           # then opens a project whose embedded packages have no package.json.
-          git submodule update --init --recursive --force
+          #
+          # core.longpaths matters on Windows: a runner workspace is already deep
+          # before the project path, and a Unity package that vendors a plugin tree
+          # goes past MAX_PATH. Git reports it per file as "unable to create file"
+          # and still exits non-zero, so the clone half-lands. -c propagates to the
+          # child git processes that clone each submodule; it is inert elsewhere.
+          git -c core.longpaths=true submodule update --init --recursive --force
 
       # ── Step 3b: Apply per-branch Scripting Define Symbols ────────────────
       # Additive merge of the resolved define-symbols into every platform group

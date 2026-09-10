@@ -24,7 +24,6 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   Windows and Linux now use the shared release report as well, instead of their
   own inline summary.
 
-### Added
 
 - **Windows and Linux release promotion through Steam.**
   `pipeline-windows-release.yml` and `pipeline-linux-release.yml`, with
@@ -46,51 +45,6 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   the data directory, the engine payload, game code, the Unity runtime library,
   and on Linux that the executable bit survived the artifact round-trip.
 
-### Fixed
-
-- **A Steam dry run never reached the staging path it promises.** The input is
-  documented as "verify, validate and stage the Steam content without
-  uploading" and `deploy_steam.sh` implements exactly that, but the phase gate
-  excluded dry runs outright — so the staging and no-mutation checks were
-  unreachable, and the one way to exercise the promotion path in a repository
-  with no Steam account did nothing. The phases now run under a dry run,
-  skipping the credential requirement, the SteamCMD install and the upload.
-- **A promotion started at a later phase did nothing and reported success.**
-  Gating the publishing jobs on `verify-artifact.result == 'success'` replaced
-  the `always()` they used to carry, and GitHub skips a job whenever anything
-  in its `needs` was skipped *unless* the `if` contains a status function. So
-  every publishing job inherited the skip from `validate-artifact`, which is
-  skipped by design whenever `start-phase` is a later phase — the retry path
-  the phase input exists for. `!cancelled()` restores the override without
-  restoring the hole: the explicit verify check still gates on identity. Found
-  by running a Linux promotion at `start-phase: internal`.
-- **The desktop validator failed every Linux build on its first real run.**
-  GitHub stores artifacts in a zip, which carries no POSIX modes, so a Linux
-  binary downloaded from any artifact is always `0644` — the transport dropped
-  the executable bit, not the build. Stage 04 sees only downloaded artifacts,
-  so the check belonged there as a warning that names the cause;
-  `--require-executable-bit` keeps it a gate for a caller checking a build
-  directory in place. `deploy_steam.sh` restores the bit on the staging copy,
-  since a depot built from a `0644` binary ships a game nobody can launch. File
-  content is untouched and the staging fingerprint still matches.
-- **The iOS promotion consumed the wrong artifact.** Stage 03b signs and
-  exports the IPA before the immutable boundary, but the IPA carried no
-  artifact manifest — so the only iOS manifest in a release run was the Xcode
-  project's, the Release Set listed the project, and
-  `consumer-21-release-ios.yml` defaulted to promoting `release-ios-xcodeproj`.
-  A promote-only pipeline cannot turn a project into anything installable, so
-  the iOS release path was a dead end that looked configured. The IPA now
-  writes and uploads its own manifest, `XCODEPROJ` is marked
-  `"intermediate": true`, a Release Set skips intermediates and raises if two
-  shippable artifacts claim one platform, verifying an intermediate fails
-  closed, and the promotion default is `release-ios-ipa`.
-- **`verify` accepted a Release Set with missing identity fields.** It only
-  compared a field when the caller supplied an expectation, so an empty one
-  passed unchallenged. All seven — run id, commit, version, build number,
-  platform, artifact name, SHA-256 — must now be present, and the artifact's
-  own commit/version/build number must agree with the Release Set's (I-009).
-
-### Added
 
 - **`.github/pipeline-policy/validation-status.md`** — what has actually been
   proven, split into runtime verified (with run IDs), static verified, and
@@ -98,39 +52,6 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   03b is written and statically checked but has never run, and no macOS runner
   exists to run it on.
 
-### Fixed
-
-- **A missing Play service account read as a corrupt one.** An unset secret
-  interpolates as an empty string, which reached the JSON parser and produced
-  "service account JSON is not valid JSON" — sending whoever read the log
-  looking for a broken key instead of an absent one. The value is stripped
-  before the emptiness check, so a blank or whitespace secret reports as
-  missing.
-- **A failed identity check did not stop a promotion.** Every job in the three
-  promotion pipelines listed `verify-artifact` in `needs` but guarded itself
-  with `if: always()`, which ignores the result. Publishing was reachable: a
-  promotion started at `start-phase: internal` would have uploaded an artifact
-  whose identity verification had just failed. Found by running a deliberate
-  version mismatch. Every job downstream of the check now requires it to have
-  succeeded — the report job excepted, since reporting a failure is the one
-  thing that must survive it — and `validate_pipeline_invariants.py` fails CI
-  if a new job forgets.
-- **Release Sets were written with no version.** The stage-01 shallow checkout
-  fetched `ProjectVersion.txt` but not `ProjectSettings.asset`, so the metadata
-  step took its "file not found" path and `app-version` resolved empty.
-  `verify --expect-version ''` then compared nothing and passed, leaving the
-  promotion identity check running on two of its three fields. The file is now
-  checked out, and generating a *release* manifest without a version fails
-  closed.
-- **The platform capability gate was inert.** `unity-pipeline.yml` never passed
-  `vars.PLATFORMS` to `resolve_build_flow.sh`, so a project declaring
-  `Android,WebGL` still built Windows64 when asked — found by running it, not
-  by the tests, every one of which set `PLATFORMS` in the resolver's own
-  environment and so tested a call shape nobody made. The variable is now
-  forwarded (with `BUILD_PLATFORMS_ENABLED` as the grouped name), and a test
-  parses the workflow to assert the resolver step actually receives it.
-
-### Added
 
 - **Builder provenance (I-008).** Every artifact manifest now carries a
   `builderProvenance` block — builder, kind (`docker`/`native`), image
@@ -142,107 +63,6 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   Set reports the weakest strength among its artifacts and
   `release_manifest.py generate` fails closed on one recorded as `unknown`.
 
-### Changed
-
-- **I-008 redefined** from "release uses immutable Unity image references" to
-  "release builds have immutable **or** auditable builder provenance,
-  recorded". The old rule could only be satisfied by Docker with a pinned
-  digest, which for `game-ci/unity-builder` means forking it or shipping a
-  custom image, and which a native macOS iOS build could never satisfy at all
-  — the invariant was deciding the architecture. Docker is not required and no
-  custom image is introduced. The three CI checks now verify that every lane
-  writing an artifact manifest records provenance, that `immutable` is gated on
-  a digest, and that an untraceable artifact cannot enter a Release Set. The
-  builder itself is unchanged; limitations are stated in
-  `docs/PIPELINE_ARCHITECTURE.md` §5b rather than hidden.
-
-- **Platform capabilities.** A project declares which targets it can build via
-  the `PLATFORMS` variable (`Android,WebGL`). That is a different question from
-  `*_BUILD_PLATFORMS`, which says which of them a branch builds — capability
-  wins, so asking for a platform the project does not support produces no job
-  at all. Enforced at `set_platforms_from_list`, the one chokepoint every path
-  (branch flow and manual dispatch) already went through, so there is no second
-  configuration system. Unset means all platforms, leaving existing projects
-  unaffected. Windows and Linux go through the identical gate — no separate
-  code path, no distribution provider required to produce an artifact.
-- **Release Set manifest** (`scripts/common/release_manifest.py`). One
-  `Build / Release` run is one Release Set: a commit, a version, a build
-  number, a Unity version and the artifacts built from them. Stage 05 collects
-  the per-platform manifests, hashes the real bytes, refuses a set whose
-  artifacts disagree on commit or version, and uploads `release-manifest` with
-  90-day retention.
-- **Artifact identity verification.** Each promotion now begins with
-  `04 / <Platform> / Verify Release Identity`, which downloads the manifest
-  from the source run and checks run id, version, build number, commit,
-  artifact name and SHA-256 before anything else runs. It fails closed: a
-  promotion that cannot prove what it is holding does not publish it. A
-  filename establishes nothing.
-- **Pipeline invariant policy and checker** —
-  `.github/pipeline-policy/invariants.md` and
-  `scripts/common/validate_pipeline_invariants.py`, wired into CI as a required
-  gate. 25 static checks covering the immutable-artifact boundary, promotion
-  purity, release-set consistency, capability filtering, build-number
-  resolution and production Environment protection. These are properties that
-  do not fail a build when broken — they produce a pipeline that looks healthy
-  and ships the wrong bytes.
-
-### Changed
-
-- **BREAKING — iOS production signing moved into `Build / Release` (stage 03b).**
-  Signing used to run during promotion, which broke the invariant the whole
-  design rests on: the artifact QA validated was an Xcode *project*, and the
-  artifact that shipped was an IPA built from it afterwards. Those are not the
-  same binary. `Build / Release` now emits a signed `release-ios-ipa`, stage 04
-  validates *that* with `REQUIRE_SIGNED` against the resolved version and build
-  number, and `Release / iOS` only downloads, verifies and publishes. The
-  distribution secrets moved with the work.
-
-  The boundary is machine-checked, not reviewed:
-  `test_promotion_cannot_modify_the_binary` scans every promotion job's `uses`
-  and `run` for anything that builds, archives, signs, re-exports or
-  recompresses, and fails the suite if one appears.
-- **BREAKING — Android's store counter no longer comes from the major version.**
-  `bundleVersionCode` was `cfg.BundleVersion.Split('.')[0]`, so every `1.x.y`
-  release uploaded versionCode `1` and Google Play refused the second one.
-  `game-ci/unity-builder` was also invoked with no version at all, falling back
-  to Semantic versioning from git tags and generating its own counter — two
-  runs of the same commit could disagree, and nothing guaranteed the number
-  increased.
-
-  Stage 01 now resolves the build number once and every platform receives the
-  same value, reusing the convention `IOSBuilder` already applied for
-  `CFBundleVersion` (`BUILD_NUMBER` → `GITHUB_RUN_NUMBER`) rather than
-  inventing a second scheme, plus a `BUILD_NUMBER_OFFSET` repository variable
-  for projects whose store history predates this pipeline. It reaches the
-  builder three ways because three consumers need it: `androidVersionCode`,
-  `version`, and the `BUILD_NUMBER` environment variable.
-- **BREAKING — the release pipelines are promote-only.** They can no longer
-  build. `start-phase: build` is gone, the Unity build job is removed from
-  each, and `release-orchestrator.yml` — which built and released in one run —
-  is retired. "The binary QA approved is the binary that ships" stops being a
-  convention and becomes structural: there is no code path in the release layer
-  that can produce a binary.
-
-  A release is now always two steps:
-
-      Build / Release   →  release-android-aab  (immutable)
-      Release / Android →  validate → publish → release
-
-  iOS keeps its IPA export, because turning an Xcode project into a signed IPA
-  needs the distribution certificate — that is a release concern, not a build
-  one.
-
-  Migration: `Release / *` gains a **required** `source-run-id` input naming
-  the `Build / Release` run that produced the artifact.
-  `actions/download-artifact` only sees the current run by default, so without
-  it a promotion cannot physically find the binary. The `Build / Release`
-  report prints the exact command, run id included.
-
-  `start-phase` options are now `validate | internal | external | production`
-  (`validate | staging | production` for WebGL), defaulting to the first
-  publish phase.
-
-### Added
 
 - **Stage 07 — Report & Notify in the release pipelines.** They ended at stage
   06, so a release run produced no report at all: the only way to see how far
@@ -379,7 +199,200 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 - `tests/test_artifact_validation.py` (52 tests) — the manifest generator, the
   AXML reader and all three validators, against synthesised artifacts.
 
+### Changed
+
+- **I-008 redefined** from "release uses immutable Unity image references" to
+  "release builds have immutable **or** auditable builder provenance,
+  recorded". The old rule could only be satisfied by Docker with a pinned
+  digest, which for `game-ci/unity-builder` means forking it or shipping a
+  custom image, and which a native macOS iOS build could never satisfy at all
+  — the invariant was deciding the architecture. Docker is not required and no
+  custom image is introduced. The three CI checks now verify that every lane
+  writing an artifact manifest records provenance, that `immutable` is gated on
+  a digest, and that an untraceable artifact cannot enter a Release Set. The
+  builder itself is unchanged; limitations are stated in
+  `docs/PIPELINE_ARCHITECTURE.md` §5b rather than hidden.
+
+- **Platform capabilities.** A project declares which targets it can build via
+  the `PLATFORMS` variable (`Android,WebGL`). That is a different question from
+  `*_BUILD_PLATFORMS`, which says which of them a branch builds — capability
+  wins, so asking for a platform the project does not support produces no job
+  at all. Enforced at `set_platforms_from_list`, the one chokepoint every path
+  (branch flow and manual dispatch) already went through, so there is no second
+  configuration system. Unset means all platforms, leaving existing projects
+  unaffected. Windows and Linux go through the identical gate — no separate
+  code path, no distribution provider required to produce an artifact.
+- **Release Set manifest** (`scripts/common/release_manifest.py`). One
+  `Build / Release` run is one Release Set: a commit, a version, a build
+  number, a Unity version and the artifacts built from them. Stage 05 collects
+  the per-platform manifests, hashes the real bytes, refuses a set whose
+  artifacts disagree on commit or version, and uploads `release-manifest` with
+  90-day retention.
+- **Artifact identity verification.** Each promotion now begins with
+  `04 / <Platform> / Verify Release Identity`, which downloads the manifest
+  from the source run and checks run id, version, build number, commit,
+  artifact name and SHA-256 before anything else runs. It fails closed: a
+  promotion that cannot prove what it is holding does not publish it. A
+  filename establishes nothing.
+- **Pipeline invariant policy and checker** —
+  `.github/pipeline-policy/invariants.md` and
+  `scripts/common/validate_pipeline_invariants.py`, wired into CI as a required
+  gate. 25 static checks covering the immutable-artifact boundary, promotion
+  purity, release-set consistency, capability filtering, build-number
+  resolution and production Environment protection. These are properties that
+  do not fail a build when broken — they produce a pipeline that looks healthy
+  and ships the wrong bytes.
+
+
+- **BREAKING — iOS production signing moved into `Build / Release` (stage 03b).**
+  Signing used to run during promotion, which broke the invariant the whole
+  design rests on: the artifact QA validated was an Xcode *project*, and the
+  artifact that shipped was an IPA built from it afterwards. Those are not the
+  same binary. `Build / Release` now emits a signed `release-ios-ipa`, stage 04
+  validates *that* with `REQUIRE_SIGNED` against the resolved version and build
+  number, and `Release / iOS` only downloads, verifies and publishes. The
+  distribution secrets moved with the work.
+
+  The boundary is machine-checked, not reviewed:
+  `test_promotion_cannot_modify_the_binary` scans every promotion job's `uses`
+  and `run` for anything that builds, archives, signs, re-exports or
+  recompresses, and fails the suite if one appears.
+- **BREAKING — Android's store counter no longer comes from the major version.**
+  `bundleVersionCode` was `cfg.BundleVersion.Split('.')[0]`, so every `1.x.y`
+  release uploaded versionCode `1` and Google Play refused the second one.
+  `game-ci/unity-builder` was also invoked with no version at all, falling back
+  to Semantic versioning from git tags and generating its own counter — two
+  runs of the same commit could disagree, and nothing guaranteed the number
+  increased.
+
+  Stage 01 now resolves the build number once and every platform receives the
+  same value, reusing the convention `IOSBuilder` already applied for
+  `CFBundleVersion` (`BUILD_NUMBER` → `GITHUB_RUN_NUMBER`) rather than
+  inventing a second scheme, plus a `BUILD_NUMBER_OFFSET` repository variable
+  for projects whose store history predates this pipeline. It reaches the
+  builder three ways because three consumers need it: `androidVersionCode`,
+  `version`, and the `BUILD_NUMBER` environment variable.
+- **BREAKING — the release pipelines are promote-only.** They can no longer
+  build. `start-phase: build` is gone, the Unity build job is removed from
+  each, and `release-orchestrator.yml` — which built and released in one run —
+  is retired. "The binary QA approved is the binary that ships" stops being a
+  convention and becomes structural: there is no code path in the release layer
+  that can produce a binary.
+
+  A release is now always two steps:
+
+      Build / Release   →  release-android-aab  (immutable)
+      Release / Android →  validate → publish → release
+
+  iOS keeps its IPA export, because turning an Xcode project into a signed IPA
+  needs the distribution certificate — that is a release concern, not a build
+  one.
+
+  Migration: `Release / *` gains a **required** `source-run-id` input naming
+  the `Build / Release` run that produced the artifact.
+  `actions/download-artifact` only sees the current run by default, so without
+  it a promotion cannot physically find the binary. The `Build / Release`
+  report prints the exact command, run id included.
+
+  `start-phase` options are now `validate | internal | external | production`
+  (`validate | staging | production` for WebGL), defaulting to the first
+  publish phase.
+
+
+- **`unity-build.yml` is the automatic lane only.** Its `workflow_dispatch`
+  form is removed; manual builds use the per-platform entry workflows. Push and
+  pull_request behaviour is unchanged — those events never carried inputs, so
+  every value already came from `resolve_build_flow.sh` and the repository
+  variables. The concurrency key drops the lane placeholders it could never
+  populate.
+- Stage-03 node labels no longer repeat the platform name: `03 / WebGL /
+  Production` rather than `03 / WebGL / Production / WebGL`. An artifact type
+  is appended only where it adds information (`03 / Android / Production / AAB`).
+- **Platform builds no longer start until Unity Tests finish.** This is the
+  intended trade: one extra gate node of latency, in exchange for never paying
+  for a build the test suite would have rejected. Wall-clock time for a green
+  run grows by roughly the test duration.
+- `unity-pipeline.yml`'s iOS stage-03 artifact type is `XCODEPROJ`, not `IPA` —
+  that lane exports an Xcode project; the IPA is produced by
+  `pipeline-ios-release.yml`.
+- The final report is grouped by stage and carries artifact type, size and build
+  duration per platform; its error line names the stage and node that failed.
+
 ### Fixed
+
+- **A Steam dry run never reached the staging path it promises.** The input is
+  documented as "verify, validate and stage the Steam content without
+  uploading" and `deploy_steam.sh` implements exactly that, but the phase gate
+  excluded dry runs outright — so the staging and no-mutation checks were
+  unreachable, and the one way to exercise the promotion path in a repository
+  with no Steam account did nothing. The phases now run under a dry run,
+  skipping the credential requirement, the SteamCMD install and the upload.
+- **A promotion started at a later phase did nothing and reported success.**
+  Gating the publishing jobs on `verify-artifact.result == 'success'` replaced
+  the `always()` they used to carry, and GitHub skips a job whenever anything
+  in its `needs` was skipped *unless* the `if` contains a status function. So
+  every publishing job inherited the skip from `validate-artifact`, which is
+  skipped by design whenever `start-phase` is a later phase — the retry path
+  the phase input exists for. `!cancelled()` restores the override without
+  restoring the hole: the explicit verify check still gates on identity. Found
+  by running a Linux promotion at `start-phase: internal`.
+- **The desktop validator failed every Linux build on its first real run.**
+  GitHub stores artifacts in a zip, which carries no POSIX modes, so a Linux
+  binary downloaded from any artifact is always `0644` — the transport dropped
+  the executable bit, not the build. Stage 04 sees only downloaded artifacts,
+  so the check belonged there as a warning that names the cause;
+  `--require-executable-bit` keeps it a gate for a caller checking a build
+  directory in place. `deploy_steam.sh` restores the bit on the staging copy,
+  since a depot built from a `0644` binary ships a game nobody can launch. File
+  content is untouched and the staging fingerprint still matches.
+- **The iOS promotion consumed the wrong artifact.** Stage 03b signs and
+  exports the IPA before the immutable boundary, but the IPA carried no
+  artifact manifest — so the only iOS manifest in a release run was the Xcode
+  project's, the Release Set listed the project, and
+  `consumer-21-release-ios.yml` defaulted to promoting `release-ios-xcodeproj`.
+  A promote-only pipeline cannot turn a project into anything installable, so
+  the iOS release path was a dead end that looked configured. The IPA now
+  writes and uploads its own manifest, `XCODEPROJ` is marked
+  `"intermediate": true`, a Release Set skips intermediates and raises if two
+  shippable artifacts claim one platform, verifying an intermediate fails
+  closed, and the promotion default is `release-ios-ipa`.
+- **`verify` accepted a Release Set with missing identity fields.** It only
+  compared a field when the caller supplied an expectation, so an empty one
+  passed unchallenged. All seven — run id, commit, version, build number,
+  platform, artifact name, SHA-256 — must now be present, and the artifact's
+  own commit/version/build number must agree with the Release Set's (I-009).
+
+
+- **A missing Play service account read as a corrupt one.** An unset secret
+  interpolates as an empty string, which reached the JSON parser and produced
+  "service account JSON is not valid JSON" — sending whoever read the log
+  looking for a broken key instead of an absent one. The value is stripped
+  before the emptiness check, so a blank or whitespace secret reports as
+  missing.
+- **A failed identity check did not stop a promotion.** Every job in the three
+  promotion pipelines listed `verify-artifact` in `needs` but guarded itself
+  with `if: always()`, which ignores the result. Publishing was reachable: a
+  promotion started at `start-phase: internal` would have uploaded an artifact
+  whose identity verification had just failed. Found by running a deliberate
+  version mismatch. Every job downstream of the check now requires it to have
+  succeeded — the report job excepted, since reporting a failure is the one
+  thing that must survive it — and `validate_pipeline_invariants.py` fails CI
+  if a new job forgets.
+- **Release Sets were written with no version.** The stage-01 shallow checkout
+  fetched `ProjectVersion.txt` but not `ProjectSettings.asset`, so the metadata
+  step took its "file not found" path and `app-version` resolved empty.
+  `verify --expect-version ''` then compared nothing and passed, leaving the
+  promotion identity check running on two of its three fields. The file is now
+  checked out, and generating a *release* manifest without a version fails
+  closed.
+- **The platform capability gate was inert.** `unity-pipeline.yml` never passed
+  `vars.PLATFORMS` to `resolve_build_flow.sh`, so a project declaring
+  `Android,WebGL` still built Windows64 when asked — found by running it, not
+  by the tests, every one of which set `PLATFORMS` in the resolver's own
+  environment and so tested a call shape nobody made. The variable is now
+  forwarded (with `BUILD_PLATFORMS_ENABLED` as the grouped name), and a test
+  parses the workflow to assert the resolver step actually receives it.
+
 
 - **`resolve-unity-image` required an `image-namespace` the toolkit already
   knew.** A release pipeline asked only to build an AAB failed with
@@ -524,26 +537,23 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   results too; previously an artifact could fail validation while the pipeline
   reported green.
 
-### Changed
 
-- **`unity-build.yml` is the automatic lane only.** Its `workflow_dispatch`
-  form is removed; manual builds use the per-platform entry workflows. Push and
-  pull_request behaviour is unchanged — those events never carried inputs, so
-  every value already came from `resolve_build_flow.sh` and the repository
-  variables. The concurrency key drops the lane placeholders it could never
-  populate.
-- Stage-03 node labels no longer repeat the platform name: `03 / WebGL /
-  Production` rather than `03 / WebGL / Production / WebGL`. An artifact type
-  is appended only where it adds information (`03 / Android / Production / AAB`).
-- **Platform builds no longer start until Unity Tests finish.** This is the
-  intended trade: one extra gate node of latency, in exchange for never paying
-  for a build the test suite would have rejected. Wall-clock time for a green
-  run grows by roughly the test duration.
-- `unity-pipeline.yml`'s iOS stage-03 artifact type is `XCODEPROJ`, not `IPA` —
-  that lane exports an Xcode project; the IPA is produced by
-  `pipeline-ios-release.yml`.
-- The final report is grouped by stage and carries artifact type, size and build
-  duration per platform; its error line names the stage and node that failed.
+- **Submodule clones half-landed on Windows when a path passed MAX_PATH.** A runner workspace is
+  already deep before the project path starts, and a Unity package that vendors a plugin tree runs
+  past 260 characters:
+
+  ```
+  error: unable to create file Plugins/Com.ForbiddenByte/OSA/Utilities/Editor/Resources/
+         Com.ForbiddenByte.OSA/Templates/ScrollViews/TableView/Input/...
+  ```
+
+  Git reports this per file and still exits non-zero, so the submodule is left partly written —
+  the next failure lands in Unity, far from the cause. The ssh lane now runs
+  `git -c core.longpaths=true submodule update`, which propagates to the child git processes that
+  clone each submodule and is inert on other platforms.
+
+  Note that `core.longpaths` is git's own switch: on Windows the OS-level `LongPathsEnabled`
+  registry value does not cover git, and git ignores paths over MAX_PATH without it.
 
 
 ## [2.2.5] — 2026-09-10
