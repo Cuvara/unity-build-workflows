@@ -1,0 +1,454 @@
+name: Pipeline iOS Release
+
+# Self-contained iOS release pipeline:
+#   Build Xcode → Archive/Export IPA → Validate IPA → TestFlight → External → App Store
+#
+# Each release phase is a separate job gated by GitHub Environments.
+# Build step calls unity-build-ios.yml for Xcode project generation.
+# Archive/Export runs on macOS with signing composite actions.
+# Store phases use ASC API (ubuntu-latest except TestFlight upload needs macOS).
+#
+# Nesting depth: orchestrator → this → unity-build-ios = 3 levels (safe).
+
+on:
+  workflow_call:
+    inputs:
+      # ── Build inputs ──
+      project-path:
+        type: string
+        required: false
+        default: '.'
+      unity-version:
+        type: string
+        required: true
+      build-config-path:
+        type: string
+        required: false
+        default: BuildConfig
+      build-version:
+        type: string
+        required: true
+      build-addressables:
+        type: boolean
+        required: false
+        default: true
+      ios-runner-label:
+        description: macOS runner label for Unity + Xcode
+        type: string
+        required: false
+        default: macos-unity-xcode
+      workflow-repository:
+        type: string
+        required: false
+        default: ''
+      workflow-ref:
+        type: string
+        required: false
+        default: ''
+      integration-mode:
+        type: string
+        required: false
+        default: remote
+      toolkit-path:
+        type: string
+        required: false
+        default: tools/unity-build-workflows
+
+      # ── Release inputs ──
+      app-id:
+        description: App Store Connect app ID
+        type: string
+        required: true
+      version-string:
+        description: App Store version string (e.g., 1.2.3)
+        type: string
+        required: true
+      export-method:
+        description: IPA export method
+        type: string
+        required: false
+        default: app-store
+      app-name:
+        description: Application name for archive/IPA naming
+        type: string
+        required: false
+        default: Unity
+      start-phase:
+        description: Phase to start from (build/internal/external/production)
+        type: string
+        required: false
+        default: build
+      phased-release:
+        description: Enable 7-day phased release on production
+        type: boolean
+        required: false
+        default: true
+      from-tag:
+        description: Git tag to generate release notes from
+        type: string
+        required: false
+        default: ''
+      dry-run:
+        description: Build without submitting to store
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      UNITY_LICENSE:
+        required: false
+      UNITY_EMAIL:
+        required: false
+      UNITY_PASSWORD:
+        required: false
+      IOS_DISTRIBUTION_CERTIFICATE_BASE64:
+        required: true
+      IOS_DISTRIBUTION_CERTIFICATE_PASSWORD:
+        required: true
+      IOS_PROVISIONING_PROFILE_BASE64:
+        required: true
+      APP_STORE_CONNECT_KEY_ID:
+        required: true
+      APP_STORE_CONNECT_ISSUER_ID:
+        required: true
+      APP_STORE_CONNECT_PRIVATE_KEY:
+        required: true
+      DISCORD_WEBHOOK_URL:
+        required: false
+
+    outputs:
+      artifact-name:
+        description: Name of the Xcode project artifact
+        value: ${{ jobs.build-xcode.outputs.artifact-name }}
+
+  workflow_dispatch:
+    inputs:
+      unity-version:
+        description: Unity editor version
+        required: true
+        type: string
+      build-version:
+        description: Build version string (CFBundleVersion)
+        required: true
+        type: string
+      version-string:
+        description: App Store version string (e.g., 1.2.3)
+        required: true
+        type: string
+      app-id:
+        description: App Store Connect app ID
+        required: true
+        type: string
+      export-method:
+        description: IPA export method
+        required: false
+        type: choice
+        default: app-store
+        options: [app-store, ad-hoc, enterprise, development]
+      app-name:
+        description: Application name
+        required: false
+        type: string
+        default: Unity
+      start-phase:
+        description: Phase to start from
+        required: false
+        type: choice
+        default: build
+        options: [build, internal, external, production]
+      phased-release:
+        description: Enable 7-day phased release
+        required: false
+        type: boolean
+        default: true
+      dry-run:
+        description: Build without submitting
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # ─── BUILD XCODE PROJECT ───────────────────────────────────────────────────
+  build-xcode:
+    name: Build Xcode Project
+    if: inputs.start-phase == 'build'
+    uses: ./.github/workflows/unity-build-ios.yml
+    with:
+      project-path: ${{ inputs.project-path || '.' }}
+      unity-version: ${{ inputs.unity-version }}
+      build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
+      build-version: ${{ inputs.build-version }}
+      environment: production
+      clean-build: true
+      build-addressables: ${{ inputs.build-addressables == '' && true || inputs.build-addressables }}
+      upload-artifact: true
+      ios-runner-label: ${{ inputs.ios-runner-label || 'macos-unity-xcode' }}
+      workflow-repository: ${{ inputs.workflow-repository || '' }}
+      workflow-ref: ${{ inputs.workflow-ref || '' }}
+      integration-mode: ${{ inputs.integration-mode || 'remote' }}
+      toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
+    secrets: inherit
+
+  # ─── ARCHIVE & EXPORT IPA ──────────────────────────────────────────────────
+  archive-export:
+    name: Archive & Export IPA
+    needs: [build-xcode]
+    if: |
+      always() &&
+      (inputs.start-phase == 'build' && needs.build-xcode.result == 'success')
+    runs-on: ${{ inputs.ios-runner-label || 'macos-unity-xcode' }}
+    outputs:
+      ipa-artifact-name: ${{ steps.set-artifact.outputs.ipa-artifact-name }}
+      bundle-id: ${{ steps.archive.outputs.bundle-id }}
+      bundle-version: ${{ steps.archive.outputs.bundle-version }}
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Download Xcode project
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ needs.build-xcode.outputs.artifact-name }}
+          path: xcode-project/
+
+      - name: Setup signing
+        id: signing
+        uses: ./.github/actions/ios-setup-signing
+        with:
+          ios-distribution-certificate-base64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          ios-distribution-certificate-password: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          ios-provisioning-profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          export-method: ${{ inputs.export-method || 'app-store' }}
+
+      - name: Find Xcode project
+        id: find-project
+        shell: bash
+        run: |
+          XCODEPROJ=$(find xcode-project/ -name '*.xcodeproj' -type d | head -1)
+          if [[ -z "${XCODEPROJ}" ]]; then
+            echo "::error::No .xcodeproj found in artifact"
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "${XCODEPROJ}")
+          echo "project-dir=${PROJECT_DIR}" >> "${GITHUB_OUTPUT}"
+          echo "[archive] Found: ${XCODEPROJ}"
+
+      - name: Archive and export
+        id: archive
+        uses: ./.github/actions/ios-archive-export
+        with:
+          xcode-project-path: ${{ steps.find-project.outputs.project-dir }}
+          export-options-path: ${{ steps.signing.outputs.export-options-path }}
+          development-team: ${{ steps.signing.outputs.development-team || '' }}
+          archive-path: build-output/${{ inputs.app-name || 'Unity' }}.xcarchive
+          export-path: build-output/ipa
+
+      - name: Validate IPA
+        shell: bash
+        run: |
+          IPA="${{ steps.archive.outputs.ipa-path }}"
+          if [[ ! -f "${IPA}" ]]; then
+            echo "::error::IPA not found at ${IPA}"
+            exit 1
+          fi
+          SIZE=$(stat -f%z "${IPA}" 2>/dev/null || stat -c%s "${IPA}")
+          echo "[validate] IPA: $(basename "${IPA}") (${SIZE} bytes)"
+          if [[ "${SIZE}" -lt 5000 ]]; then
+            echo "::error::IPA suspiciously small (${SIZE} bytes)"
+            exit 1
+          fi
+          echo "[validate] IPA OK"
+
+      - name: Upload IPA artifact
+        id: set-artifact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: ios-ipa-${{ inputs.build-version }}
+          path: |
+            ${{ steps.archive.outputs.ipa-path }}
+            build-output/${{ inputs.app-name || 'Unity' }}.xcarchive/dSYMs/
+          retention-days: 30
+
+      - name: Set output
+        shell: bash
+        run: echo "ipa-artifact-name=ios-ipa-${{ inputs.build-version }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Cleanup signing
+        if: always()
+        uses: ./.github/actions/ios-cleanup-signing
+        with:
+          keychain-name: ${{ steps.signing.outputs.keychain-name || '' }}
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### Archive & Export" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Bundle ID:** ${{ steps.archive.outputs.bundle-id }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Bundle Version:** ${{ steps.archive.outputs.bundle-version }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Export Method:** ${{ inputs.export-method || 'app-store' }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **IPA Artifact:** ios-ipa-${{ inputs.build-version }}" >> "${GITHUB_STEP_SUMMARY}"
+
+  # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
+  release-notes:
+    name: Generate Release Notes
+    needs: [build-xcode]
+    if: |
+      always() &&
+      (needs.build-xcode.result == 'success' || needs.build-xcode.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Generate notes
+        uses: ./.github/actions/generate-release-notes
+        with:
+          from-tag: ${{ inputs.from-tag }}
+          format: app-store-text
+          output-path: release-notes.txt
+
+      - name: Upload notes
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: ios-release-notes
+          path: release-notes.txt
+          retention-days: 7
+
+  # ─── PHASE 1: TESTFLIGHT INTERNAL ──────────────────────────────────────────
+  internal-testing:
+    name: 'Phase 1: TestFlight Internal'
+    needs: [archive-export, release-notes]
+    if: |
+      always() && !inputs.dry-run &&
+      (
+        needs.archive-export.result == 'success' ||
+        inputs.start-phase == 'internal'
+      )
+    runs-on: macos-latest
+    environment: internal-testing
+    outputs:
+      build-id: ${{ steps.upload.outputs.build-id }}
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Download IPA artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ needs.archive-export.outputs.ipa-artifact-name || format('ios-ipa-{0}', inputs.build-version) }}
+          path: ipa-artifact/
+
+      - name: Find IPA
+        id: find-ipa
+        shell: bash
+        run: |
+          IPA_PATH=$(find ipa-artifact/ -name '*.ipa' -type f | head -1)
+          if [[ -z "${IPA_PATH}" ]]; then
+            echo "::error::No .ipa file found in artifact"
+            exit 1
+          fi
+          echo "ipa-path=${IPA_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload to TestFlight + wait for processing
+        id: upload
+        uses: ./.github/actions/ios-testflight
+        with:
+          ipa-path: ${{ steps.find-ipa.outputs.ipa-path }}
+          app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          app-store-connect-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          app-store-connect-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          wait-for-processing: 'true'
+          app-id: ${{ inputs.app-id }}
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### Phase 1: TestFlight Internal" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build ID:** ${{ steps.upload.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Processing:** Complete" >> "${GITHUB_STEP_SUMMARY}"
+
+  # ─── PHASE 2: TESTFLIGHT EXTERNAL ──────────────────────────────────────────
+  external-testing:
+    name: 'Phase 2: TestFlight External'
+    needs: [internal-testing]
+    if: |
+      always() && !inputs.dry-run &&
+      (
+        needs.internal-testing.result == 'success' ||
+        inputs.start-phase == 'external'
+      )
+    runs-on: ubuntu-latest
+    environment: external-testing
+    outputs:
+      build-id: ${{ needs.internal-testing.outputs.build-id }}
+    steps:
+      - name: External testing gate
+        shell: bash
+        run: |
+          BUILD_ID="${{ needs.internal-testing.outputs.build-id }}"
+          echo "[ios-release] Build ID: ${BUILD_ID}"
+          echo "[ios-release] External beta review: add build to external TestFlight groups in App Store Connect."
+          echo "[ios-release] This environment gate ensures manual approval before external distribution."
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### Phase 2: TestFlight External" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build ID:** ${{ needs.internal-testing.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Approved for external TestFlight testing" >> "${GITHUB_STEP_SUMMARY}"
+
+  # ─── PHASE 3: APP STORE PRODUCTION ─────────────────────────────────────────
+  production-release:
+    name: 'Phase 3: App Store'
+    needs: [internal-testing, external-testing, release-notes]
+    if: |
+      always() && !inputs.dry-run &&
+      (
+        needs.external-testing.result == 'success' ||
+        inputs.start-phase == 'production'
+      )
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Resolve build ID
+        id: resolve
+        shell: bash
+        run: |
+          BUILD_ID="${{ needs.internal-testing.outputs.build-id || needs.external-testing.outputs.build-id }}"
+          if [[ -z "${BUILD_ID}" ]]; then
+            echo "::error::No build-id available from prior phases"
+            exit 1
+          fi
+          echo "build-id=${BUILD_ID}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download release notes
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ios-release-notes
+          path: ./
+        continue-on-error: true
+
+      - name: Submit for App Store review
+        uses: ./.github/actions/ios-asc-submit-review
+        with:
+          app-id: ${{ inputs.app-id }}
+          build-id: ${{ steps.resolve.outputs.build-id }}
+          version-string: ${{ inputs.version-string }}
+          phased-release: ${{ inputs.phased-release && 'true' || 'false' }}
+          release-notes-file: release-notes.txt
+          asc-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          asc-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          asc-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### Phase 3: App Store Submission" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Version:** ${{ inputs.version-string }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build ID:** ${{ steps.resolve.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Phased Release:** ${{ inputs.phased-release }}" >> "${GITHUB_STEP_SUMMARY}"

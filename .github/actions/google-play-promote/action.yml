@@ -1,0 +1,56 @@
+name: Google Play Track Promotion
+description: >
+  Promotes an existing build from one Google Play track to another without re-uploading.
+  Supports staged rollout and release notes.
+
+inputs:
+  package-name:
+    description: Android package name (e.g., com.company.app)
+    required: true
+  from-track:
+    description: Source track (internal/alpha/beta/production)
+    required: true
+  to-track:
+    description: Destination track (internal/alpha/beta/production)
+    required: true
+  rollout-fraction:
+    description: Rollout fraction 0.0-1.0 (default 1.0 = full rollout)
+    required: false
+    default: '1.0'
+  release-notes-path:
+    description: Path to JSON release notes file
+    required: false
+    default: ''
+  service-account-json:
+    description: Google Play service account JSON (prefer passing via env)
+    required: true
+
+outputs:
+  promotion-status:
+    description: Result of the promotion
+    value: ${{ steps.promote.outputs.promotion-status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet google-api-python-client google-auth
+
+    - name: Promote track
+      id: promote
+      shell: bash
+      env:
+        GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ inputs.service-account-json }}
+      run: |
+        ARGS=(
+          --package-name "${{ inputs.package-name }}"
+          --from-track "${{ inputs.from-track }}"
+          --to-track "${{ inputs.to-track }}"
+          --rollout-fraction "${{ inputs.rollout-fraction }}"
+        )
+        if [[ -n "${{ inputs.release-notes-path }}" ]]; then
+          ARGS+=(--release-notes-file "${{ inputs.release-notes-path }}")
+        fi
+        python3 "${{ github.action_path }}/../../../scripts/android/promote_google_play.py" "${ARGS[@]}"
+        echo "promotion-status=success" >> "${GITHUB_OUTPUT}"

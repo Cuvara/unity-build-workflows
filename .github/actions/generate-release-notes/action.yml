@@ -1,0 +1,48 @@
+name: Generate Release Notes
+description: >
+  Generates store-formatted release notes from git conventional commits.
+  Supports Google Play JSON, App Store text, and markdown formats.
+
+inputs:
+  from-tag:
+    description: Start tag/ref (empty = all commits up to to-ref)
+    required: false
+    default: ''
+  to-ref:
+    description: End ref (default HEAD)
+    required: false
+    default: 'HEAD'
+  format:
+    description: Output format (google-play-json / app-store-text / markdown)
+    required: false
+    default: 'google-play-json'
+  language:
+    description: Language code for store notes (default en-US)
+    required: false
+    default: 'en-US'
+  output-path:
+    description: Output file path
+    required: false
+    default: 'release-notes.json'
+
+outputs:
+  notes-file-path:
+    description: Path to generated release notes file
+    value: ${{ inputs.output-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Generate release notes
+      shell: bash
+      run: |
+        ARGS=(
+          --to-ref "${{ inputs.to-ref }}"
+          --format "${{ inputs.format }}"
+          --language "${{ inputs.language }}"
+          --output "${{ inputs.output-path }}"
+        )
+        if [[ -n "${{ inputs.from-tag }}" ]]; then
+          ARGS+=(--from-tag "${{ inputs.from-tag }}")
+        fi
+        python3 "${{ github.action_path }}/../../../scripts/common/generate_release_notes.py" "${ARGS[@]}"

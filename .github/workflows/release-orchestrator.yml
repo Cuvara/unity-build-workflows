@@ -1,0 +1,180 @@
+name: Release Orchestrator
+
+# Top-level release pipeline: Preflight → Version Bump → Per-Platform Pipelines
+# Consumer repos use this as their release workflow.
+# Supports Android, iOS, or both platforms.
+#
+# Each platform has its own self-contained pipeline:
+#   Android: build → validate → internal → external → production
+#   iOS: build → archive → validate → testflight → external → app store
+#
+# This is NOT a reusable workflow — it's a consumer-facing entry point.
+# Nesting: orchestrator → pipeline-*-release → unity-build-* = 3 levels (safe).
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform(s) to release
+        required: true
+        type: choice
+        options: [Android, iOS, Both]
+      bump-type:
+        description: Version bump type (none = use current version)
+        required: false
+        type: choice
+        default: none
+        options: [none, patch, minor, major]
+      rollout-percentage:
+        description: Production rollout percentage for Android (1-100)
+        required: false
+        type: number
+        default: 10
+      phased-release-ios:
+        description: Enable 7-day phased release for iOS
+        required: false
+        type: boolean
+        default: true
+      skip-external-testing:
+        description: Skip external testing phase (internal → production)
+        required: false
+        type: boolean
+        default: false
+      dry-run:
+        description: Build without deploying to stores
+        required: false
+        type: boolean
+        default: false
+
+      # ── Platform-specific required inputs ──
+      android-package-name:
+        description: Android package name (required for Android release)
+        required: false
+        type: string
+        default: ''
+      ios-app-id:
+        description: App Store Connect app ID (required for iOS release)
+        required: false
+        type: string
+        default: ''
+      unity-version:
+        description: Unity editor version (reads from ProjectVersion.txt if empty)
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  # ─── RESOLVE & VALIDATE ─────────────────────────────────────────────────────
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      build-android: ${{ steps.resolve.outputs.build-android }}
+      build-ios: ${{ steps.resolve.outputs.build-ios }}
+      version: ${{ steps.resolve.outputs.version }}
+      unity-version: ${{ steps.resolve.outputs.unity-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Resolve platform flags and version
+        id: resolve
+        shell: bash
+        run: |
+          PLATFORM="${{ inputs.platform }}"
+          echo "build-android=$([[ "${PLATFORM}" == "Android" || "${PLATFORM}" == "Both" ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
+          echo "build-ios=$([[ "${PLATFORM}" == "iOS" || "${PLATFORM}" == "Both" ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
+
+          # Read version from ProjectSettings
+          VERSION=$(grep -oP '^\s*bundleVersion:\s*\K[0-9]+\.[0-9]+\.[0-9]+' ProjectSettings/ProjectSettings.asset || echo "0.0.0")
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+          # Resolve Unity version
+          UNITY_VER="${{ inputs.unity-version }}"
+          if [[ -z "${UNITY_VER}" ]]; then
+            UNITY_VER=$(grep -oP 'm_EditorVersion:\s*\K\S+' ProjectSettings/ProjectVersion.txt || echo "")
+          fi
+          echo "unity-version=${UNITY_VER}" >> "${GITHUB_OUTPUT}"
+
+          echo "[orchestrator] Platform: ${PLATFORM}, Version: ${VERSION}, Unity: ${UNITY_VER}"
+
+      - name: Validate inputs
+        shell: bash
+        run: |
+          if [[ "${{ steps.resolve.outputs.build-android }}" == "true" && -z "${{ inputs.android-package-name }}" ]]; then
+            echo "::error::android-package-name is required for Android release"
+            exit 1
+          fi
+          if [[ "${{ steps.resolve.outputs.build-ios }}" == "true" && -z "${{ inputs.ios-app-id }}" ]]; then
+            echo "::error::ios-app-id is required for iOS release"
+            exit 1
+          fi
+          if [[ -z "${{ steps.resolve.outputs.unity-version }}" ]]; then
+            echo "::error::Unity version could not be resolved. Set unity-version input or check ProjectVersion.txt"
+            exit 1
+          fi
+
+  # ─── VERSION BUMP (optional) ────────────────────────────────────────────────
+  version-bump:
+    name: Version Bump
+    needs: [preflight]
+    if: inputs.bump-type != 'none'
+    uses: ./.github/workflows/version-bump.yml
+    with:
+      bump-type: ${{ inputs.bump-type }}
+
+  # ─── ANDROID PIPELINE ──────────────────────────────────────────────────────
+  android-release:
+    name: Android Release Pipeline
+    needs: [preflight, version-bump]
+    if: |
+      always() &&
+      needs.preflight.outputs.build-android == 'true' &&
+      (needs.version-bump.result == 'success' || needs.version-bump.result == 'skipped')
+    uses: ./.github/workflows/pipeline-android-release.yml
+    with:
+      unity-version: ${{ needs.preflight.outputs.unity-version }}
+      build-version: ${{ needs.preflight.outputs.version }}
+      package-name: ${{ inputs.android-package-name }}
+      rollout-percentage: ${{ inputs.rollout-percentage }}
+      skip-external: ${{ inputs.skip-external-testing }}
+      dry-run: ${{ inputs.dry-run }}
+    secrets: inherit
+
+  # ─── iOS PIPELINE ──────────────────────────────────────────────────────────
+  ios-release:
+    name: iOS Release Pipeline
+    needs: [preflight, version-bump]
+    if: |
+      always() &&
+      needs.preflight.outputs.build-ios == 'true' &&
+      (needs.version-bump.result == 'success' || needs.version-bump.result == 'skipped')
+    uses: ./.github/workflows/pipeline-ios-release.yml
+    with:
+      unity-version: ${{ needs.preflight.outputs.unity-version }}
+      build-version: ${{ needs.preflight.outputs.version }}
+      version-string: ${{ needs.preflight.outputs.version }}
+      app-id: ${{ inputs.ios-app-id }}
+      phased-release: ${{ inputs.phased-release-ios }}
+      dry-run: ${{ inputs.dry-run }}
+    secrets: inherit
+
+  # ─── FINAL REPORT ──────────────────────────────────────────────────────────
+  report:
+    name: Release Report
+    needs: [preflight, android-release, ios-release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        shell: bash
+        run: |
+          echo "## Release Report" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Platform | Pipeline | Status |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "|----------|----------|--------|" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| Android | android-release | ${{ needs.android-release.result || 'skipped' }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "| iOS | ios-release | ${{ needs.ios-release.result || 'skipped' }} |" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "**Version:** ${{ needs.preflight.outputs.version }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "**Dry Run:** ${{ inputs.dry-run }}" >> "${GITHUB_STEP_SUMMARY}"
