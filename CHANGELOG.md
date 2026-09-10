@@ -10,6 +10,27 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+- **The ssh submodule lane left a reused workspace's submodules empty.** `actions/checkout` runs
+  `git clean -ffdx` before fetching, which empties each submodule's working tree while leaving its
+  gitdir behind at the recorded commit. `git submodule update --init --recursive` then sees the
+  right SHA, concludes there is nothing to do, and restores nothing:
+
+  ```
+  Packages/com.gdk.core     1 entry (.git only, no package.json)
+  Assets/DOTSFoundation     1 entry (.git only)
+  ```
+
+  The build then proceeds against packages Unity cannot load. It fails much later, in the Unity
+  step, with hundreds of errors that point away from the cause — `BlueprintReader`, `Zenject`,
+  `Unity.Physics.Systems` and friends "not found", none of which name a submodule. Only a
+  self-hosted runner sees it, because a GitHub-hosted one starts from an empty workspace every time.
+
+  Pass `--force`, which is what `actions/checkout` itself uses on the token lane
+  (`submodule update --init --force --depth=1 --recursive`).
+  `tests/test_workflow_contract.py::TestSshSubmoduleUpdateIsForced` pins it.
+
+
 ## [2.2.4] — 2026-09-10
 
 ### Added
