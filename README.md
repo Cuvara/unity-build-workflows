@@ -153,7 +153,7 @@ jobs:
 
 > **Choosing `<ref>`:**
 > - Development / pre-release: `@main` (tracks latest) or `@<commit-sha>` (pinned)
-> - Stable release: use an exact released tag (e.g. `@vX.Y.Z`) — the latest is `@v2.2.2`; see [CHANGELOG.md](CHANGELOG.md) and the repository Releases page.
+> - Stable release: use an exact released tag (e.g. `@vX.Y.Z`) — the latest is `@v2.2.3`; see [CHANGELOG.md](CHANGELOG.md) and the repository Releases page.
 > - A floating `@vMAJOR` tag tracks the newest release of that major version. `@v2` is published and moves with each `v2.x.y` release; `@v1` is frozen at `v1.1.3` and receives no further updates.
 
 The executor (Docker or macOS) is selected automatically from `target-platform`. No `executor-mode` input exists.
@@ -272,7 +272,7 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@v
 
 Major version increments indicate breaking changes to the workflow input interface.
 
-Current version: **2.2.2** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **2.2.3** — see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -415,7 +415,7 @@ The caller workflow (`consumer-unity-build.yml`) uses a single
 `uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2`
 call with `secrets: inherit` — no per-secret wiring, no build scripts to copy.
 
-**Pin the version**: `@v2` (latest stable, auto-fixes) or `@v2.2.2` (exact) for
+**Pin the version**: `@v2` (latest stable, auto-fixes) or `@v2.2.3` (exact) for
 production; `@main` only for development. Keep `toolkit-ref:` set to the same
 ref. See [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md).
 
