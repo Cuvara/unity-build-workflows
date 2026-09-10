@@ -64,5 +64,5 @@ final_config = deep_merge(base.json, <environment>.json)
 Pin a specific release tag to control upgrades:
 
 ```yaml
-uses: OWNER/unity-build-workflows/.github/workflows/unity-build.yml@v2.2.4
+uses: OWNER/unity-build-workflows/.github/workflows/unity-build.yml@v2.2.5
 ```
