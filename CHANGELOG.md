@@ -10,6 +10,8 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+## [2.2.3] — 2026-09-10
+
 ### Fixed
 - **A CRLF `ProjectVersion.txt` failed the Unity version check against a value equal to it.**
   Unity writes `ProjectSettings/ProjectVersion.txt` with CRLF on Windows, so consumers commit it
@@ -732,7 +734,8 @@ This release migrates the entire build platform from native Unity Editor executi
 
 ---
 
-[Unreleased]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.2...HEAD
+[Unreleased]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.3...HEAD
+[2.2.3]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.1.0...v2.2.0
