@@ -73,7 +73,7 @@ uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2
 toolkit-ref:  'v2'   # MUST equal the @ref above
 ```
 
-`@v2` is the floating major tag and moves with each `v2.x.y` release; `@v2.2.1`
+`@v2` is the floating major tag and moves with each `v2.x.y` release; `@v2.2.2`
 pins exactly; `@main` is for developing the toolkit itself. **`@v1` is frozen at
 `v1.1.3`** and receives nothing further.
 

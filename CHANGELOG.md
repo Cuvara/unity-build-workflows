@@ -10,6 +10,8 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+## [2.2.2] — 2026-09-10
+
 ### Added
 - **`docs/NEW_PROJECT_END_TO_END.md`** — the guide that did not exist: one ordered pass from an
   empty Unity repository to a green build, and from there to building on your own machine. Repo
@@ -709,7 +711,9 @@ This release migrates the entire build platform from native Unity Editor executi
 
 ---
 
-[Unreleased]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.2...HEAD
+[2.2.2]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.1...v2.2.2
+[2.2.1]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/<WORKFLOW_OWNER>/unity-build-workflows/compare/v1.0.0...v2.0.0
