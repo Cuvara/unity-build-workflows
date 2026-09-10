@@ -335,7 +335,7 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           if-no-files-found: error
 
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy to Cloudflare Pages (deprecated — use dedicated release workflow)
         id: deploy
         if: inputs.deploy-target == 'cloudflare'
         shell: bash
@@ -346,6 +346,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          echo "::warning::deploy-target in unity-build-webgl.yml is deprecated. Migrate to a dedicated release workflow for phased releases."
           DEPLOY_URL=$(bash "${TOOLKIT_PATH}/scripts/webgl/deploy_cloudflare_pages.sh" \
             "$BUILD_PATH" "$ENVIRONMENT" "$BUILD_VERSION")
           echo "deploy-url=${DEPLOY_URL}" >> "$GITHUB_OUTPUT"

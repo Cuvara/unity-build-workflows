@@ -366,7 +366,7 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           if-no-files-found: error
 
-      - name: Deploy to Google Play
+      - name: Deploy to Google Play (deprecated — use pipeline-android-release.yml)
         if: inputs.deploy-target == 'google-play'
         shell: bash
         env:
@@ -375,6 +375,7 @@ jobs:
           BUILD_VERSION: ${{ inputs.build-version }}
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
+          echo "::warning::deploy-target in unity-build-android.yml is deprecated. Migrate to pipeline-android-release.yml for phased releases with approval gates."
           python3 "${TOOLKIT_PATH}/scripts/android/upload_google_play.py" \
             --build-path  "$BUILD_PATH" \
             --environment "$ENVIRONMENT" \

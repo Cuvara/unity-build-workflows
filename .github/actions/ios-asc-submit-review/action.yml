@@ -1,0 +1,77 @@
+name: iOS App Store Submit for Review
+description: >
+  Creates or finds an App Store version, attaches a build, and submits for review.
+  Optionally enables phased release. Uses App Store Connect API v2.
+
+inputs:
+  app-id:
+    description: App Store Connect app ID
+    required: true
+  build-id:
+    description: ASC build ID (from wait-for-build output)
+    required: true
+  version-string:
+    description: App Store version string (e.g., 1.2.3)
+    required: true
+  platform:
+    description: Platform (default IOS)
+    required: false
+    default: 'IOS'
+  phased-release:
+    description: Enable 7-day phased release
+    required: false
+    default: 'false'
+  release-notes-file:
+    description: Path to release notes text file for whatsNew field
+    required: false
+    default: ''
+  asc-key-id:
+    description: App Store Connect API key ID
+    required: true
+  asc-issuer-id:
+    description: App Store Connect API issuer ID
+    required: true
+  asc-private-key:
+    description: App Store Connect API private key (.p8 content)
+    required: true
+
+outputs:
+  version-id:
+    description: App Store version ID
+    value: ${{ steps.submit.outputs.version-id }}
+  submission-status:
+    description: Submission result (submitted/failed)
+    value: ${{ steps.submit.outputs.submission-status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet PyJWT cryptography
+
+    - name: Submit for review
+      id: submit
+      shell: bash
+      env:
+        ASC_KEY_ID: ${{ inputs.asc-key-id }}
+        ASC_ISSUER_ID: ${{ inputs.asc-issuer-id }}
+        ASC_PRIVATE_KEY: ${{ inputs.asc-private-key }}
+      run: |
+        echo "::add-mask::${{ inputs.asc-key-id }}"
+        echo "::add-mask::${{ inputs.asc-issuer-id }}"
+        echo "::add-mask::${{ inputs.asc-private-key }}"
+        ARGS=(
+          submit-for-review
+          --app-id "${{ inputs.app-id }}"
+          --build-id "${{ inputs.build-id }}"
+          --version-string "${{ inputs.version-string }}"
+          --platform "${{ inputs.platform }}"
+        )
+        if [[ "${{ inputs.phased-release }}" == "true" ]]; then
+          ARGS+=(--phased-release)
+        fi
+        if [[ -n "${{ inputs.release-notes-file }}" ]]; then
+          ARGS+=(--release-notes-file "${{ inputs.release-notes-file }}")
+        fi
+        python3 "${{ github.action_path }}/../../../scripts/ios/asc_api.py" "${ARGS[@]}"

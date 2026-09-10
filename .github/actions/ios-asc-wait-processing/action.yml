@@ -1,0 +1,57 @@
+name: iOS ASC Wait for Build Processing
+description: >
+  Polls App Store Connect API until a TestFlight build finishes processing.
+  Uses exponential backoff (30s → 5min). Outputs build-id when processing completes.
+
+inputs:
+  app-id:
+    description: App Store Connect app ID
+    required: true
+  build-version:
+    description: Build version string (CFBundleVersion) to wait for
+    required: true
+  timeout:
+    description: Timeout in seconds (default 1800 = 30 min)
+    required: false
+    default: '1800'
+  asc-key-id:
+    description: App Store Connect API key ID
+    required: true
+  asc-issuer-id:
+    description: App Store Connect API issuer ID
+    required: true
+  asc-private-key:
+    description: App Store Connect API private key (.p8 content)
+    required: true
+
+outputs:
+  build-id:
+    description: ASC build ID once processing is complete
+    value: ${{ steps.wait.outputs.build-id }}
+  processing-status:
+    description: Processing result (valid/invalid/failed/timeout)
+    value: ${{ steps.wait.outputs.processing-status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet PyJWT cryptography
+
+    - name: Wait for build processing
+      id: wait
+      shell: bash
+      env:
+        ASC_KEY_ID: ${{ inputs.asc-key-id }}
+        ASC_ISSUER_ID: ${{ inputs.asc-issuer-id }}
+        ASC_PRIVATE_KEY: ${{ inputs.asc-private-key }}
+      run: |
+        echo "::add-mask::${{ inputs.asc-key-id }}"
+        echo "::add-mask::${{ inputs.asc-issuer-id }}"
+        echo "::add-mask::${{ inputs.asc-private-key }}"
+        python3 "${{ github.action_path }}/../../../scripts/ios/asc_api.py" \
+          wait-for-build \
+          --app-id "${{ inputs.app-id }}" \
+          --build-version "${{ inputs.build-version }}" \
+          --timeout "${{ inputs.timeout }}"

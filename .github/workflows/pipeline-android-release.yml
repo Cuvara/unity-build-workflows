@@ -1,0 +1,389 @@
+name: Pipeline Android Release
+
+# Self-contained Android release pipeline:
+#   Build AAB → Validate → Release Notes → Internal Testing → External Testing → Production
+#
+# Each release phase is a separate job gated by GitHub Environments.
+# The build step calls unity-build-android.yml with deploy-target=none (no embedded deploy).
+# Store deployment uses dedicated scripts and composite actions.
+#
+# Nesting depth: orchestrator → this → unity-build-android = 3 levels (safe).
+
+on:
+  workflow_call:
+    inputs:
+      # ── Build inputs ──
+      project-path:
+        type: string
+        required: false
+        default: '.'
+      unity-version:
+        type: string
+        required: true
+      build-config-path:
+        type: string
+        required: false
+        default: BuildConfig
+      build-version:
+        type: string
+        required: true
+      build-addressables:
+        type: boolean
+        required: false
+        default: true
+      image-registry:
+        type: string
+        required: false
+        default: ghcr.io
+      image-namespace:
+        type: string
+        required: false
+        default: ''
+      image-name:
+        type: string
+        required: false
+        default: ''
+      image-digest:
+        type: string
+        required: false
+        default: ''
+      workflow-repository:
+        type: string
+        required: false
+        default: ''
+      workflow-ref:
+        type: string
+        required: false
+        default: ''
+      integration-mode:
+        type: string
+        required: false
+        default: remote
+      toolkit-path:
+        type: string
+        required: false
+        default: tools/unity-build-workflows
+
+      # ── Release inputs ──
+      package-name:
+        description: Android package name (e.g., com.company.app)
+        type: string
+        required: true
+      start-phase:
+        description: Phase to start from (build/internal/external/production)
+        type: string
+        required: false
+        default: build
+      rollout-percentage:
+        description: Production rollout percentage (1-100, default 100)
+        type: number
+        required: false
+        default: 100
+      skip-external:
+        description: Skip external testing phase (internal → production)
+        type: boolean
+        required: false
+        default: false
+      from-tag:
+        description: Git tag to generate release notes from
+        type: string
+        required: false
+        default: ''
+      dry-run:
+        description: Build without deploying to store
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      UNITY_LICENSE:
+        required: false
+      UNITY_EMAIL:
+        required: false
+      UNITY_PASSWORD:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASS:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASS:
+        required: false
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
+        required: true
+
+    outputs:
+      artifact-name:
+        description: Name of the build artifact
+        value: ${{ jobs.build-aab.outputs.artifact-name }}
+
+  workflow_dispatch:
+    inputs:
+      unity-version:
+        description: Unity editor version
+        required: true
+        type: string
+      build-version:
+        description: Build version string
+        required: true
+        type: string
+      package-name:
+        description: Android package name
+        required: true
+        type: string
+      start-phase:
+        description: Phase to start from
+        required: false
+        type: choice
+        default: build
+        options: [build, internal, external, production]
+      rollout-percentage:
+        description: Production rollout percentage (1-100)
+        required: false
+        type: number
+        default: 100
+      skip-external:
+        description: Skip external testing phase
+        required: false
+        type: boolean
+        default: false
+      dry-run:
+        description: Build without deploying
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # ─── BUILD AAB ──────────────────────────────────────────────────────────────
+  build-aab:
+    name: Build AAB
+    if: inputs.start-phase == 'build'
+    uses: ./.github/workflows/unity-build-android.yml
+    with:
+      project-path: ${{ inputs.project-path || '.' }}
+      unity-version: ${{ inputs.unity-version }}
+      build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
+      build-version: ${{ inputs.build-version }}
+      environment: production
+      release-mode: true
+      deploy-target: none
+      clean-build: true
+      build-addressables: ${{ inputs.build-addressables == '' && true || inputs.build-addressables }}
+      upload-artifact: true
+      image-registry: ${{ inputs.image-registry || 'ghcr.io' }}
+      image-namespace: ${{ inputs.image-namespace || '' }}
+      image-name: ${{ inputs.image-name || '' }}
+      image-digest: ${{ inputs.image-digest || '' }}
+      workflow-repository: ${{ inputs.workflow-repository || '' }}
+      workflow-ref: ${{ inputs.workflow-ref || '' }}
+      integration-mode: ${{ inputs.integration-mode || 'remote' }}
+      toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
+    secrets: inherit
+
+  # ─── VALIDATE AAB ───────────────────────────────────────────────────────────
+  validate-aab:
+    name: Validate AAB
+    needs: [build-aab]
+    if: |
+      always() &&
+      (inputs.start-phase == 'build' && needs.build-aab.result == 'success')
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ needs.build-aab.outputs.artifact-name }}
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ needs.build-aab.outputs.artifact-name }}
+          path: build-artifact/
+
+      - name: Validate build artifact
+        shell: bash
+        run: |
+          AAB=$(find build-artifact/ -name '*.aab' -type f | head -1)
+          APK=$(find build-artifact/ -name '*.apk' -type f | head -1)
+          ARTIFACT="${AAB:-$APK}"
+          if [[ -z "${ARTIFACT}" ]]; then
+            echo "::error::No AAB or APK found in artifact"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "${ARTIFACT}" 2>/dev/null || stat -f%z "${ARTIFACT}")
+          echo "[validate] Found: $(basename "${ARTIFACT}") (${SIZE} bytes)"
+          if [[ "${SIZE}" -lt 1000 ]]; then
+            echo "::error::Artifact suspiciously small (${SIZE} bytes)"
+            exit 1
+          fi
+          echo "[validate] Artifact OK"
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### Build Validation" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Artifact:** ${{ needs.build-aab.outputs.artifact-name }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Status:** Passed" >> "${GITHUB_STEP_SUMMARY}"
+
+  # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
+  release-notes:
+    name: Generate Release Notes
+    needs: [build-aab]
+    if: |
+      always() &&
+      (needs.build-aab.result == 'success' || needs.build-aab.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Generate notes
+        uses: ./.github/actions/generate-release-notes
+        with:
+          from-tag: ${{ inputs.from-tag }}
+          format: google-play-json
+          output-path: release-notes.json
+
+      - name: Upload notes
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: android-release-notes
+          path: release-notes.json
+          retention-days: 7
+
+  # ─── PHASE 1: INTERNAL TESTING ──────────────────────────────────────────────
+  internal-testing:
+    name: 'Phase 1: Internal Testing'
+    needs: [build-aab, validate-aab, release-notes]
+    if: |
+      always() && !inputs.dry-run &&
+      (
+        (inputs.start-phase == 'build' && needs.validate-aab.result == 'success') ||
+        inputs.start-phase == 'internal'
+      )
+    runs-on: ubuntu-latest
+    environment: internal-testing
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Download build artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ needs.build-aab.outputs.artifact-name || inputs.artifact-name }}
+          path: build-artifact/
+
+      - name: Download release notes
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: android-release-notes
+          path: ./
+        continue-on-error: true
+
+      - name: Install dependencies
+        run: pip install --quiet google-api-python-client google-auth
+
+      - name: Upload to internal track
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          ARGS=(
+            --build-path build-artifact/
+            --version "${{ inputs.build-version }}"
+            --track internal
+            --package-name "${{ inputs.package-name }}"
+          )
+          if [[ -f release-notes.json ]]; then
+            ARGS+=(--release-notes-file release-notes.json)
+          fi
+          python3 scripts/android/upload_google_play.py "${ARGS[@]}"
+
+      - name: Summary
+        run: |
+          echo "### Phase 1: Internal Testing" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Package:** ${{ inputs.package-name }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Version:** ${{ inputs.build-version }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Track:** internal" >> "${GITHUB_STEP_SUMMARY}"
+
+  # ─── PHASE 2: EXTERNAL TESTING ─────────────────────────────────────────────
+  external-testing:
+    name: 'Phase 2: External Testing'
+    needs: [internal-testing]
+    if: |
+      always() && !inputs.dry-run && !inputs.skip-external &&
+      (
+        needs.internal-testing.result == 'success' ||
+        inputs.start-phase == 'external'
+      )
+    runs-on: ubuntu-latest
+    environment: external-testing
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Promote to alpha track
+        uses: ./.github/actions/google-play-promote
+        with:
+          package-name: ${{ inputs.package-name }}
+          from-track: internal
+          to-track: alpha
+          service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+
+      - name: Summary
+        run: |
+          echo "### Phase 2: External Testing" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Promoted:** internal → alpha" >> "${GITHUB_STEP_SUMMARY}"
+
+  # ─── PHASE 3: PRODUCTION ───────────────────────────────────────────────────
+  production-release:
+    name: 'Phase 3: Production'
+    needs: [internal-testing, external-testing, release-notes]
+    if: |
+      always() && !inputs.dry-run &&
+      (
+        inputs.start-phase == 'production' ||
+        needs.external-testing.result == 'success' ||
+        (inputs.skip-external && needs.internal-testing.result == 'success')
+      )
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Download release notes
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: android-release-notes
+          path: ./
+        continue-on-error: true
+
+      - name: Determine source track
+        id: source
+        run: |
+          if [[ "${{ inputs.skip-external }}" == "true" ]]; then
+            echo "track=internal" >> "${GITHUB_OUTPUT}"
+          else
+            echo "track=alpha" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Promote to production
+        uses: ./.github/actions/google-play-promote
+        with:
+          package-name: ${{ inputs.package-name }}
+          from-track: ${{ steps.source.outputs.track }}
+          to-track: production
+          rollout-fraction: ${{ format('{0}', inputs.rollout-percentage / 100) }}
+          release-notes-path: release-notes.json
+          service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+
+      - name: Summary
+        run: |
+          ROLLOUT="${{ inputs.rollout-percentage }}"
+          echo "### Phase 3: Production" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Source:** ${{ steps.source.outputs.track }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Rollout:** ${ROLLOUT}%" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ "${ROLLOUT}" -lt 100 ]]; then
+            echo "" >> "${GITHUB_STEP_SUMMARY}"
+            echo "Staged rollout active. Use \`update_rollout.py --rollout-fraction X\` to adjust." >> "${GITHUB_STEP_SUMMARY}"
+          fi

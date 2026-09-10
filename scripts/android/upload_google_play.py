@@ -28,6 +28,8 @@ def upload_to_play(
     package_name: str,
     track: str,
     version_code: int | None,
+    rollout_fraction: float = 1.0,
+    release_notes_file: str | None = None,
 ) -> dict:
     """Upload artifact to Google Play. Returns upload response."""
     try:
@@ -84,15 +86,37 @@ def upload_to_play(
 
     vcode = version_code or upload_response.get("versionCode", 0)
 
+    # Build release object
+    release = {
+        "versionCodes": [str(vcode)],
+    }
+    if 0.0 < rollout_fraction < 1.0:
+        release["status"] = "inProgress"
+        release["userFraction"] = rollout_fraction
+        print(f"[upload_google_play] Staged rollout: {rollout_fraction * 100:.0f}%")
+    else:
+        release["status"] = "completed"
+
+    # Attach release notes if provided
+    if release_notes_file:
+        notes_path = Path(release_notes_file)
+        if notes_path.is_file():
+            with open(notes_path) as nf:
+                notes_data = json.load(nf)
+            # Format: {"en-US": "text", "vi": "text"} or [{"language": "en-US", "text": "..."}]
+            if isinstance(notes_data, dict):
+                release["releaseNotes"] = [
+                    {"language": lang, "text": text}
+                    for lang, text in notes_data.items()
+                ]
+            elif isinstance(notes_data, list):
+                release["releaseNotes"] = notes_data
+            print(f"[upload_google_play] Release notes loaded from {notes_path.name}")
+
     # Assign to track
     track_body = {
         "track": track,
-        "releases": [
-            {
-                "versionCodes": [str(vcode)],
-                "status": "completed",
-            }
-        ],
+        "releases": [release],
     }
     service.edits().tracks().update(
         packageName=package_name,
@@ -116,6 +140,17 @@ def main() -> None:
     parser.add_argument("--version", required=True, help="Build version string")
     parser.add_argument("--track", default="internal", help="Google Play track (internal/alpha/beta/production)")
     parser.add_argument("--package-name", default="", help="Android package name (overrides config)")
+    parser.add_argument(
+        "--rollout-fraction",
+        type=float,
+        default=1.0,
+        help="Rollout fraction 0.0-1.0 (default: 1.0 = full rollout)",
+    )
+    parser.add_argument(
+        "--release-notes-file",
+        default="",
+        help="Path to JSON release notes file ({lang: text} or [{language, text}])",
+    )
     args = parser.parse_args()
 
     service_account_json = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
@@ -159,6 +194,8 @@ def main() -> None:
         package_name=package_name,
         track=track,
         version_code=None,
+        rollout_fraction=args.rollout_fraction,
+        release_notes_file=args.release_notes_file or None,
     )
     print(f"[upload_google_play] Successfully uploaded v{args.version} to {track}")
 
