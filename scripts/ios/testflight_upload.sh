@@ -8,7 +8,9 @@
 #   APP_STORE_CONNECT_ISSUER_ID    — ASC API issuer ID
 #   APP_STORE_CONNECT_PRIVATE_KEY  — ASC API private key (.p8 content)
 # Optional:
-#   REPORT_PATH   — directory for upload status reports (default: BuildReports/iOS)
+#   REPORT_PATH            — directory for upload status reports (default: BuildReports/iOS)
+#   WAIT_FOR_PROCESSING    — if "true", poll ASC API until build finishes processing
+#   ASC_APP_ID             — App Store Connect app ID (required when WAIT_FOR_PROCESSING=true)
 set -euo pipefail
 
 IPA_PATH="${IPA_PATH:?IPA_PATH is required}"
@@ -97,4 +99,36 @@ echo "[testflight_upload] ASC API key scrubbed"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'upload-status=upload-accepted\n' >> "${GITHUB_OUTPUT}"
+fi
+
+# Optional: wait for build processing via ASC API
+WAIT_FOR_PROCESSING="${WAIT_FOR_PROCESSING:-false}"
+if [[ "${WAIT_FOR_PROCESSING}" == "true" ]]; then
+  ASC_APP_ID="${ASC_APP_ID:?ASC_APP_ID is required when WAIT_FOR_PROCESSING=true}"
+  # Extract CFBundleVersion from IPA for build version filter
+  BUILD_VERSION=""
+  if command -v unzip &>/dev/null; then
+    PLIST_CONTENT=$(unzip -p "${IPA_PATH}" "Payload/*.app/Info.plist" 2>/dev/null || true)
+    if [[ -n "${PLIST_CONTENT}" ]] && command -v plutil &>/dev/null; then
+      BUILD_VERSION=$(echo "${PLIST_CONTENT}" | plutil -extract CFBundleVersion raw - 2>/dev/null || true)
+    fi
+  fi
+  if [[ -z "${BUILD_VERSION}" ]]; then
+    echo "[testflight_upload] WARNING: Could not extract CFBundleVersion from IPA, using version from metadata" >&2
+    BUILD_VERSION=$(python3 -c "import json; print(json.load(open('${REPORT_PATH}/upload-metadata.json')).get('build_version',''))" 2>/dev/null || true)
+  fi
+
+  if [[ -n "${BUILD_VERSION}" ]]; then
+    echo "[testflight_upload] Waiting for build ${BUILD_VERSION} to finish processing..."
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    export ASC_KEY_ID="${KEY_ID}"
+    export ASC_ISSUER_ID="${ISSUER_ID}"
+    export ASC_PRIVATE_KEY="${PRIVATE_KEY}"
+    python3 "${SCRIPT_DIR}/asc_api.py" wait-for-build \
+      --app-id "${ASC_APP_ID}" \
+      --build-version "${BUILD_VERSION}" \
+      --timeout "${ASC_WAIT_TIMEOUT:-1800}"
+  else
+    echo "[testflight_upload] WARNING: No build version found, skipping processing wait" >&2
+  fi
 fi

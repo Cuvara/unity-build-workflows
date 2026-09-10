@@ -22,11 +22,29 @@ inputs:
     description: Directory to write upload-metadata.json and logs
     required: false
     default: BuildReports/iOS
+  wait-for-processing:
+    description: If true, poll ASC API until build finishes processing after upload
+    required: false
+    default: 'false'
+  app-id:
+    description: App Store Connect app ID (required when wait-for-processing is true)
+    required: false
+    default: ''
+  wait-timeout:
+    description: Timeout in seconds for build processing wait (default 1800)
+    required: false
+    default: '1800'
 
 outputs:
   upload-status:
     description: Upload result — upload-accepted or failed
     value: ${{ steps.upload.outputs.upload-status }}
+  build-id:
+    description: ASC build ID (only set when wait-for-processing is true and build is valid)
+    value: ${{ steps.upload.outputs.build-id }}
+  processing-status:
+    description: Build processing status (valid/invalid/failed/timeout)
+    value: ${{ steps.upload.outputs.processing-status }}
 
 runs:
   using: composite
@@ -40,4 +58,11 @@ runs:
         APP_STORE_CONNECT_ISSUER_ID: ${{ inputs.app-store-connect-issuer-id }}
         APP_STORE_CONNECT_PRIVATE_KEY: ${{ inputs.app-store-connect-private-key }}
         REPORT_PATH: ${{ inputs.report-path }}
-      run: bash "${{ github.action_path }}/../../../scripts/ios/testflight_upload.sh"
+        WAIT_FOR_PROCESSING: ${{ inputs.wait-for-processing }}
+        ASC_APP_ID: ${{ inputs.app-id }}
+        ASC_WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
+      run: |
+        if [[ "${{ inputs.wait-for-processing }}" == "true" ]]; then
+          pip install --quiet PyJWT cryptography
+        fi
+        bash "${{ github.action_path }}/../../../scripts/ios/testflight_upload.sh"
