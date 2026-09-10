@@ -691,3 +691,37 @@ class TestSubmoduleAuthIsForwarded:
             assert any(
                 s.get("name") == "Fetch submodules over SSH" for s in iter_steps(workflow)
             ), f"{name} disables the checkout fetch but never fetches over SSH"
+
+
+# ---------------------------------------------------------------------------
+# The ssh submodule lane must force the checkout
+# ---------------------------------------------------------------------------
+
+class TestSshSubmoduleUpdateIsForced:
+    """
+    actions/checkout runs `git clean -ffdx` on a reused workspace, which empties a
+    submodule's working tree while leaving its gitdir at the recorded commit. A
+    plain `git submodule update` then sees the right SHA, concludes there is
+    nothing to do, and leaves the directory empty — on a self-hosted runner the
+    build proceeds against packages that have no package.json, and Unity fails
+    with hundreds of unrelated-looking CS0246 errors.
+    """
+
+    def test_submodule_update_passes_force(self, workflows_dir):
+        offenders = []
+        for path in sorted(workflows_dir.glob("*.yml")):
+            for step in iter_steps(load_workflow(path)):
+                run = str(step.get("run") or "")
+                if "submodule update" not in run:
+                    continue
+                for line in run.splitlines():
+                    line = line.strip()
+                    if not line.startswith("git submodule update"):
+                        continue
+                    if "--force" not in line and "-f " not in line:
+                        offenders.append(f"  {path.name} :: {step.get('name')} :: {line}")
+
+        assert not offenders, (
+            "`git submodule update` without --force silently no-ops on a workspace "
+            "that git clean has emptied:\n" + "\n".join(offenders)
+        )

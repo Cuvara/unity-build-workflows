@@ -224,7 +224,12 @@ jobs:
 
           export GIT_SSH_COMMAND="ssh ${_ssh_opts}"
           git submodule sync --recursive
-          git submodule update --init --recursive
+          # --force is not optional. actions/checkout runs `git clean -ffdx`, which
+          # empties a submodule's working tree while leaving its gitdir behind at the
+          # recorded commit. Without --force, `submodule update` sees the right SHA,
+          # concludes there is nothing to do, and leaves the directory empty — Unity
+          # then opens a project whose embedded packages have no package.json.
+          git submodule update --init --recursive --force
 
       # ── 3. Cache Library ──────────────────────────────────────────────────────
       - name: Cache Library
