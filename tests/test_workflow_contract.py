@@ -533,3 +533,53 @@ class TestDockerOnlyWorkflowContract:
             pytest.skip("unity-build-webgl.yml not present")
         checker = TestAlwaysConditionOnUploadSteps()
         checker._check_workflow_upload_steps(load_workflow(path), "unity-build-webgl.yml")
+
+
+# ---------------------------------------------------------------------------
+# Sparse checkout must respect project-path
+# ---------------------------------------------------------------------------
+
+class TestSparseCheckoutHonoursProjectPath:
+    """
+    A sparse-checkout pattern that contains a slash is anchored to the repository
+    root in non-cone mode. Any workflow that checks out a consumer project file
+    sparsely and then reads it under `inputs.project-path` must therefore either
+    lead with '**/' or interpolate the project path — otherwise a project living
+    in a subdirectory checks out nothing and the step fails.
+    """
+
+    def _sparse_patterns(self, workflow: dict):
+        for step in iter_steps(workflow):
+            patterns = (step.get("with") or {}).get("sparse-checkout")
+            if patterns:
+                for line in str(patterns).splitlines():
+                    line = line.strip()
+                    if line:
+                        yield step.get("name", "<unnamed step>"), line
+
+    def test_project_file_patterns_match_at_any_depth(self, workflows_dir):
+        offenders = []
+        for path in sorted(workflows_dir.glob("*.yml")):
+            workflow = load_workflow(path)
+            if not isinstance(workflow, dict):
+                continue
+            for step_name, pattern in self._sparse_patterns(workflow):
+                if "/" not in pattern:
+                    continue  # unanchored already: matches at any depth
+                if pattern.startswith("**/") or "project-path" in pattern:
+                    continue
+                offenders.append(f"  {path.name} :: {step_name} :: {pattern}")
+
+        assert not offenders, (
+            "Root-anchored sparse-checkout patterns break a project-path in a "
+            "subdirectory. Lead with '**/' or interpolate inputs.project-path:\n"
+            + "\n".join(offenders)
+        )
+
+    def test_pipeline_checks_out_the_project_version_it_reads(self, workflows_dir):
+        workflow = load_workflow(workflows_dir / "unity-pipeline.yml")
+        patterns = [p for _, p in self._sparse_patterns(workflow)]
+        assert "**/ProjectSettings/ProjectVersion.txt" in patterns, (
+            "resolve-config reads ${PROJECT_PATH}/ProjectSettings/ProjectVersion.txt, "
+            f"so it must sparsely check it out at any depth. Patterns found: {patterns}"
+        )

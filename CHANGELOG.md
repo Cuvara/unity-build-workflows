@@ -32,6 +32,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   your machine.
 
 ### Fixed
+- **A Unity project in a subdirectory could never resolve its Unity version.** `resolve-config`
+  checked out `ProjectSettings/ProjectVersion.txt` sparsely with
+  `sparse-checkout-cone-mode: false` (`unity-pipeline.yml:207-209`), then read the file back at
+  `${PROJECT_PATH%/}/ProjectSettings/ProjectVersion.txt` (`:223`). A non-cone pattern containing a
+  slash is a gitignore-style pattern anchored to the repository root, so for any caller passing a
+  `project-path` other than `.` the checkout produced nothing at the path the next step reads, and
+  the job failed on its first step:
+
+  ```
+  ::error::ProjectVersion.txt not found at UnityBackpackRoguelike/ProjectSettings/ProjectVersion.txt
+  ```
+
+  The file was present in the repository and `project-path` was correct — only the checkout was
+  wrong. The pattern now leads with `**/`, which matches at any depth including the repository
+  root, so both `project-path: '.'` and a subdirectory work, and a trailing slash on the input is
+  harmless. `tests/test_workflow_contract.py::TestSparseCheckoutHonoursProjectPath` pins it for
+  every workflow, not just this one.
+
 - **The onboarding docs demanded three Unity secrets where the pipeline needs one.**
   `CONSUMER_SETUP.md` and `NEW_PROJECT_END_TO_END.md` both stated that `UNITY_EMAIL`,
   `UNITY_PASSWORD` and `UNITY_LICENSE` "must be set together", quoting the `personal-combined`
