@@ -358,14 +358,19 @@ jobs:
           path: ./
         continue-on-error: true
 
-      - name: Determine source track
+      - name: Determine source track and rollout fraction
         id: source
+        shell: bash
         run: |
           if [[ "${{ inputs.skip-external }}" == "true" ]]; then
             echo "track=internal" >> "${GITHUB_OUTPUT}"
           else
             echo "track=alpha" >> "${GITHUB_OUTPUT}"
           fi
+          # Compute rollout fraction (percentage / 100)
+          PERCENT="${{ inputs.rollout-percentage }}"
+          FRACTION=$(python3 -c "print(${PERCENT} / 100.0)")
+          echo "rollout-fraction=${FRACTION}" >> "${GITHUB_OUTPUT}"
 
       - name: Promote to production
         uses: ./.github/actions/google-play-promote
@@ -373,7 +378,7 @@ jobs:
           package-name: ${{ inputs.package-name }}
           from-track: ${{ steps.source.outputs.track }}
           to-track: production
-          rollout-fraction: ${{ format('{0}', inputs.rollout-percentage / 100) }}
+          rollout-fraction: ${{ steps.source.outputs.rollout-fraction }}
           release-notes-path: release-notes.json
           service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
 
