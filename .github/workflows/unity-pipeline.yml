@@ -192,6 +192,20 @@ on:
           self-hosted runner usually already has.
         required: false
 
+# The pipeline's stages, declared once. Every job renders this same ladder with
+# itself marked, so the run summary grows into a progress view while the run is
+# still going — GitHub draws no progress on a workflow node, and the graph
+# shows shape without distance.
+env:
+  PIPELINE_STAGES: |
+    01 Prepare
+    02 Quality Gate
+    03 Build
+    03b Sign iOS
+    04 Validate
+    05 Release Manifest
+    07 Report
+
 jobs:
 
   # ════════════════════════════════════════════════════════════════════════════
@@ -938,9 +952,7 @@ jobs:
             exit 1
           fi
 
-  # ════════════════════════════════════════════════════════════════════════════
-  # JOB 4: build-addressables
-  # ════════════════════════════════════════════════════════════════════════════
+
   build-addressables:
     name: 03 / Addressables
     needs: [resolve-config, quality-gate]
@@ -1203,6 +1215,17 @@ jobs:
         with:
           keychain-name: ${{ steps.signing.outputs.keychain-name || '' }}
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Build / ${{ needs.resolve-config.outputs.build-type == 'release' && 'Release' || 'Development' }}
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 03b Sign iOS
+          toolkit-path: .toolkit
+
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 04 — ARTIFACT VALIDATION  (one matrix job, not one job per platform)
   # ════════════════════════════════════════════════════════════════════════════
@@ -1211,8 +1234,10 @@ jobs:
   # loader next to a brotli wasm, or an Xcode export missing Libraries/ — all
   # exit 0, all fail hours later in a store upload or a blank browser canvas.
   #
-  # The matrix carries only platforms that HAVE a validator, so Linux and
-  # Windows contribute no node rather than a permanently skipped one.
+  # Every platform has a validator now: Android, iOS and WebGL their own,
+  # Windows and both Linux targets the shared `desktop` one. A platform with
+  # no validator would contribute no node rather than a permanently skipped
+  # one, but there is no longer such a platform.
   #
   # `needs: [build]` is the whole build matrix, which means a failed iOS leg
   # delays Android's validation until the matrix settles. That is a GitHub
@@ -1223,6 +1248,7 @@ jobs:
   # A plain job, not a workflow_call: caller → unity-pipeline →
   # reusable-build-platform already spends 3 of GitHub's 4 nesting levels.
   # ════════════════════════════════════════════════════════════════════════════
+
   validate-artifact:
     name: 04 / ${{ matrix.platform }} / Validate ${{ matrix.artifact-type }}
     # sign-ios produces the iOS release artifact, so validation waits for it.
@@ -1352,6 +1378,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Build / ${{ needs.resolve-config.outputs.build-type == 'release' && 'Release' || 'Development' }}
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Validate
+          toolkit-path: .toolkit
+
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 05 — RELEASE MANIFEST  (release builds only)
   # ════════════════════════════════════════════════════════════════════════════
@@ -1365,6 +1402,7 @@ jobs:
   # It runs after validation, so an artifact that failed stage 04 never becomes
   # part of a promotable set.
   # ════════════════════════════════════════════════════════════════════════════
+
   release-manifest:
     name: 05 / Release Manifest
     needs: [resolve-config, build, sign-ios, validate-artifact]
@@ -1424,6 +1462,17 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Build / ${{ needs.resolve-config.outputs.build-type == 'release' && 'Release' || 'Development' }}
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 05 Release Manifest
+          toolkit-path: .toolkit
+
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 07 — FINAL REPORT
   # ════════════════════════════════════════════════════════════════════════════
@@ -1437,6 +1486,7 @@ jobs:
   # here, and it carries real per-platform artifact type, size and duration
   # rather than a hardcoded artifact name.
   # ════════════════════════════════════════════════════════════════════════════
+
   final-report:
     name: 07 / Final Report
     needs:
