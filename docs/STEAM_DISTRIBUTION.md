@@ -81,6 +81,11 @@ supposed to be publishing, so `scripts/steam/deploy_steam.sh`:
    and **refuses to upload** if they differ;
 3. removes `artifact-manifest.json` from the staging copy, because it is
    provenance rather than game content and does not belong in a depot;
+   and restores the executable bit on ELF binaries — GitHub artifacts are
+   zipped without POSIX modes, so every downloaded Linux binary arrives `0644`
+   and a depot built from one ships a game nobody can launch. That is undoing
+   something the transport did, not modifying the build: file content is
+   untouched, which is why the fingerprint in step 2 still matches;
 4. generates the app and depot VDFs from the resolved configuration, with no
    project-specific id anywhere in the toolkit.
 
