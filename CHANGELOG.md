@@ -320,6 +320,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **`templates/AddressableBuilder.cs` did not compile.** The template carried one using directive
+  for Addressables, `UnityEditor.AddressableAssets.Settings`, but neither type it uses lives there:
+  `AddressableAssetSettingsDefaultObject` is in `UnityEditor.AddressableAssets` and
+  `AddressablesPlayerBuildResult` in `UnityEditor.AddressableAssets.Build`. A consumer who followed
+  `CONSUMER_SETUP.md` step 5 got
+
+  ```
+  error CS0103: The name 'AddressableAssetSettingsDefaultObject' does not exist in the current context
+  error CS0246: The type or namespace name 'AddressablesPlayerBuildResult' could not be found
+  ```
+
+  and the failure only surfaced at their first Addressables build. Both directives added.
+
 - **A Steam dry run never reached the staging path it promises.** The input is
   documented as "verify, validate and stage the Steam content without
   uploading" and `deploy_steam.sh` implements exactly that, but the phase gate
