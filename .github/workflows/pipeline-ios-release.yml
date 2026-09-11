@@ -211,6 +211,18 @@ on:
         type: boolean
         default: false
 
+# The pipeline's stages, declared once. Every job renders this same
+# ladder with itself marked, so the run summary grows into a progress
+# view while the run is still going — GitHub draws no progress on a
+# workflow node, and the graph shows shape without distance.
+env:
+  PIPELINE_STAGES: |
+    04 Verify Release Identity
+    04 Release Notes
+    05 Publish — TestFlight Internal
+    06 Release — TestFlight External
+    06 Release — Production
+
 jobs:
   # ─── 04 — VERIFY RELEASE IDENTITY ───────────────────────────────────────────
   # A filename establishes nothing. This proves the downloaded bytes are the
@@ -255,7 +267,18 @@ jobs:
             --expect-run-id        "${{ inputs.source-run-id }}" \
             --expect-artifact-name "${{ inputs.artifact-name }}" \
             --expect-version       "${{ inputs.build-version }}"
+
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / iOS
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Verify Release Identity
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
+
   release-notes:
     name: 04 / iOS / Release Notes
     needs: [verify-artifact]
@@ -293,7 +316,18 @@ jobs:
           path: release-notes.txt
           retention-days: 7
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / iOS
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Release Notes
+
   # ─── PHASE 1: TESTFLIGHT INTERNAL ──────────────────────────────────────────
+
   internal-testing:
     name: 05 / iOS / Publish — TestFlight Internal
     needs: [verify-artifact, release-notes]
@@ -351,7 +385,18 @@ jobs:
           echo "- **Build ID:** ${{ steps.upload.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Processing:** Complete" >> "${GITHUB_STEP_SUMMARY}"
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / iOS
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 05 Publish — TestFlight Internal
+
   # ─── PHASE 2: TESTFLIGHT EXTERNAL ──────────────────────────────────────────
+
   external-testing:
     name: 06 / iOS / Release — TestFlight External
     needs: [verify-artifact, internal-testing]
@@ -368,6 +413,12 @@ jobs:
     outputs:
       build-id: ${{ needs.internal-testing.outputs.build-id }}
     steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
       - name: External testing gate
         shell: bash
         run: |
@@ -383,7 +434,17 @@ jobs:
           echo "- **Build ID:** ${{ needs.internal-testing.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Approved for external TestFlight testing" >> "${GITHUB_STEP_SUMMARY}"
 
-  # ─── PHASE 3: APP STORE PRODUCTION ─────────────────────────────────────────
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / iOS
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 06 Release — TestFlight External
+
+
   production-release:
     name: 06 / iOS / Release — App Store
     needs: [verify-artifact, internal-testing, external-testing, release-notes]
@@ -443,11 +504,22 @@ jobs:
           echo "- **Build ID:** ${{ steps.resolve.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Phased Release:** ${{ inputs.phased-release }}" >> "${GITHUB_STEP_SUMMARY}"
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / iOS
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 06 Release — Production
+
   # ─── 07 — REPORT & NOTIFY ───────────────────────────────────────────────────
   # The pipeline used to end at stage 06, so a release run produced no report:
   # the only way to see how far a promotion got was to read the graph. This
   # says which phase it reached, or which one stopped it, and posts the same
   # to Discord.
+
   report:
     name: 07 / iOS / Report & Notify
     needs: [verify-artifact, release-notes, internal-testing, external-testing, production-release]

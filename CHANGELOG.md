@@ -12,6 +12,20 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **A progress ladder on every pipeline.** GitHub draws no progress indicator
+  on a workflow node, so each stage job now renders one into its summary via
+  `.github/actions/pipeline-progress`; because job summaries accumulate, the
+  ladder grows while the run is still going. The stage list is declared once as
+  a workflow-level `PIPELINE_STAGES` env so two jobs of the same run cannot
+  disagree about the pipeline's shape, and `release-report` renders the same
+  ladder from the final results. A phase skipped on purpose counts as distance
+  covered; a phase skipped because something earlier failed renders as
+  `not reached`, so a failed run cannot count its own wreckage as progress.
+  Windows and Linux now use the shared release report as well, instead of their
+  own inline summary.
+
+### Added
+
 - **Windows and Linux release promotion through Steam.**
   `pipeline-windows-release.yml` and `pipeline-linux-release.yml`, with
   `templates/consumer-23-release-windows.yml` and
