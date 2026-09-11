@@ -556,3 +556,18 @@ def test_a_platform_absent_from_the_set_cannot_be_promoted(tmp_path):
     ], capture_output=True, text=True)
     assert proc.returncode == 1
     assert "no Linux64 artifact" in proc.stderr
+
+
+@pytest.mark.parametrize("name", DESKTOP_PIPELINES)
+def test_a_later_start_phase_still_publishes(name):
+    """Starting at `internal` skips validation on purpose. A skipped `needs`
+    propagates the skip unless the `if` has a status function, so without one
+    the promotion quietly does nothing and reports success — which is what a
+    real run did before `!cancelled()` was added back."""
+    workflow = load(name)
+    for job_id, job in workflow["jobs"].items():
+        if not job_id.startswith("steam-"):
+            continue
+        condition = str(job.get("if", ""))
+        assert "!cancelled()" in condition, job_id
+        assert "verify-artifact.result == 'success'" in condition, job_id
