@@ -394,13 +394,17 @@ jobs:
           {
             echo "configuration=${CONFIG}"
             echo "android-artifact-type=${ANDROID_ARTIFACT}"
+            # The caller job already names the platform ("03 / Android"), and
+            # GitHub joins the two halves. Only append an artifact type when it
+            # says something the platform name does not — otherwise the node
+            # reads "03 / WebGL / Production / WebGL".
             echo "label-android=${CONFIG} / ${ANDROID_ARTIFACT}"
             echo "label-ios=${CONFIG} / Xcode Project"
-            echo "label-webgl=${CONFIG} / WebGL"
-            echo "label-linux64=${CONFIG} / Linux64"
-            echo "label-linuxserver=${CONFIG} / LinuxServer"
-            echo "label-windows64=${CONFIG} / Windows64"
-            echo "label-addressables=${CONFIG} / Addressables"
+            echo "label-webgl=${CONFIG}"
+            echo "label-linux64=${CONFIG}"
+            echo "label-linuxserver=${CONFIG}"
+            echo "label-windows64=${CONFIG}"
+            echo "label-addressables=${CONFIG}"
           } >> "$GITHUB_OUTPUT"
 
           echo "[labels] configuration=${CONFIG} android-artifact=${ANDROID_ARTIFACT}"

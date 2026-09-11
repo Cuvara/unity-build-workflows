@@ -12,6 +12,25 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **Per-platform entry workflows** — `templates/consumer-build-{android,ios,webgl,all}.yml`.
+  `workflow_dispatch` has no conditional input visibility, so the single
+  multi-platform form had grown to fourteen fields and showed Android's
+  APK/AAB choice to somebody building iOS. Splitting the *entry point* is the
+  only mechanism GitHub offers for a form that contains just the applicable
+  options; all five entry workflows call the same `unity-pipeline.yml` engine
+  and none contains build logic. Inputs carry a group prefix
+  (`GENERAL` / `ANDROID` / `QUALITY` / `CONTENT` / `UNITY` / `ADVANCED`) since
+  the form cannot group them natively.
+- `tests/test_entry_workflows.py` (55 tests) — platform-specific inputs appear
+  only in their own workflow, Build All carries no per-platform output format,
+  infrastructure inputs are grouped `ADVANCED`, every entry point delegates to
+  the shared engine with no steps of its own, entry points agree on the engine
+  ref, and their concurrency groups are distinct.
+- **CI now lints `templates/`.** Those files are copied verbatim into consumer
+  repositories but live outside `.github/workflows/`, so the actionlint gate
+  could not see them — and the first draft of the new templates shipped two
+  invalid-workflow errors (an empty `choice` option, and unescaped quotes in a
+  description) that only surfaced when linting the consumer copies.
 - **Pipeline stage architecture** — every user-visible node in `unity-pipeline.yml`,
   `release-orchestrator.yml` and the three release pipelines is now named
   `NN / Platform / Configuration / Artifact` (`03 / Android / Production / AAB`)
@@ -151,6 +170,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Changed
 
+- **`unity-build.yml` is the automatic lane only.** Its `workflow_dispatch`
+  form is removed; manual builds use the per-platform entry workflows. Push and
+  pull_request behaviour is unchanged — those events never carried inputs, so
+  every value already came from `resolve_build_flow.sh` and the repository
+  variables. The concurrency key drops the lane placeholders it could never
+  populate.
+- Stage-03 node labels no longer repeat the platform name: `03 / WebGL /
+  Production` rather than `03 / WebGL / Production / WebGL`. An artifact type
+  is appended only where it adds information (`03 / Android / Production / AAB`).
 - **Platform builds no longer start until Unity Tests finish.** This is the
   intended trade: one extra gate node of latency, in exchange for never paying
   for a build the test suite would have rejected. Wall-clock time for a green
