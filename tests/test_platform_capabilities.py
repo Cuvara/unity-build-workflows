@@ -248,3 +248,101 @@ def test_invariant_checker_detects_a_promotion_that_builds(tmp_path):
     report = json.loads(proc.stdout)
     assert proc.returncode == 1
     assert any(v["invariant"] == "I-005" for v in report["violations"]), report
+
+
+# ---------------------------------------------------------------------------
+# Full capability matrix
+# ---------------------------------------------------------------------------
+# Every supported project shape, plus the combinations that should produce
+# nothing. A capability declaration that can be talked around is not a
+# capability declaration.
+
+CAPABILITY_MATRIX = [
+    # declared,                       requested,     expected built
+    ("Android",                       "Android",     {"android"}),
+    ("Android",                       "All",         {"android"}),
+    ("WebGL",                         "WebGL",       {"webgl"}),
+    ("WebGL",                         "All",         {"webgl"}),
+    ("Windows64",                     "Windows64",   {"windows64"}),
+    ("Windows64",                     "All",         {"windows64"}),
+    ("Linux64",                       "Linux64",     {"linux64"}),
+    ("Linux64",                       "All",         {"linux64"}),
+    ("Android,WebGL",                 "All",         {"android", "webgl"}),
+    ("Android,Windows64",             "All",         {"android", "windows64"}),
+    ("Windows64,Linux64",             "All",         {"windows64", "linux64"}),
+    ("Android,WebGL,Windows64,Linux64", "All",
+     {"android", "webgl", "windows64", "linux64"}),
+    ("Linux64,LinuxServer",           "All",         {"linux64", "linuxserver"}),
+]
+
+
+@pytest.mark.parametrize("declared,requested,expected", CAPABILITY_MATRIX)
+def test_capability_matrix(declared, requested, expected):
+    assert resolve(platforms=declared, in_platform=requested) == expected
+
+
+# Requesting a platform the project has not declared. Each of these must build
+# nothing at all — not fail, not fall back, not build something else.
+INVALID_COMBINATIONS = [
+    ("Android", "WebGL"),
+    ("Android", "Windows64"),
+    ("Android", "Linux64"),
+    ("Android", "iOS"),
+    ("WebGL", "Android"),
+    ("WebGL", "Windows64"),
+    ("Windows64", "Android"),
+    ("Windows64", "WebGL"),
+    ("Linux64", "Windows64"),
+    ("Android,WebGL", "Windows64"),
+    ("Android,WebGL", "Linux64"),
+    ("Windows64,Linux64", "Android"),
+]
+
+
+@pytest.mark.parametrize("declared,requested", INVALID_COMBINATIONS)
+def test_undeclared_platform_creates_no_job(declared, requested):
+    """The capability must win over the request, or it is only advice."""
+    built = resolve(platforms=declared, in_platform=requested)
+    assert built == set(), (
+        f"a project declaring {declared} built {sorted(built)} when asked for "
+        f"{requested}; a disabled platform must produce no job"
+    )
+
+
+@pytest.mark.parametrize("declared", ["Android", "WebGL", "Windows64", "Linux64"])
+def test_disabled_platforms_produce_no_matrix_row(resolve_matrix, declared):
+    """No job means no artifact: a platform absent from the build matrix has
+    nothing to upload, validate or promote."""
+    enabled = {
+        "Android": "Android", "WebGL": "WebGL",
+        "Windows64": "Windows64", "Linux64": "Linux64",
+    }[declared]
+    out = resolve_matrix([enabled], build_type="release")
+    assert out["build_platforms"] == [enabled]
+    for name in out["artifact_names"]:
+        assert enabled.lower().rstrip("64") in name.replace("-", ""), name
+    # Nothing belonging to another platform slipped into the set.
+    for other in ("android", "webgl", "windows", "linux"):
+        if other in enabled.lower():
+            continue
+        assert not any(n.startswith(f"release-{other}") for n in out["artifact_names"]), (
+            f"{declared}-only project produced a {other} artifact"
+        )
+
+
+def test_every_toolkit_platform_is_declarable():
+    """I-013: all five are first-class. A platform the toolkit supports but
+    that cannot be declared would be second-class by omission."""
+    for platform, flag in [("Android", "android"), ("WebGL", "webgl"),
+                           ("Windows64", "windows64"), ("Linux64", "linux64"),
+                           ("LinuxServer", "linuxserver")]:
+        assert resolve(platforms=platform, in_platform=platform) == {flag}
+    # iOS is declarable too, but only reachable by explicit dispatch.
+    assert resolve(platforms="iOS", in_platform="iOS") == {"ios"}
+
+
+def test_capability_does_not_require_a_distribution_provider():
+    """I-015: Windows and Linux produce artifacts with no distribution
+    configured. Requiring one would make desktop second-class."""
+    for platform in ("Windows64", "Linux64"):
+        assert resolve(platforms=platform, in_platform=platform)

@@ -89,6 +89,14 @@ on:
         type: string
         required: false
         default: validate
+      allow-unverified-build-number:
+        description: >-
+          Proceed when the store's existing versionCodes cannot be read. Only
+          for a first upload to a package that does not exist in the console
+          yet — it disables the guard against reusing a build number.
+        type: boolean
+        required: false
+        default: false
       source-run-id:
         description: >-
           Run ID of the Build / Release run that produced the artifact. Required
@@ -242,6 +250,28 @@ jobs:
             --expect-run-id        "${{ inputs.source-run-id }}" \
             --expect-artifact-name "${{ inputs.artifact-name }}" \
             --expect-version       "${{ inputs.build-version }}"
+
+      # Play rejects a duplicate versionCode, but only after the upload has
+      # started — a late, misleading failure. A code merely LOWER than the
+      # current one uploads fine and then cannot be promoted, which surfaces
+      # days later mid-rollout. Ask the store first.
+      #
+      # Skipped on a dry run: there is nothing to collide with, and a dry run
+      # must not require store credentials.
+      - name: Check the build number against the store
+        if: ${{ !inputs.dry-run }}
+        shell: bash
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -Eeuo pipefail
+          pip install --quiet google-api-python-client google-auth
+          BUILD_NUMBER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["releaseSet"]["buildNumber"])' \
+            release-set/release-manifest.json)
+          python3 .toolkit/scripts/android/check_build_number.py \
+            --package-name  "${{ inputs.package-name }}" \
+            --build-number  "${BUILD_NUMBER}" \
+            ${{ inputs.allow-unverified-build-number && '--allow-unverified' || '' }}
   # ─── VALIDATE AAB ───────────────────────────────────────────────────────────
   validate-aab:
     name: 04 / Android / Validate AAB
