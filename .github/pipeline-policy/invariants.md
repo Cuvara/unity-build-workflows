@@ -26,7 +26,7 @@ here first and say why.
 | I-010 | Promotion consumes an exact `source-run-id`. | ✅ |
 | I-011 | Production deployment is protected by a GitHub Environment. | ✅ |
 | I-012 | Build numbers increase monotonically. | ✅ |
-| I-013 | Android, iOS, WebGL, Windows and Linux are first-class capabilities. | ✅ |
+| I-013 | Android, iOS, WebGL, Windows and Linux are first-class capabilities — built, validated, released. | ✅ |
 | I-014 | Enabled platforms come from project configuration. | ✅ |
 | I-015 | Distribution providers are separate from platform capabilities. | ✅ |
 | I-016 | Disabled platforms do not execute build or release jobs. | ✅ |
@@ -48,6 +48,17 @@ This was broken once: iOS signing ran during promotion, so QA validated an
 Xcode project while an IPA built from it afterwards is what would have
 shipped. Signing now happens in `Build / Release` stage 03b. A promotion may
 only download, verify, test, approve and publish.
+
+Its second half took longer to close. Signing moved to the build lane, but the
+IPA carried no artifact manifest, so the only iOS manifest in a release run was
+the Xcode project's — the Release Set listed the project, and the consumer
+template defaulted to promoting it. A promote-only pipeline cannot turn a
+project into anything installable, so the iOS promotion path was a dead end
+that looked configured. The IPA now writes its own manifest, the Xcode project
+is marked `"intermediate": true`, a Release Set skips intermediates, and
+verifying an intermediate fails closed. Two *shippable* artifacts claiming one
+platform raises rather than picking: picking silently is how the wrong one was
+chosen in the first place.
 
 **I-008 — builder provenance.**
 
@@ -104,6 +115,15 @@ platform must never see a job for it.
 immutable release artifacts with no distribution provider configured. Steam is
 a delivery choice, not a build prerequisite. Requiring one to produce an
 artifact would make desktop a second-class platform.
+
+Both halves are enforced. `Build / Release` never mentions Steam, so no Steam
+variable or secret can block a desktop build, and a test fails if one appears
+there. The Steam promotion workflows declare their credentials `required:
+false` — a required secret is checked when the call is *resolved*, so requiring
+them would make even a dry run unresolvable in a repository with no Steam
+account. And missing Steam configuration fails the promotion loudly: a deploy
+job that skips quietly and reports success is how a release nobody shipped gets
+believed. See `docs/STEAM_DISTRIBUTION.md`.
 
 ## Adding a platform
 

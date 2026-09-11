@@ -578,9 +578,12 @@ jobs:
             VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"iOS\",\"artifact-type\":\"IPA\",\"artifact-name\":\"${BUILD_TYPE}-ios-ipa\",\"validator\":\"ipa\",\"node\":\"IPA\"},"
           fi
           add "${SEL_WEBGL}"       WebGL       WEBGL                 "WebGL"               webgl
-          add "${SEL_LINUX64}"     Linux64     LINUX                 "Standalone"          ""
-          add "${SEL_LINUXSERVER}" LinuxServer LINUX                 "Dedicated Server"    ""
-          add "${SEL_WINDOWS64}"   Windows64   EXE                   "Standalone"          ""
+          # Desktop players had no stage-04 leg at all, so a Windows or Linux
+          # build missing its _Data directory — a player that cannot start —
+          # became an immutable release artifact unchallenged.
+          add "${SEL_LINUX64}"     Linux64     LINUX                 "Standalone"          desktop
+          add "${SEL_LINUXSERVER}" LinuxServer LINUX                 "Dedicated Server"    desktop
+          add "${SEL_WINDOWS64}"   Windows64   EXE                   "Standalone"          desktop
 
           BUILD_MATRIX="[${BUILD_ROWS%,}]"
           VALIDATE_MATRIX="[${VALIDATE_ROWS%,}]"
@@ -1117,6 +1120,50 @@ jobs:
           archive-path: build-output/${{ inputs.ios-app-name }}.xcarchive
           export-path: build-output/ipa
 
+      # The IPA is the iOS artifact a Release Set promotes, so it needs the same
+      # manifest every other platform's build leg writes. Without one the only
+      # iOS manifest in the run was the Xcode project's, and the Release Set
+      # listed a project nobody can install where the shippable binary should
+      # have been.
+      #
+      # This lane is native macOS: there is no image and no digest, so the
+      # provenance is the Unity version, the runner and the commit —
+      # `auditable`, recorded as such rather than dressed up (I-008).
+      - name: Write IPA artifact manifest
+        id: ipa-manifest
+        shell: bash
+        env:
+          IPA_PATH: ${{ steps.archive.outputs.ipa-path }}
+        run: |
+          set -Eeuo pipefail
+          MANIFEST_DIR="${RUNNER_TEMP}/ios-ipa-manifest"
+          mkdir -p "${MANIFEST_DIR}"
+          python3 .toolkit/scripts/common/artifact_manifest.py \
+            --platform        iOS \
+            --configuration   "${{ needs.resolve-config.outputs.configuration }}" \
+            --artifact-type   IPA \
+            --artifact-path   "${IPA_PATH}" \
+            --output          "${MANIFEST_DIR}/artifact-manifest.json" \
+            --version         "${{ needs.resolve-config.outputs.app-version }}" \
+            --build-number    "${{ needs.resolve-config.outputs.build-number }}" \
+            --unity-version   "${{ needs.resolve-config.outputs.unity-version }}" \
+            --commit          "${{ github.sha }}" \
+            --branch          "${{ github.ref_name }}" \
+            --artifact-name   "${{ needs.resolve-config.outputs.build-type }}-ios-ipa" \
+            --builder         local-xcode \
+            --builder-kind    native \
+            --runner          "${RUNNER_OS:-macOS}/${RUNNER_ARCH:-unknown}" \
+            > /dev/null
+          echo "dir=${MANIFEST_DIR}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload IPA artifact manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.resolve-config.outputs.build-type }}-ios-ipa-manifest
+          path: ${{ steps.ipa-manifest.outputs.dir }}/artifact-manifest.json
+          if-no-files-found: error
+          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+
       - name: Upload signed IPA
         uses: actions/upload-artifact@v4
         with:
@@ -1242,6 +1289,14 @@ jobs:
             ios)
               python3 .toolkit/scripts/ios/validate_xcode_project.py \
                 --search-root build-artifact --report validation-${VALIDATOR}.json
+              ;;
+            desktop)
+              # Windows, Linux and the Linux dedicated server ship the same
+              # shape: an executable plus its <Product>_Data directory.
+              python3 .toolkit/scripts/desktop/validate_desktop_artifact.py \
+                --search-root build-artifact \
+                --platform "${{ matrix.platform }}" \
+                --report validation-${VALIDATOR}.json
               ;;
             ipa)
               # The signed release artifact. Production must be signed, or it
@@ -1642,6 +1697,8 @@ jobs:
               "Android": ("Release / Android", "20-release-android.yml", "Google Play"),
               "iOS": ("Release / iOS", "21-release-ios.yml", "App Store Connect"),
               "WebGL": ("Release / WebGL", "22-release-webgl.yml", "hosting / CDN"),
+              "Windows64": ("Release / Windows", "23-release-windows.yml", "Steam"),
+              "Linux64": ("Release / Linux", "24-release-linux.yml", "Steam"),
           }
           if build_type == "release" and not failed_stage:
               shippable = [p for p, row in sorted(builds.items())

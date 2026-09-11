@@ -45,6 +45,11 @@ RELEASE_ENTRY_POINTS = {
     "android": TEMPLATES / "consumer-20-release-android.yml",
     "ios": TEMPLATES / "consumer-21-release-ios.yml",
     "webgl": TEMPLATES / "consumer-22-release-webgl.yml",
+    # Windows and Linux ship through Steam. They were absent while no
+    # distribution target existed — inventing a store for them would have been
+    # fiction — and are here now that SteamCMD publishing exists.
+    "windows": TEMPLATES / "consumer-23-release-windows.yml",
+    "linux": TEMPLATES / "consumer-24-release-linux.yml",
 }
 
 EXPECTED_BUILD_TYPE = {"development": "development", "release": "release"}
@@ -383,9 +388,28 @@ def test_release_entry_point_can_dry_run(key, path):
     assert "dry-run" in dispatch_inputs(load(path))
 
 
-def test_no_release_workflow_for_platforms_without_a_distribution_target():
-    """Windows and Linux produce standalone artifacts. Inventing a store for
-    them would be fiction."""
-    for absent in ("windows", "linux"):
-        assert absent not in RELEASE_ENTRY_POINTS
-        assert not list(TEMPLATES.glob(f"consumer-*release-{absent}.yml"))
+@pytest.mark.parametrize("key,artifact", [
+    ("windows", "release-windows"),
+    ("linux", "release-linux"),
+])
+def test_desktop_release_entry_points_promote_to_steam(key, artifact):
+    """Windows and Linux now have a real distribution target, so they get the
+    same promote-only entry point as everyone else."""
+    body = RELEASE_ENTRY_POINTS[key].read_text()
+    assert f"pipeline-{key}-release.yml" in body
+    inputs = dispatch_inputs(load(RELEASE_ENTRY_POINTS[key]))
+    assert inputs["artifact-name"]["default"] == artifact
+    assert inputs["source-run-id"]["required"] is True
+
+
+@pytest.mark.parametrize("key", ["windows", "linux"])
+def test_a_desktop_entry_point_never_asks_for_steam_credentials(key):
+    """Credentials are repository secrets, not something a human types into a
+    dispatch form where they would land in the run's inputs — and therefore in
+    the run log."""
+    inputs = dispatch_inputs(load(RELEASE_ENTRY_POINTS[key]))
+    for name in inputs:
+        assert "username" not in name.lower()
+        assert "vdf" not in name.lower()
+        assert "password" not in name.lower()
+        assert "token" not in name.lower()
