@@ -181,8 +181,34 @@ def check_promotion_verifies_identity(workflows_dir, report):
                 f"{path.name} never verifies the artifact against the release "
                 "manifest — it trusts the artifact name alone",
             )
-        else:
-            report.ok("I-007", f"{path.name} verifies artifact identity and checksum")
+            continue
+        report.ok("I-007", f"{path.name} verifies artifact identity and checksum")
+
+        # Running the verification is half of it. Every publishing job must
+        # also be gated on the result — and `needs:` alone does not do that
+        # under `if: always()`, which is how a promotion started with
+        # start-phase=internal would have published an artifact whose identity
+        # check had just failed.
+        try:
+            workflow = load_workflow(path)
+        except yaml.YAMLError:
+            continue
+        for name, job in (workflow.get("jobs") or {}).items():
+            needs = job.get("needs") or []
+            if isinstance(needs, str):
+                needs = [needs]
+            # The report job is meant to survive a failure and say so.
+            if "verify-artifact" not in needs or name.endswith("report"):
+                continue
+            condition = str(job.get("if", ""))
+            if "verify-artifact.result == 'success'" not in condition:
+                report.fail(
+                    "I-007",
+                    f"{path.name}:{name} does not require the identity check to "
+                    "have passed, so it can act on an unverified artifact",
+                )
+            else:
+                report.ok("I-007", f"{path.name}:{name} requires a verified artifact")
 
 
 # ---------------------------------------------------------------------------
