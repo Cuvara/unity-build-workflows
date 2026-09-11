@@ -34,6 +34,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **The desktop validator failed every Linux build on its first real run.**
+  GitHub stores artifacts in a zip, which carries no POSIX modes, so a Linux
+  binary downloaded from any artifact is always `0644` — the transport dropped
+  the executable bit, not the build. Stage 04 sees only downloaded artifacts,
+  so the check belonged there as a warning that names the cause;
+  `--require-executable-bit` keeps it a gate for a caller checking a build
+  directory in place. `deploy_steam.sh` restores the bit on the staging copy,
+  since a depot built from a `0644` binary ships a game nobody can launch. File
+  content is untouched and the staging fingerprint still matches.
 - **The iOS promotion consumed the wrong artifact.** Stage 03b signs and
   exports the IPA before the immutable boundary, but the IPA carried no
   artifact manifest — so the only iOS manifest in a release run was the Xcode

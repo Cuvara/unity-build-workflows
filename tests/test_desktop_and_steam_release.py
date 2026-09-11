@@ -118,13 +118,51 @@ def test_a_player_with_no_game_code_fails(tmp_path, platform):
     assert "game code" in proc.stderr.lower()
 
 
-def test_a_linux_player_without_the_executable_bit_fails(tmp_path):
-    """Artifact upload/download does not reliably preserve the bit, and a
-    Linux build that is not executable cannot be launched as downloaded."""
+def test_a_downloaded_linux_player_without_the_bit_warns_rather_than_fails(tmp_path):
+    """Found on a real run. GitHub stores artifacts in a zip, which carries no
+    POSIX modes, so EVERY downloaded Linux binary is 0644. Failing stage 04 on
+    that would fail every Linux release forever while blaming the build for
+    something the transport did."""
     make_player(tmp_path / "a", "Linux64", executable_bit=False)
     proc = validate_desktop(tmp_path / "a", "Linux64")
+    assert proc.returncode == 0, proc.stdout
+    report = json.loads(proc.stdout)
+    bit = next(c for c in report["checks"] if c["name"] == "executable bit")
+    assert bit["status"] == "warn"
+    assert "POSIX modes" in bit["detail"]
+
+
+def test_the_bit_is_still_a_gate_before_upload(tmp_path):
+    """Against a build directory on disk, a missing bit really is the build's
+    fault — so the check is available as a gate for that caller."""
+    make_player(tmp_path / "a", "Linux64", executable_bit=False)
+    proc = subprocess.run(
+        ["python3", str(DESKTOP_VALIDATOR), "--search-root", str(tmp_path / "a"),
+         "--platform", "Linux64", "--require-executable-bit"],
+        capture_output=True, text=True)
     assert proc.returncode == 1
     assert "executable bit" in proc.stderr.lower()
+
+
+def test_staging_restores_the_bit_the_artifact_zip_dropped(tmp_path):
+    """A depot built from a 0644 binary ships a game nobody can launch. The
+    content is untouched — only the mode the transport lost is put back."""
+    artifact = make_player(tmp_path / "promoted", "Linux64", executable_bit=False)
+    before = (artifact / "Game.x86_64").read_bytes()
+    staging = tmp_path / "staging"
+    proc = subprocess.run(
+        ["bash", str(STEAM_DEPLOY)], capture_output=True, text=True,
+        env={**os.environ, "ARTIFACT_DIR": str(artifact), "STAGING_DIR": str(staging),
+             "STEAM_APP_ID": "480", "STEAM_DEPOT_ID": "480012",
+             "STEAM_BRANCH": "internal", "DRY_RUN": "true",
+             "RUNNER_TEMP": str(tmp_path)})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert os.access(staging / "Game.x86_64", os.X_OK)
+    # The artifact itself is untouched, mode included.
+    assert not os.access(artifact / "Game.x86_64", os.X_OK)
+    assert (artifact / "Game.x86_64").read_bytes() == before
+    # And the content fingerprint still matched, so the upload was allowed.
+    assert "matches the verified artifact" in proc.stdout
 
 
 def test_a_windows_player_missing_unityplayer_fails(tmp_path):

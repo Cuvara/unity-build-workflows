@@ -16,9 +16,11 @@ What it checks:
     * the matching `<name>_Data` directory exists next to it
     * the engine payload inside `_Data` is present: globalgamemanagers or
       data.unity3d, plus at least one level/resource file
-    * on Linux, the executable bit is actually set — a Unity build copied
-      through a zip or an artifact upload routinely loses it, and the game
-      then cannot be launched at all
+    * on Linux, whether the executable bit survived. A warning by default,
+      because GitHub artifacts are zipped without POSIX modes so a downloaded
+      Linux binary is ALWAYS 0644 — the transport dropped it, not the build.
+      `--require-executable-bit` makes it a gate for a caller checking a build
+      directory in place, before upload.
     * `UnityPlayer` runtime library is present for the platform
     * a dedicated server build is headless: no UnityPlayer graphics payload
       expected, checked more loosely
@@ -179,25 +181,40 @@ def check_runtime_library(root, platform, result):
         )
 
 
-def check_executable_bit(executable, result):
-    """A Linux player that is not executable cannot be launched at all.
+def check_executable_bit(executable, result, required):
+    """A Linux player that is not executable cannot be launched.
 
-    Artifact upload and download does not preserve the bit reliably, so this
-    is a real failure mode rather than a theoretical one: the artifact looks
-    complete and the game will not run.
+    Where this is checked matters. `actions/upload-artifact` stores files in a
+    zip that does not carry POSIX modes, so a Linux binary downloaded from any
+    GitHub artifact arrives 0644 — always, for every build. Failing stage 04 on
+    that would fail every Linux release forever while telling the reader the
+    build was broken, which it is not: the transport dropped the bit.
+
+    So the default is a warning that names the cause, and whoever consumes the
+    artifact restores the bit on their own copy (see
+    scripts/steam/deploy_steam.sh). `--require-executable-bit` makes it a gate
+    for a caller validating a build directory in place, before upload, where a
+    missing bit really is the build's fault.
     """
     mode = executable.stat().st_mode
     if mode & stat.S_IXUSR:
         result.ok("executable bit", executable.name)
-    else:
+    elif required:
         result.fail(
             "executable bit",
-            f"{executable.name} is not executable ({oct(stat.S_IMODE(mode))}); "
-            "the artifact cannot be launched as downloaded",
+            f"{executable.name} is not executable ({oct(stat.S_IMODE(mode))})",
+        )
+    else:
+        result.warn(
+            "executable bit",
+            f"{executable.name} is {oct(stat.S_IMODE(mode))}. GitHub artifacts "
+            "are zipped without POSIX modes, so this is expected on a "
+            "downloaded artifact; whoever unpacks it must restore +x",
         )
 
 
-def validate(search_root, platform, min_size_bytes, max_size_mb):
+def validate(search_root, platform, min_size_bytes, max_size_mb,
+             require_executable_bit=False):
     result = Result()
     root = Path(search_root)
     result.facts["platform"] = platform
@@ -230,7 +247,7 @@ def validate(search_root, platform, min_size_bytes, max_size_mb):
     result.ok("executable", executable.name)
 
     if platform != "Windows64":
-        check_executable_bit(executable, result)
+        check_executable_bit(executable, result, require_executable_bit)
 
     data_dir = data_directory_for(executable)
     if data_dir.is_dir():
@@ -257,6 +274,11 @@ def main(argv=None):
     parser.add_argument("--min-size-bytes", type=int, default=5_000_000)
     parser.add_argument("--max-size-mb", type=float, default=0.0,
                         help="0 disables the ceiling")
+    parser.add_argument(
+        "--require-executable-bit", action="store_true",
+        help="Fail when a Linux binary is not executable. Only meaningful "
+             "against a build directory on disk: a downloaded GitHub artifact "
+             "has always lost its POSIX modes to the zip.")
     parser.add_argument("--report", default="", help="Write the JSON report here")
     args = parser.parse_args(argv)
 
@@ -266,7 +288,8 @@ def main(argv=None):
         return 2
 
     result = validate(args.search_root, platform,
-                      args.min_size_bytes, args.max_size_mb)
+                      args.min_size_bytes, args.max_size_mb,
+                      args.require_executable_bit)
     report = result.to_dict()
     print(json.dumps(report, indent=2))
     if args.report:
