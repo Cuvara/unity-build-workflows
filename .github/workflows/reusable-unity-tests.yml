@@ -7,6 +7,18 @@ name: Reusable Unity Tests
 on:
   workflow_call:
     inputs:
+      # GitHub renders a called workflow as "<caller job name> / <inner job name>",
+      # so a caller named "02 / Unity Tests (All)" calling a job also named
+      # "Unity Tests (All)" renders the mode twice. The caller owns the stage
+      # half; node-label owns the rest.
+      node-label:
+        description: >-
+          Display name for this workflow's job, appended after the caller's job
+          name. Defaults to the legacy "Unity Tests (<mode>)".
+        required: false
+        default: ''
+        type: string
+
       unity-version:
         description: Unity version string (e.g. 6000.0.26f1). Must be resolved by caller.
         required: true
@@ -161,7 +173,7 @@ on:
 
 jobs:
   test:
-    name: Unity Tests (${{ inputs.test-mode }})
+    name: ${{ inputs.node-label != '' && inputs.node-label || format('Unity Tests ({0})', inputs.test-mode) }}
     timeout-minutes: ${{ inputs.build-timeout-minutes }}
     # ── Runner selection (V2) ────────────────────────────────────────────────
     # runs-on is driven directly by the resolver-provided runner-labels JSON

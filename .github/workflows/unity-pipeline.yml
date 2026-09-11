@@ -614,7 +614,7 @@ jobs:
   # JOB 3: unity-tests
   # ════════════════════════════════════════════════════════════════════════════
   unity-tests:
-    name: 02 / Unity Tests (${{ needs.resolve-config.outputs.test-mode }})
+    name: 02 / Unity Tests
     needs: [resolve-config, validate-project, validate-license]
     if: >-
       !cancelled() &&
@@ -623,6 +623,7 @@ jobs:
       needs.resolve-config.outputs.run-tests == 'true'
     uses: ./.github/workflows/reusable-unity-tests.yml
     with:
+      node-label:          ${{ needs.resolve-config.outputs.test-mode }}
       unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
       test-mode:           ${{ needs.resolve-config.outputs.test-mode }}
       project-path:        ${{ needs.resolve-config.outputs.project-path }}
@@ -1087,7 +1088,10 @@ jobs:
 
   # ── JOB 11: validate-artifact-android ──────────────────────────────────────
   validate-artifact-android:
-    name: 04 / Android / Validate ${{ needs.resolve-config.outputs.android-artifact-type }}
+    # Static: a `needs.*` expression in a job name is left uninterpolated when the
+    # job is skipped, so the graph showed the raw ${{ … }} text. The concrete
+    # artifact type is reported by the job itself and by stage 07.
+    name: 04 / Android / Validate Artifact
     needs: [resolve-config, build-android]
     if: >-
       !cancelled() &&

@@ -109,6 +109,20 @@ def test_every_pipeline_job_is_stage_numbered(pipeline_jobs):
     )
 
 
+def test_no_job_name_depends_on_the_needs_context(pipeline_jobs):
+    """A `needs.*` expression in a job name is left uninterpolated when the job
+    is skipped, so the graph shows raw `${{ … }}` text to the reader."""
+    offenders = {
+        job_id: job.get("name")
+        for job_id, job in pipeline_jobs.items()
+        if "needs." in str(job.get("name", ""))
+    }
+    assert not offenders, (
+        "these node names render as literal ${{ … }} when the job is skipped: "
+        f"{offenders}"
+    )
+
+
 def test_no_ambiguous_build_node_names(pipeline_jobs):
     """`Build`, `build 2`, `pipeline/.../build` must not reach the UI."""
     for job_id, job in pipeline_jobs.items():
