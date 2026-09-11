@@ -182,11 +182,12 @@ jobs:
   # Running the test suite alongside them meant discovering a red suite after
   # paying for all of it. Everything below now waits on this node.
   unity-tests:
-    name: 02 / Unity Tests (${{ inputs.test-mode }})
+    name: 02 / Unity Tests
     needs: [preflight]
     if: inputs.run-tests
     uses: ./.github/workflows/reusable-unity-tests.yml
     with:
+      node-label: ${{ inputs.test-mode }}
       unity-version: ${{ needs.preflight.outputs.unity-version }}
       test-mode: ${{ inputs.test-mode }}
     secrets: inherit
