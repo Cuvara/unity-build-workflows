@@ -36,6 +36,13 @@ REQUIRED_ROLES = {
     "wasm": ".wasm",
 }
 
+# The loader is deliberately excluded from the compression-consistency check.
+# It is the file the browser fetches and executes *before* any decompression
+# logic exists, so Unity leaves it uncompressed even when everything else is
+# brotli — `loader=none, data=brotli, framework=brotli, wasm=brotli` is the
+# normal, correct output of a brotli WebGL build, not a defect.
+COMPRESSED_ROLES = ("framework", "data", "wasm")
+
 COMPRESSION_SUFFIX = {"gzip": ".gz", "brotli": ".br", "none": ""}
 
 
@@ -148,13 +155,18 @@ def validate(args):
 
     compressions = {role: comp for role, (_, comp) in found.items()}
     result.facts["compression"] = compressions
-    distinct = set(compressions.values())
+
+    payload = {r: c for r, c in compressions.items() if r in COMPRESSED_ROLES}
+    distinct = set(payload.values())
 
     if len(distinct) > 1:
+        # A genuinely half-compressed payload — plain framework next to a
+        # brotli wasm — renders as a blank canvas in the browser, which is
+        # exactly the class of failure this stage exists to catch before deploy.
         result.fail(
             "compression-consistent",
             "mixed compression across player files: "
-            + ", ".join(f"{r}={c}" for r, c in sorted(compressions.items())),
+            + ", ".join(f"{r}={c}" for r, c in sorted(payload.items())),
         )
     elif distinct:
         actual = distinct.pop()
@@ -166,6 +178,18 @@ def validate(args):
             )
         else:
             result.ok("compression-consistent", actual)
+
+    # A COMPRESSED loader is the case worth flagging: it only works when the
+    # host negotiates Content-Encoding, and it fails silently when it does not.
+    loader_compression = compressions.get("loader", "none")
+    result.facts["loaderCompression"] = loader_compression
+    if loader_compression != "none":
+        result.warn(
+            "loader-compression",
+            f"the loader is {loader_compression}-compressed — the browser fetches it "
+            "before any decompression exists, so the host must serve it with a "
+            "matching Content-Encoding",
+        )
 
     if args.require_streaming_assets:
         if (web_root / "StreamingAssets").is_dir():
