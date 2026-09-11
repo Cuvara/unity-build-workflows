@@ -12,6 +12,18 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **Progress visualisation in the Final Report.** GitHub renders no progress
+  indicator on a workflow node, so the report draws the pipeline's shape
+  instead — a stage strip (`01 Prepare ████████ 3/3 ok`) and a per-platform
+  bar — making it obvious at a glance how far a run got and where it stopped.
+- **A release build now hands off to the release workflow.** `Build / Release`
+  produces immutable artifacts and stops; nothing said what to do with them,
+  which is why the release layer looked absent. The report now names the
+  artifact, the workflow that publishes it and where it goes, with a ready
+  `gh workflow run` line. A development build says plainly that it is not
+  signed and cannot be published.
+- Stage 04 nodes name what they validate — `04 / Android / Validate AAB`
+  rather than `04 / Android / Validate`.
 - **`build-type` is now its own axis** (`development` | `release`), separate
   from `environment`. It drives the artifact names, so a development APK and a
   release AAB can never be confused: `development-android-apk` versus

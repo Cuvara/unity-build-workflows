@@ -978,7 +978,7 @@ jobs:
   # reusable-build-platform already spends 3 of GitHub's 4 nesting levels.
   # ════════════════════════════════════════════════════════════════════════════
   validate-artifact:
-    name: 04 / ${{ matrix.platform }} / Validate
+    name: 04 / ${{ matrix.platform }} / Validate ${{ matrix.artifact-type }}
     needs: [resolve-config, build]
     if: >-
       !cancelled() &&
@@ -1242,10 +1242,40 @@ jobs:
           build_type = env.get("BUILD_TYPE") or "development"
           out = []
           w = out.append
+
+          # GitHub renders no progress indicator on a workflow node, so the
+          # closest honest thing is to draw the pipeline's shape here: which
+          # stages ran, which are green, and where it stopped.
+          def bar(done, total, width=24):
+              if total <= 0:
+                  return "░" * width
+              filled = max(0, min(width, round(width * done / total)))
+              return "█" * filled + "░" * (width - filled)
+
+          STAGES = [
+              ("01 Prepare", [env.get("R_RESOLVE", ""), env.get("R_VALIDATE", ""),
+                              env.get("R_LICENSE", "")]),
+              ("02 Quality Gate", [env.get("R_TESTS", ""), env.get("R_GATE", "")]),
+              ("03 Build", [env.get("R_ADDR", "")] + [r.get("result", "") for r in builds.values()]),
+              ("04 Validate", [r.get("result", "") for r in validations.values()]),
+          ]
+
           w("## Unity Build — Final Report")
           w("")
           w(f"**{emoji(overall)} {overall.upper()}**"
             + (f" — failed at **{failed_stage}**" if failed_stage else ""))
+          w("")
+          w("```text")
+          for label, results in STAGES:
+              results = [r for r in results if r != ""]
+              if not results:
+                  w(f"{label:<16} {bar(0, 1)}  —")
+                  continue
+              ok = sum(1 for r in results if r in ("success", "skipped", "unreported"))
+              bad = [r for r in results if r not in ("success", "skipped", "unreported")]
+              mark = "FAILED" if bad else "ok"
+              w(f"{label:<16} {bar(ok, len(results))}  {ok}/{len(results)} {mark}")
+          w("```")
           w("")
           w("| Field | Value |")
           w("|---|---|")
@@ -1276,6 +1306,20 @@ jobs:
           w("")
           w("### 03 — Build Artifacts")
           if builds:
+              done = sum(1 for r in builds.values()
+                         if r.get("result") in ("success", "skipped", "unreported"))
+              w("")
+              w("```text")
+              for platform, row in sorted(builds.items()):
+                  result = row.get("result", "")
+                  glyph = {"success": "████████ done",
+                           "failure": "██░░░░░░ FAILED",
+                           "cancelled": "██░░░░░░ cancelled",
+                           "skipped": "░░░░░░░░ skipped"}.get(result, "░░░░░░░░ " + (result or "no result"))
+                  w(f"  {platform:<14} {glyph}")
+              w(f"  {'':<14} {done}/{len(builds)} platforms")
+              w("```")
+              w("")
               w("| Platform | Result | Type | Size | Duration | Artifact |")
               w("|---|---|---|---|---|---|")
               addr = env.get("R_ADDR", "")
@@ -1302,6 +1346,34 @@ jobs:
           else:
               w("_No artifact validation ran._")
           w("")
+          # A Build / Release run produces immutable artifacts and stops. Nothing
+          # in the graph said what to do with them, which is why the release layer
+          # looked absent — this hands the reader straight to it.
+          RELEASE_LANES = {
+              "Android": ("Release / Android", "20-release-android.yml", "Google Play"),
+              "iOS": ("Release / iOS", "21-release-ios.yml", "App Store Connect"),
+              "WebGL": ("Release / WebGL", "22-release-webgl.yml", "hosting / CDN"),
+          }
+          if build_type == "release" and not failed_stage:
+              shippable = [p for p, row in sorted(builds.items())
+                           if row.get("result") == "success" and p in RELEASE_LANES]
+              if shippable:
+                  w("### Next: promote these artifacts")
+                  w("")
+                  w("These are immutable. The release workflows publish *this* binary — "
+                    "nothing is rebuilt, so what QA approves is what ships.")
+                  w("")
+                  w("| Platform | Artifact | Run | Publishes to |")
+                  w("|---|---|---|---|")
+                  for platform in shippable:
+                      lane, wf, dest = RELEASE_LANES[platform]
+                      artifact = builds[platform].get("artifactName", "")
+                      w(f"| {platform} | `{artifact}` | **{lane}** (`{wf}`) | {dest} |")
+                  w("")
+          elif build_type == "development":
+              w("> This is a development build. It is not signed for release and "
+                "cannot be published — use **Build / Release** for that.")
+              w("")
           w(f"> Logs: `{build_type}-<platform>-<artifact>-logs`. "
             f"Manifests: `{build_type}-<platform>-<artifact>-manifest`.")
           w("> Publishing is a separate pipeline — see `pipeline-android-release.yml`, "
