@@ -34,6 +34,13 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **A Steam dry run never reached the staging path it promises.** The input is
+  documented as "verify, validate and stage the Steam content without
+  uploading" and `deploy_steam.sh` implements exactly that, but the phase gate
+  excluded dry runs outright — so the staging and no-mutation checks were
+  unreachable, and the one way to exercise the promotion path in a repository
+  with no Steam account did nothing. The phases now run under a dry run,
+  skipping the credential requirement, the SteamCMD install and the upload.
 - **A promotion started at a later phase did nothing and reported success.**
   Gating the publishing jobs on `verify-artifact.result == 'success'` replaced
   the `always()` they used to carry, and GitHub skips a job whenever anything
