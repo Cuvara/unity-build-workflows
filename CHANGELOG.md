@@ -58,6 +58,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 - `discord-upload-build`: `failed-stage`, `configuration` and
   `result-validation-{android,webgl,ios}` inputs. The message now names the stage
   the pipeline stopped at and marks artifacts that built but failed validation.
+- **`actionlint` as a third CI gate** (`.github/workflows/ci.yml`), with
+  `.github/actionlint.yaml` declaring the self-hosted runner labels. A workflow
+  that parses as YAML but is invalid as a workflow is accepted by the pytest
+  suite and rejected by GitHub at dispatch — as a run with no jobs and no logs.
+  Three such defects were live on `main` before this change; the gate is what
+  stops the fourth.
 - `tests/test_pipeline_stages.py` (84 tests) — stage naming, quality-gate
   ordering, platform fan-out independence, validation independence, publish
   depends on validation, `start-phase` retry, production approval, artifact
@@ -66,6 +72,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   AXML reader and all three validators, against synthesised artifacts.
 
 ### Fixed
+
+- **`pipeline-android-release.yml` was an invalid workflow file.** It referenced
+  `inputs.artifact-name`, which was declared as a workflow *output*, never as an
+  input. GitHub rejects such a file when the call is resolved, producing a run
+  with no jobs, no logs and a bare `failure` — the shape that made the
+  NDCUnityTemplate release dispatch fail with `Android Release` absent from the
+  job list entirely. `artifact-name` is now a real input (it is also the
+  publish-without-rebuild handle for `start-phase`).
+- **`unity-build-{android,webgl,linux}.yml` exported an empty `artifact-name`.**
+  The output read `steps.upload.outputs.artifact-name`, but
+  `actions/upload-artifact` returns `artifact-id` / `artifact-url` /
+  `artifact-digest` and has no `artifact-name` output. Every downstream
+  `download-artifact` therefore received an empty name and silently fell back to
+  "download every artifact in the run". The name is now resolved in its own step
+  and used both for the upload and for the output.
+- **`release-orchestrator.yml` called `version-bump.yml` with no secrets**, though
+  that workflow requires `APP_ID` / `APP_PRIVATE_KEY` to push the bump commit, so
+  a version bump could never have succeeded. Now `secrets: inherit`.
 
 - **`game-ci/unity-test-runner` pinned to `v4.3.2`.** The `@v4` tag moved to **v4.4.0** on
   2026-09-09 — not a bug-fix release but a rewrite: a thin wrapper around the new `game-ci`

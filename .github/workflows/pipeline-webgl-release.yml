@@ -178,11 +178,11 @@ on:
         type: string
         default: ''
       expected-compression:
-        description: Expected WebGL compression
+        description: Expected WebGL compression (any = accept whatever the build emitted)
         required: false
         type: choice
-        default: ''
-        options: ['', gzip, brotli, none]
+        default: any
+        options: [any, gzip, brotli, none]
       dry-run:
         description: Build and validate only — no deployment
         required: false
@@ -249,7 +249,7 @@ jobs:
             --search-root build-artifact
             --report      validation-webgl.json
           )
-          if [[ -n "${{ inputs.expected-compression }}" ]]; then
+          if [[ -n "${{ inputs.expected-compression }}" && "${{ inputs.expected-compression }}" != "any" ]]; then
             ARGS+=(--expected-compression "${{ inputs.expected-compression }}")
           fi
           if [[ "${{ inputs.max-size-mb }}" != "0" ]]; then

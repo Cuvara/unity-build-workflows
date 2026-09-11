@@ -129,7 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     outputs:
-      artifact-name: ${{ steps.upload.outputs.artifact-name }}
+      artifact-name: ${{ steps.artifact-name.outputs.name }}
       deploy-url: ${{ steps.deploy.outputs.deploy-url }}
 
     steps:
@@ -325,12 +325,21 @@ jobs:
             --platform   WebGL \
             --version    "${{ inputs.build-version }}" || true
 
+      # Resolve the artifact name once. `actions/upload-artifact` does not
+      # return the name it uploaded, so reading it back from that step's
+      # outputs silently produced an empty string.
+      - name: Resolve artifact name
+        id: artifact-name
+        if: always()
+        shell: bash
+        run: echo "name=webgl-build-${{ inputs.environment }}-${{ inputs.build-version }}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
       - name: Upload build artifact
         id: upload
         if: always() && inputs.upload-artifact == true
         uses: actions/upload-artifact@v4
         with:
-          name: webgl-build-${{ inputs.environment }}-${{ inputs.build-version }}-${{ github.run_number }}
+          name: ${{ steps.artifact-name.outputs.name }}
           path: Builds/WebGL/
           retention-days: ${{ inputs.artifact-retention-days }}
           if-no-files-found: error

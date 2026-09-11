@@ -171,6 +171,9 @@ jobs:
     uses: ./.github/workflows/version-bump.yml
     with:
       bump-type: ${{ inputs.bump-type }}
+    # version-bump.yml requires APP_ID / APP_PRIVATE_KEY to push the bump commit;
+    # the call passed no secrets at all, so a bump could never have succeeded.
+    secrets: inherit
 
   # ─── 02 — QUALITY GATE ─────────────────────────────────────────────────────
   # A release build is the most expensive thing this repository does: Android,

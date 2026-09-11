@@ -122,7 +122,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     outputs:
-      artifact-name: ${{ steps.upload.outputs.artifact-name }}
+      artifact-name: ${{ steps.artifact-name.outputs.name }}
 
     steps:
       - name: Free disk space
@@ -313,12 +313,21 @@ jobs:
             --platform   "$TARGET_PLATFORM" \
             --version    "$BUILD_VERSION" || true
 
+      # Resolve the artifact name once. `actions/upload-artifact` does not
+      # return the name it uploaded, so reading it back from that step's
+      # outputs silently produced an empty string.
+      - name: Resolve artifact name
+        id: artifact-name
+        if: always()
+        shell: bash
+        run: echo "name=linux-${{ inputs.target-platform }}-build-${{ inputs.environment }}-${{ inputs.build-version }}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
       - name: Upload build artifact
         id: upload
         if: inputs.upload-artifact == true
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ inputs.target-platform }}-build-${{ inputs.environment }}-${{ inputs.build-version }}-${{ github.run_number }}
+          name: ${{ steps.artifact-name.outputs.name }}
           path: Builds/${{ inputs.target-platform }}/
           retention-days: ${{ inputs.artifact-retention-days }}
           if-no-files-found: error

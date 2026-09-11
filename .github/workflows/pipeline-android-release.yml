@@ -89,6 +89,14 @@ on:
         type: string
         required: false
         default: build
+      artifact-name:
+        description: >-
+          Existing build artifact to publish when start-phase is
+          internal/external/production. This is what makes "retry the upload"
+          publish the same validated bytes instead of rebuilding the AAB.
+        type: string
+        required: false
+        default: ''
       rollout-percentage:
         description: Production rollout percentage (1-100, default 100)
         type: number
@@ -158,6 +166,11 @@ on:
         type: choice
         default: build
         options: [build, internal, external, production]
+      artifact-name:
+        description: Existing artifact to publish (required unless start-phase is build)
+        required: false
+        type: string
+        default: ''
       rollout-percentage:
         description: Production rollout percentage (1-100)
         required: false
@@ -226,8 +239,6 @@ jobs:
         with:
           repository: ${{ inputs.toolkit-repo }}
           ref: ${{ inputs.toolkit-ref }}
-          path: .toolkit
-        with:
           path: .toolkit
 
       - name: Validate build artifact
