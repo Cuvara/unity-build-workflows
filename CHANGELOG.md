@@ -12,6 +12,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **A failed identity check did not stop a promotion.** Every job in the three
+  promotion pipelines listed `verify-artifact` in `needs` but guarded itself
+  with `if: always()`, which ignores the result. Publishing was reachable: a
+  promotion started at `start-phase: internal` would have uploaded an artifact
+  whose identity verification had just failed. Found by running a deliberate
+  version mismatch. Every job downstream of the check now requires it to have
+  succeeded — the report job excepted, since reporting a failure is the one
+  thing that must survive it — and `validate_pipeline_invariants.py` fails CI
+  if a new job forgets.
 - **Release Sets were written with no version.** The stage-01 shallow checkout
   fetched `ProjectVersion.txt` but not `ProjectSettings.asset`, so the metadata
   step took its "file not found" path and `app-version` resolved empty.

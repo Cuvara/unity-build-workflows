@@ -249,7 +249,7 @@ jobs:
     name: 04 / WebGL / Validate
     needs: [verify-artifact]
     if: |
-      always() &&
+      needs.verify-artifact.result == 'success' &&
       inputs.start-phase == 'validate'
     runs-on: ubuntu-latest
     outputs:
@@ -302,7 +302,8 @@ jobs:
     name: 05 / WebGL / Deploy — Staging
     needs: [verify-artifact, validate-webgl]
     if: |
-      always() && !inputs.dry-run &&
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
       (
         (inputs.start-phase == 'validate' && needs.validate-webgl.result == 'success') ||
         inputs.start-phase == 'staging'
@@ -373,7 +374,8 @@ jobs:
     name: 06 / WebGL / Deploy — Production
     needs: [verify-artifact, deploy-staging]
     if: |
-      always() && !inputs.dry-run &&
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
       (
         needs.deploy-staging.result == 'success' ||
         inputs.start-phase == 'production'

@@ -642,3 +642,32 @@ def test_the_pipeline_checks_out_the_file_version_comes_from():
         "no checkout brings in ProjectSettings.asset, so bundleVersion cannot "
         "be read and the Release Set will have an empty version"
     )
+
+
+@pytest.mark.parametrize("platform", ["android", "ios", "webgl"])
+def test_nothing_downstream_of_a_failed_identity_check_runs(platform):
+    """Observed on a real promotion: identity verification failed and
+    "Validate AAB" still reported green beside it.
+
+    Publishing was correctly skipped, so nothing shipped — but a run that is a
+    hard stop should read as one. Every job hanging off verify-artifact now
+    requires it to have succeeded.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows"
+         / f"pipeline-{platform}-release.yml").read_text())
+    for name, job in workflow["jobs"].items():
+        needs = job.get("needs") or []
+        if isinstance(needs, str):
+            needs = [needs]
+        if "verify-artifact" not in needs or name == "report":
+            # The report job runs on any outcome by design — reporting a
+            # failure is the one thing that must survive it.
+            continue
+        condition = str(job.get("if", ""))
+        assert "verify-artifact.result == 'success'" in condition, (
+            f"{platform}:{name} runs regardless of whether the artifact's "
+            f"identity was verified"
+        )
