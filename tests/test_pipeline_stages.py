@@ -682,3 +682,82 @@ def test_stage_04_node_names_the_artifact_it_validates(pipeline_jobs):
         f"'{name}' does not say what it validates — '04 / Android / Validate AAB' "
         "tells the reader more than '04 / Android / Validate'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Stage 07 in the release pipelines
+# ---------------------------------------------------------------------------
+
+RELEASE_PIPELINES = {
+    "android": (ANDROID_RELEASE, "Google Play"),
+    "ios": (IOS_RELEASE, "App Store Connect"),
+    "webgl": (WEBGL_RELEASE, "hosting / CDN"),
+}
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_release_pipeline_reaches_stage_07(key, spec):
+    """The pipelines ended at stage 06, so a release run produced no report at
+    all — the only way to see how far a promotion got was to read the graph."""
+    path, _ = spec
+    jobs = load(path)["jobs"]
+    stages = {str(j.get("name", ""))[:2] for j in jobs.values()}
+    for stage in ("03", "04", "05", "06", "07"):
+        assert stage in stages, f"{path.name} has no stage {stage}: {sorted(stages)}"
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_release_report_runs_even_when_a_phase_failed(key, spec):
+    path, _ = spec
+    job = load(path)["jobs"]["report"]
+    assert str(job.get("if", "")).strip() == "always()", (
+        "a report that only runs on success cannot tell you where a release stopped"
+    )
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_release_report_covers_every_phase(key, spec):
+    """Every publish/release job must appear in the phase list, or the report
+    silently omits the one that failed."""
+    path, _ = spec
+    jobs = load(path)["jobs"]
+    report = jobs["report"]
+    phases = str(report["steps"][-1]["with"]["phases"])
+    for job_id, job in jobs.items():
+        if job_id == "report":
+            continue
+        assert f"needs.{job_id}.result" in phases, (
+            f"{path.name}: phase list omits {job_id} ({job.get('name')})"
+        )
+        assert job_id in needs_of(report), f"{path.name}: report does not depend on {job_id}"
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_release_report_names_its_destination(key, spec):
+    path, destination = spec
+    step = load(path)["jobs"]["report"]["steps"][-1]
+    assert step["with"]["destination"] == destination
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_release_report_declares_the_discord_secret(key, spec):
+    """Referencing a secret a reusable workflow never declared makes it always
+    empty — the notification would silently never fire."""
+    path, _ = spec
+    workflow = load(path)
+    secrets = triggers(workflow)["workflow_call"].get("secrets") or {}
+    step = workflow["jobs"]["report"]["steps"][-1]
+    if "DISCORD_WEBHOOK_URL" in str(step["with"].get("discord-webhook", "")):
+        assert "DISCORD_WEBHOOK_URL" in secrets, (
+            f"{path.name} uses DISCORD_WEBHOOK_URL without declaring it"
+        )
+
+
+def test_release_report_is_one_shared_implementation(repo_root):
+    """Three pipelines, one report. The phase names differ per platform; the
+    rendering does not."""
+    action = repo_root / ".github" / "actions" / "release-report" / "action.yml"
+    assert action.exists(), "the shared release report action is missing"
+    for path, _ in RELEASE_PIPELINES.values():
+        body = yaml.dump(load(path)["jobs"]["report"])
+        assert "release-report" in body, f"{path.name} does not use the shared action"

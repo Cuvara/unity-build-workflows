@@ -140,6 +140,9 @@ on:
       # Deploy credentials are checked where they are used. Declaring them
       # required here would make a Build Only run unresolvable in a repository
       # that has no Cloudflare account.
+      DISCORD_WEBHOOK_URL:
+        description: Discord webhook for the stage-07 release notification. Optional.
+        required: false
       CLOUDFLARE_API_TOKEN:
         required: false
       CLOUDFLARE_ACCOUNT_ID:
@@ -387,3 +390,38 @@ jobs:
             echo "- **Artifact:** ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}"
             echo "- **URL:** ${{ steps.deploy.outputs.url || 'n/a' }}"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ─── 07 — REPORT & NOTIFY ───────────────────────────────────────────────────
+  # The pipeline used to end at stage 06, so a release run produced no report:
+  # the only way to see how far a promotion got was to read the graph. This
+  # says which phase it reached, or which one stopped it, and posts the same
+  # to Discord.
+  report:
+    name: 07 / WebGL / Report & Notify
+    needs: [build-webgl, validate-webgl, deploy-staging, deploy-production]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Report
+        uses: ./.toolkit/.github/actions/release-report
+        with:
+          platform: WebGL
+          destination: hosting / CDN
+          build-version: ${{ inputs.build-version }}
+          artifact-name: ${{ inputs.artifact-name }}
+          start-phase: ${{ inputs.start-phase }}
+          dry-run: ${{ inputs.dry-run }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          phases: |
+            03 Build WebGL=${{ needs.build-webgl.result }}
+            04 Validate=${{ needs.validate-webgl.result }}
+            05 Deploy — Staging=${{ needs.deploy-staging.result }}
+            06 Deploy — Production=${{ needs.deploy-production.result }}
