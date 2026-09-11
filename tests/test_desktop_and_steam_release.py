@@ -571,3 +571,30 @@ def test_a_later_start_phase_still_publishes(name):
         condition = str(job.get("if", ""))
         assert "!cancelled()" in condition, job_id
         assert "verify-artifact.result == 'success'" in condition, job_id
+
+
+@pytest.mark.parametrize("name", DESKTOP_PIPELINES)
+def test_a_dry_run_reaches_the_staging_path(name):
+    """`dry-run` promises "verify, validate and stage without uploading", and
+    the deploy script implements exactly that — but the phase gate excluded dry
+    runs outright at first, so the staging path was unreachable and the promise
+    was untestable in a repository with no Steam account."""
+    workflow = load(name)
+    for job_id, job in workflow["jobs"].items():
+        if not job_id.startswith("steam-"):
+            continue
+        assert "!inputs.dry-run" not in str(job.get("if", "")), (
+            f"{job_id} skips entirely on a dry run, so nothing is staged"
+        )
+        steps = json.dumps(job["steps"])
+        assert "DRY_RUN" in steps, f"{job_id} does not tell the deploy script"
+        # Credentials are required for a real upload and not for a dry run.
+        assert "--require-credentials" in steps
+
+
+@pytest.mark.parametrize("name", DESKTOP_PIPELINES)
+def test_steamcmd_is_not_installed_for_a_dry_run(name):
+    for job in load(name)["jobs"].values():
+        for step in job.get("steps", []):
+            if "Install SteamCMD" in str(step.get("name", "")):
+                assert "dry-run" in str(step.get("if", ""))
