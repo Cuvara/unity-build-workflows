@@ -430,12 +430,18 @@ def test_android_export_does_not_touch_other_platforms(resolve_matrix):
         assert rows["Linux64"]["artifact-type"] == "LINUX"
 
 
-def test_only_platforms_with_a_validator_reach_stage_04(resolve_matrix):
-    """Linux and Windows have no artifact validator, so they contribute no
-    stage-04 node rather than a permanently skipped one."""
+def test_every_platform_reaches_stage_04(resolve_matrix):
+    """Desktop used to contribute no stage-04 node, because there was no
+    validator to run. That meant a Windows or Linux build missing its _Data
+    directory — a player that cannot start — became an immutable release
+    artifact unchallenged. They now share the `desktop` validator."""
     out = resolve_matrix(["Android", "iOS", "WebGL", "Linux64", "LinuxServer", "Windows64"])
-    assert sorted(out["validate_platforms"]) == ["Android", "WebGL", "iOS"].__class__(
-        sorted(["Android", "WebGL", "iOS"]))
+    assert sorted(out["validate_platforms"]) == sorted(
+        ["Android", "iOS", "WebGL", "Linux64", "LinuxServer", "Windows64"])
+    validators = {r["platform"]: r["validator"] for r in out["validate"]}
+    assert validators["Windows64"] == "desktop"
+    assert validators["Linux64"] == "desktop"
+    assert validators["LinuxServer"] == "desktop"
 
 
 def test_empty_selection_yields_an_empty_matrix(resolve_matrix):
@@ -788,12 +794,13 @@ def test_r4w_windows64_absent_when_not_selected(resolve_matrix):
     assert "Windows64" not in out["build_platforms"]
 
 
-def test_r4w_windows64_has_no_stage_04_validator(resolve_matrix):
-    """There is no Windows artifact validator, so it must contribute no
-    stage-04 node rather than a permanently skipped one."""
+def test_r4w_windows64_is_validated_before_it_becomes_immutable(resolve_matrix):
+    """Windows is a first-class release platform (I-013), so its artifact is
+    checked before the immutable boundary like everyone else's."""
     out = resolve_matrix(["Windows64"])
-    assert out["validate_platforms"] == []
-    assert out["has-validations"] == "false"
+    assert out["validate_platforms"] == ["Windows64"]
+    assert out["has-validations"] == "true"
+    assert out["validate"][0]["validator"] == "desktop"
 
 
 @pytest.mark.parametrize("addressables_result,should_run", [

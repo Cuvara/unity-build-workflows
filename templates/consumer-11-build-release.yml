@@ -18,7 +18,7 @@
 # required, and the artifacts are immutable inputs to the Release workflows.
 #
 #   release-android-aab    release-webgl
-#   release-ios-xcodeproj  release-windows
+#   release-ios-ipa        release-windows
 #                          release-linux
 #
 # Nothing here publishes either. The artifacts this produces are what

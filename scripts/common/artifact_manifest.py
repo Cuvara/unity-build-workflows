@@ -51,6 +51,15 @@ ARTIFACT_PATTERNS = {
     "ADDRESSABLES": ["catalog*.json", "*.bundle"],
 }
 
+# Artifact types that are a step on the way to a shippable artifact, never the
+# shippable artifact itself. An Xcode project is the clearest case: Unity emits
+# one for iOS, but what ships is the signed IPA exported from it, and a Release
+# Set that listed the project would be promising to promote something nobody
+# can install. Marking them here keeps the judgement in one place instead of
+# spread across the workflows that happen to know about iOS.
+INTERMEDIATE_ARTIFACT_TYPES = {"XCODEPROJ"}
+
+
 # Platform → the artifact type a build produces when the caller does not say.
 # Android is deliberately absent: APK vs AAB is a build-configuration decision,
 # never a default.
@@ -244,6 +253,7 @@ def build_manifest(
     image_digest="",
     provenance_strength="",
     runner="",
+    intermediate=False,
     env=None,
 ):
     """Assemble the artifact manifest dictionary.
@@ -287,6 +297,11 @@ def build_manifest(
 
     metadata["schemaVersion"] = 1
     metadata["artifactType"] = str(artifact_type).upper()
+    # A Release Set skips these, so an iOS release set contains the signed IPA
+    # produced by stage 03b and not the Xcode project it was built from.
+    metadata["intermediate"] = bool(
+        intermediate or metadata["artifactType"] in INTERMEDIATE_ARTIFACT_TYPES
+    )
     metadata["configuration"] = configuration
     metadata["platform"] = platform
     metadata["artifactPath"] = rel_path or abs_path
@@ -343,6 +358,11 @@ def main(argv=None):
     parser.add_argument("--provenance-strength", default="",
                         help="immutable | auditable | unknown (derived when omitted)")
     parser.add_argument("--runner", default="", help="runner identity, e.g. Linux/X64")
+    parser.add_argument(
+        "--intermediate", action="store_true",
+        help="This artifact is an input to a later stage, not a shippable "
+             "artifact — a Release Set will skip it. XCODEPROJ is marked "
+             "automatically.")
     parser.add_argument("--output", default="", help=f"Default: <search-root>/{MANIFEST_FILENAME}")
     parser.add_argument(
         "--github-output",
@@ -384,6 +404,7 @@ def main(argv=None):
         image_digest=args.image_digest,
         provenance_strength=args.provenance_strength,
         runner=args.runner,
+        intermediate=args.intermediate,
     )
 
     output = Path(args.output) if args.output else Path(args.search_root) / MANIFEST_FILENAME

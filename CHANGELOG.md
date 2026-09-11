@@ -12,6 +12,47 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **Windows and Linux release promotion through Steam.**
+  `pipeline-windows-release.yml` and `pipeline-linux-release.yml`, with
+  `templates/consumer-23-release-windows.yml` and
+  `consumer-24-release-linux.yml` as entry points. Promote-only: they consume
+  `source-run-id`, `release-windows` / `release-linux` and the release
+  manifest, verify identity and checksum in *every* phase, and publish through
+  `steam-internal` → `steam-external` → `steam-production` Environments.
+  SteamCMD needs a content root of its own, so the verified artifact is copied
+  into a staging workspace and both trees are fingerprinted before anything
+  uploads — the artifact itself is never touched. App and depot ids come from
+  `STEAM_APP_ID` / `STEAM_DEPOTS` repository variables; nothing project-specific
+  is hardcoded in the toolkit. See `docs/STEAM_DISTRIBUTION.md`.
+- **A stage-04 validator for desktop players**
+  (`scripts/desktop/validate_desktop_artifact.py`). Windows, Linux and the
+  Linux dedicated server previously had no validator at all, so a build missing
+  its `<Product>_Data` directory — a player that cannot start — became an
+  immutable release artifact unchallenged. Checks the executable and its kind,
+  the data directory, the engine payload, game code, the Unity runtime library,
+  and on Linux that the executable bit survived the artifact round-trip.
+
+### Fixed
+
+- **The iOS promotion consumed the wrong artifact.** Stage 03b signs and
+  exports the IPA before the immutable boundary, but the IPA carried no
+  artifact manifest — so the only iOS manifest in a release run was the Xcode
+  project's, the Release Set listed the project, and
+  `consumer-21-release-ios.yml` defaulted to promoting `release-ios-xcodeproj`.
+  A promote-only pipeline cannot turn a project into anything installable, so
+  the iOS release path was a dead end that looked configured. The IPA now
+  writes and uploads its own manifest, `XCODEPROJ` is marked
+  `"intermediate": true`, a Release Set skips intermediates and raises if two
+  shippable artifacts claim one platform, verifying an intermediate fails
+  closed, and the promotion default is `release-ios-ipa`.
+- **`verify` accepted a Release Set with missing identity fields.** It only
+  compared a field when the caller supplied an expectation, so an empty one
+  passed unchallenged. All seven — run id, commit, version, build number,
+  platform, artifact name, SHA-256 — must now be present, and the artifact's
+  own commit/version/build number must agree with the Release Set's (I-009).
+
+### Added
+
 - **`.github/pipeline-policy/validation-status.md`** — what has actually been
   proven, split into runtime verified (with run IDs), static verified, and
   blocked by missing hardware or credentials. iOS is listed as blocked: stage
@@ -74,7 +115,7 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   writing an artifact manifest records provenance, that `immutable` is gated on
   a digest, and that an untraceable artifact cannot enter a Release Set. The
   builder itself is unchanged; limitations are stated in
-  `docs/PIPELINE_ARCHITECTURE.md` §5a rather than hidden.
+  `docs/PIPELINE_ARCHITECTURE.md` §5b rather than hidden.
 
 - **Platform capabilities.** A project declares which targets it can build via
   the `PLATFORMS` variable (`Android,WebGL`). That is a different question from

@@ -1,0 +1,512 @@
+name: Pipeline Linux Release
+
+# Linux promotion pipeline — PROMOTE ONLY. This workflow builds nothing.
+#
+#   Verify Identity -> Validate Artifact -> Steam Internal -> Steam External -> Steam Production
+#
+# It consumes the `release-linux` artifact that `Build / Release` already produced
+# and validated, pinned by `source-run-id`, and publishes those exact bytes to
+# Steam. Every phase is a separate job behind its own GitHub Environment.
+#
+# Platform and distribution provider are separate concerns (I-015). Linux is a
+# PLATFORM: a project can build and validate a Linux release artifact with no
+# Steam account at all. Steam is a DISTRIBUTION PROVIDER: its configuration
+# gates publishing, and it gates it by failing loudly. A deploy job that skips
+# quietly and reports success is how a release nobody shipped gets believed.
+#
+# SteamCMD needs a content directory of its own beside a pair of VDF scripts.
+# That is the one place a promotion could be tempted into rewriting the
+# artifact, so the verified artifact is COPIED into a staging workspace and the
+# copy is fingerprinted against the original before anything uploads
+# (scripts/steam/deploy_steam.sh). Nothing is rebuilt, re-signed, repacked or
+# recompressed — `check_promotion_never_mutates` fails CI if it ever is.
+
+on:
+  workflow_call:
+    inputs:
+      toolkit-repo:
+        description: >-
+          Toolkit repository checked out to .toolkit/ for this workflow's own
+          scripts. A step-level `uses: ./…` in a reusable workflow resolves
+          against the runner WORKSPACE, which is the caller's repository.
+        type: string
+        required: false
+        default: Cuvara/unity-build-workflows
+      toolkit-ref:
+        description: Git ref of the toolkit repository to check out.
+        type: string
+        required: false
+        default: main
+
+      build-version:
+        description: Version being released, e.g. 1.4.2.
+        type: string
+        required: true
+      source-run-id:
+        description: >-
+          Run ID of the Build / Release run that produced the artifact.
+          Required: `actions/download-artifact` only sees the current run by
+          default, and pinning the run is what makes this the same binary QA
+          approved rather than whatever happens to carry the name today.
+        type: string
+        required: true
+      artifact-name:
+        description: The immutable artifact to promote.
+        type: string
+        required: false
+        default: 'release-linux'
+      start-phase:
+        description: Phase to start from (validate | internal | external | production).
+        type: string
+        required: false
+        default: validate
+      skip-external:
+        description: Skip the external/beta branch (internal -> production).
+        type: boolean
+        required: false
+        default: false
+      build-description:
+        description: Text shown against the build in Steamworks.
+        type: string
+        required: false
+        default: ''
+      dry-run:
+        description: >-
+          Verify, validate and stage the Steam content without uploading. Needs
+          no Steam credentials.
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      # Steam credentials are optional at the workflow level and required at
+      # the point of use. Declaring them required here would make a dry run
+      # unresolvable in a repository that has no Steam account — which is the
+      # normal state for a project that ships Linux builds somewhere else.
+      STEAM_USERNAME:
+        required: false
+      STEAM_CONFIG_VDF:
+        description: base64 of a config.vdf whose Steam Guard session is already valid.
+        required: false
+      DISCORD_WEBHOOK_URL:
+        required: false
+
+    outputs:
+      artifact-name:
+        description: The artifact this run promoted.
+        value: ${{ inputs.artifact-name }}
+
+jobs:
+  # ─── 04 — VERIFY RELEASE IDENTITY ───────────────────────────────────────────
+  # A filename establishes nothing. This proves the downloaded bytes are the
+  # ones the named Release Set produced: same run, same commit, same version,
+  # same build number, same platform, same artifact name, same SHA-256. It
+  # fails closed — a promotion that cannot prove what it is holding must not
+  # publish it.
+  verify-artifact:
+    name: 04 / Linux / Verify Release Identity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Download artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: promoted/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             Linux64 \
+            --artifact-path        promoted \
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
+
+  # ─── 04 — ARTIFACT VALIDATION ───────────────────────────────────────────────
+  # The same validator Build / Release ran, against the bytes that actually
+  # arrived here. Running it twice is deliberate: stage 04 proved the build was
+  # sound, this proves the download is.
+  validate-artifact:
+    name: 04 / Linux / Validate
+    needs: [verify-artifact]
+    if: |
+      needs.verify-artifact.result == 'success' &&
+      inputs.start-phase == 'validate'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Download artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Validate Linux artifact
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/desktop/validate_desktop_artifact.py \
+            --search-root build-artifact \
+            --platform Linux64 \
+            --report validation-linux.json
+
+      - name: Upload validation report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: validation-report-Linux64
+          path: validation-linux.json
+          retention-days: 30
+
+  # ─── 05 — STEAM: Internal ──────────────────────────────────────────
+  # The automated half: publishes to the internal Steam branch as soon as
+  # validation is green. Still Environment-gated, so a project that wants a
+  # human here only has to add a reviewer to `steam-internal`.
+  steam-internal:
+    name: 05 / Linux / Steam — Internal
+    needs: [verify-artifact, validate-artifact]
+    if: |
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
+      (
+        (inputs.start-phase == 'validate' && needs.validate-artifact.result == 'success') ||
+        inputs.start-phase == 'internal'
+      )
+    runs-on: ubuntu-latest
+    environment: steam-internal
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      # Fail closed on configuration BEFORE downloading anything: missing Steam
+      # setup is a clear error, never a silent skip.
+      - name: Resolve Steam configuration
+        id: steam
+        env:
+          STEAM_APP_ID:      ${{ vars.STEAM_APP_ID }}
+          STEAM_DEPOTS:      ${{ vars.STEAM_DEPOTS }}
+          STEAM_DEPOT_LINUX64: ${{ vars.STEAM_DEPOT_LINUX64 }}
+          STEAM_BRANCH_INTERNAL: ${{ vars.STEAM_BRANCH_INTERNAL }}
+          STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
+          STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/steam/resolve_steam_config.py \
+            --platform Linux64 \
+            --phase internal \
+            --require-credentials
+
+      - name: Download the verified artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: promoted/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      # Re-verified in every phase. Each phase downloads the artifact again, so
+      # each phase proves for itself that what it holds is the Release Set's
+      # artifact — an approval on the internal branch is not evidence about the
+      # bytes a later job fetched.
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             Linux64 \
+            --artifact-path        promoted \
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
+
+      - name: Install SteamCMD
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq steamcmd
+          echo "/usr/games" >> "${GITHUB_PATH}"
+
+      - name: Upload to Steam
+        env:
+          ARTIFACT_DIR:      promoted
+          STEAM_APP_ID:      ${{ steps.steam.outputs.app-id }}
+          STEAM_DEPOT_ID:    ${{ steps.steam.outputs.depot-id }}
+          STEAM_BRANCH:      ${{ steps.steam.outputs.branch }}
+          STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
+          STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+          BUILD_DESCRIPTION: ${{ inputs.build-description != '' && inputs.build-description || format('{0} {1} ({2})', 'Linux', inputs.build-version, inputs.source-run-id) }}
+        shell: bash
+        run: bash .toolkit/scripts/steam/deploy_steam.sh
+
+  # ─── 06 — STEAM: External / Beta ──────────────────────────────────────────
+  # The public beta branch. Skippable — not every release goes through one —
+  # but skipping is an explicit input, never a silent default.
+  steam-external:
+    name: 06 / Linux / Steam — External / Beta
+    needs: [verify-artifact, steam-internal]
+    if: |
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
+      !inputs.skip-external &&
+      (
+        needs.steam-internal.result == 'success' ||
+        inputs.start-phase == 'external'
+      )
+    runs-on: ubuntu-latest
+    environment: steam-external
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      # Fail closed on configuration BEFORE downloading anything: missing Steam
+      # setup is a clear error, never a silent skip.
+      - name: Resolve Steam configuration
+        id: steam
+        env:
+          STEAM_APP_ID:      ${{ vars.STEAM_APP_ID }}
+          STEAM_DEPOTS:      ${{ vars.STEAM_DEPOTS }}
+          STEAM_DEPOT_LINUX64: ${{ vars.STEAM_DEPOT_LINUX64 }}
+          STEAM_BRANCH_EXTERNAL: ${{ vars.STEAM_BRANCH_EXTERNAL }}
+          STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
+          STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/steam/resolve_steam_config.py \
+            --platform Linux64 \
+            --phase external \
+            --require-credentials
+
+      - name: Download the verified artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: promoted/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      # Re-verified in every phase. Each phase downloads the artifact again, so
+      # each phase proves for itself that what it holds is the Release Set's
+      # artifact — an approval on the internal branch is not evidence about the
+      # bytes a later job fetched.
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             Linux64 \
+            --artifact-path        promoted \
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
+
+      - name: Install SteamCMD
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq steamcmd
+          echo "/usr/games" >> "${GITHUB_PATH}"
+
+      - name: Upload to Steam
+        env:
+          ARTIFACT_DIR:      promoted
+          STEAM_APP_ID:      ${{ steps.steam.outputs.app-id }}
+          STEAM_DEPOT_ID:    ${{ steps.steam.outputs.depot-id }}
+          STEAM_BRANCH:      ${{ steps.steam.outputs.branch }}
+          STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
+          STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+          BUILD_DESCRIPTION: ${{ inputs.build-description != '' && inputs.build-description || format('{0} {1} ({2})', 'Linux', inputs.build-version, inputs.source-run-id) }}
+        shell: bash
+        run: bash .toolkit/scripts/steam/deploy_steam.sh
+
+  # ─── 06 — STEAM: Production ──────────────────────────────────────────
+  # Sets the live branch. Gated by the `steam-production` Environment: add
+  # required reviewers there and this waits for a human. A green build is
+  # never on its own a reason to publish to players.
+  steam-production:
+    name: 06 / Linux / Steam — Production
+    needs: [verify-artifact, steam-internal, steam-external]
+    if: |
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
+      (
+        needs.steam-external.result == 'success' ||
+        (inputs.skip-external && needs.steam-internal.result == 'success') ||
+        inputs.start-phase == 'production'
+      )
+    runs-on: ubuntu-latest
+    environment: steam-production
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      # Fail closed on configuration BEFORE downloading anything: missing Steam
+      # setup is a clear error, never a silent skip.
+      - name: Resolve Steam configuration
+        id: steam
+        env:
+          STEAM_APP_ID:      ${{ vars.STEAM_APP_ID }}
+          STEAM_DEPOTS:      ${{ vars.STEAM_DEPOTS }}
+          STEAM_DEPOT_LINUX64: ${{ vars.STEAM_DEPOT_LINUX64 }}
+          STEAM_BRANCH_PRODUCTION: ${{ vars.STEAM_BRANCH_PRODUCTION }}
+          STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
+          STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/steam/resolve_steam_config.py \
+            --platform Linux64 \
+            --phase production \
+            --require-credentials
+
+      - name: Download the verified artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: promoted/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      # Re-verified in every phase. Each phase downloads the artifact again, so
+      # each phase proves for itself that what it holds is the Release Set's
+      # artifact — an approval on the internal branch is not evidence about the
+      # bytes a later job fetched.
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             Linux64 \
+            --artifact-path        promoted \
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
+
+      - name: Install SteamCMD
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq steamcmd
+          echo "/usr/games" >> "${GITHUB_PATH}"
+
+      - name: Upload to Steam
+        env:
+          ARTIFACT_DIR:      promoted
+          STEAM_APP_ID:      ${{ steps.steam.outputs.app-id }}
+          STEAM_DEPOT_ID:    ${{ steps.steam.outputs.depot-id }}
+          STEAM_BRANCH:      ${{ steps.steam.outputs.branch }}
+          STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
+          STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+          BUILD_DESCRIPTION: ${{ inputs.build-description != '' && inputs.build-description || format('{0} {1} ({2})', 'Linux', inputs.build-version, inputs.source-run-id) }}
+        shell: bash
+        run: bash .toolkit/scripts/steam/deploy_steam.sh
+
+  # ─── 07 — REPORT ────────────────────────────────────────────────────────────
+  report:
+    name: 07 / Linux / Report
+    needs: [verify-artifact, validate-artifact, steam-internal, steam-external, steam-production]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarise
+        shell: bash
+        env:
+          VERIFY:     ${{ needs.verify-artifact.result }}
+          VALIDATE:   ${{ needs.validate-artifact.result }}
+          INTERNAL:   ${{ needs.steam-internal.result }}
+          EXTERNAL:   ${{ needs.steam-external.result }}
+          PRODUCTION: ${{ needs.steam-production.result }}
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "### Linux promotion"
+            echo
+            echo "Release Set \`${{ inputs.source-run-id }}\` · version \`${{ inputs.build-version }}\` · artifact \`${{ inputs.artifact-name }}\`"
+            echo
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Verify identity | ${VERIFY} |"
+            echo "| Validate artifact | ${VALIDATE} |"
+            echo "| Steam internal | ${INTERNAL} |"
+            echo "| Steam external | ${EXTERNAL} |"
+            echo "| Steam production | ${PRODUCTION} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          # A promotion whose identity check failed is a failed promotion, even
+          # though the publishing jobs "succeeded" by being skipped.
+          if [ "${VERIFY}" != "success" ]; then
+            echo "::error::Release identity was not verified; nothing was published."
+            exit 1
+          fi
