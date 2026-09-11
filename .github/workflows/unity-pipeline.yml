@@ -348,6 +348,14 @@ jobs:
           IN_BUILD_ADDRESSABLES: ${{ inputs.build-addressables || '' }}
           IN_ANDROID_EXPORT:     ${{ inputs.android-export || '' }}
           IN_DEFINE_SYMBOLS:     ${{ inputs.define-symbols || '' }}
+          # ── Platform capability (I-013/I-014) ──────────────────────────────
+          # Which platforms this PROJECT can build at all — a different
+          # question from which ones a branch builds. Unset means all, so
+          # existing projects are unaffected. Without this line the resolver
+          # never saw the variable and the capability gate was inert: a
+          # project declaring Android,WebGL still built Windows64 on request.
+          PLATFORMS:                       ${{ vars.PLATFORMS || '' }}
+          NEW_PLATFORMS:                   ${{ vars.BUILD_PLATFORMS_ENABLED || '' }}
           # ── Repository Variables (optional platform/config overrides) ──────
           VAR_DEVELOP_BUILD_PLATFORMS:     ${{ vars.DEVELOP_BUILD_PLATFORMS || '' }}
           VAR_STAGING_BUILD_PLATFORMS:     ${{ vars.STAGING_BUILD_PLATFORMS || '' }}
