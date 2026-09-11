@@ -1,0 +1,14 @@
+# actionlint configuration.
+#
+# Custom runner labels used by the self-hosted lanes. actionlint only knows the
+# GitHub-hosted label set, so without this every self-hosted `runs-on:` reports
+# as an unknown label and drowns the findings that matter.
+#
+# See docs/RUNNER_AND_BUILD_ENGINE.md and docs/SELF_HOSTED_*.md.
+self-hosted-runner:
+  labels:
+    - docker-unity          # self-hosted Linux runner with Docker, used by the docker lane
+    - macos-unity-xcode     # self-hosted macOS runner with Xcode, required for iOS
+    - self-hosted-macos     # legacy alias kept for the runner-macos-label default
+    - self-hosted-windows   # legacy alias kept for the runner-windows-label default
+    - unity                 # capability label on the Unity-capable self-hosted runners

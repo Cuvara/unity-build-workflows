@@ -12,6 +12,21 @@ name: Pipeline Android Release
 on:
   workflow_call:
     inputs:
+      toolkit-repo:
+        description: >-
+          Toolkit repository checked out to .toolkit/ for this workflow's own
+          composite actions and scripts. A step-level `uses: ./…` in a reusable
+          workflow resolves against the runner WORKSPACE, which is the caller's
+          repository — so the toolkit's actions are not on disk unless checked
+          out explicitly.
+        type: string
+        required: false
+        default: Cuvara/unity-build-workflows
+      toolkit-ref:
+        description: Git ref of the toolkit repository to check out.
+        type: string
+        required: false
+        default: main
       # ── Build inputs ──
       project-path:
         type: string
@@ -74,6 +89,14 @@ on:
         type: string
         required: false
         default: build
+      artifact-name:
+        description: >-
+          Existing build artifact to publish when start-phase is
+          internal/external/production. This is what makes "retry the upload"
+          publish the same validated bytes instead of rebuilding the AAB.
+        type: string
+        required: false
+        default: ''
       rollout-percentage:
         description: Production rollout percentage (1-100, default 100)
         type: number
@@ -111,7 +134,12 @@ on:
       ANDROID_KEY_PASS:
         required: false
       GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
-        required: true
+        # Deliberately optional: stage 03/04 (Build Only, dry-run) must run in a
+        # repo that has no Play credentials at all. A workflow_call-level
+        # `required: true` is checked when the call is *resolved*, so it made a
+        # build-only run impossible before a single job started. The publish
+        # jobs check for it themselves and fail there, where it matters.
+        required: false
 
     outputs:
       artifact-name:
@@ -138,6 +166,11 @@ on:
         type: choice
         default: build
         options: [build, internal, external, production]
+      artifact-name:
+        description: Existing artifact to publish (required unless start-phase is build)
+        required: false
+        type: string
+        default: ''
       rollout-percentage:
         description: Production rollout percentage (1-100)
         required: false
@@ -157,7 +190,7 @@ on:
 jobs:
   # ─── BUILD AAB ──────────────────────────────────────────────────────────────
   build-aab:
-    name: Build AAB
+    name: 03 / Android / Release / AAB
     if: inputs.start-phase == 'build'
     uses: ./.github/workflows/unity-build-android.yml
     with:
@@ -183,7 +216,7 @@ jobs:
 
   # ─── VALIDATE AAB ───────────────────────────────────────────────────────────
   validate-aab:
-    name: Validate AAB
+    name: 04 / Android / Validate AAB
     needs: [build-aab]
     if: |
       always() &&
@@ -198,47 +231,63 @@ jobs:
           name: ${{ needs.build-aab.outputs.artifact-name }}
           path: build-artifact/
 
-      - name: Validate build artifact
-        shell: bash
-        run: |
-          AAB=$(find build-artifact/ -name '*.aab' -type f | head -1)
-          APK=$(find build-artifact/ -name '*.apk' -type f | head -1)
-          ARTIFACT="${AAB:-$APK}"
-          if [[ -z "${ARTIFACT}" ]]; then
-            echo "::error::No AAB or APK found in artifact"
-            exit 1
-          fi
-          SIZE=$(stat -c%s "${ARTIFACT}" 2>/dev/null || stat -f%z "${ARTIFACT}")
-          echo "[validate] Found: $(basename "${ARTIFACT}") (${SIZE} bytes)"
-          if [[ "${SIZE}" -lt 1000 ]]; then
-            echo "::error::Artifact suspiciously small (${SIZE} bytes)"
-            exit 1
-          fi
-          echo "[validate] Artifact OK"
+      # A >1000-byte file was the whole of the old gate, so an unsigned AAB, an
+      # APK where an AAB was expected, or a bundle with the wrong package id all
+      # reached Google Play and failed there. Validate the artifact properly.
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
 
-      - name: Summary
+      - name: Validate build artifact
+        id: validate
         shell: bash
         run: |
-          echo "### Build Validation" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Artifact:** ${{ needs.build-aab.outputs.artifact-name }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Status:** Passed" >> "${GITHUB_STEP_SUMMARY}"
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/android/validate_android_artifact.py \
+            --search-root      build-artifact \
+            --expected-type    AAB \
+            --expected-package "${{ inputs.package-name }}" \
+            --expected-version-name "${{ inputs.build-version }}" \
+            --require-signed \
+            --report           validation-android.json
+
+      - name: Upload validation report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: validation-report-Android
+          path: validation-android.json
+          retention-days: 30
 
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
   release-notes:
-    name: Generate Release Notes
+    name: 04 / Android / Release Notes
     needs: [build-aab]
     if: |
       always() &&
       (needs.build-aab.result == 'success' || needs.build-aab.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
+      # Release notes come from the CALLER's git history, so the caller repo is
+      # the workspace checkout; the toolkit only supplies the action.
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0
 
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
       - name: Generate notes
-        uses: ./.github/actions/generate-release-notes
+        uses: ./.toolkit/.github/actions/generate-release-notes
         with:
           from-tag: ${{ inputs.from-tag }}
           format: google-play-json
@@ -253,7 +302,7 @@ jobs:
 
   # ─── PHASE 1: INTERNAL TESTING ──────────────────────────────────────────────
   internal-testing:
-    name: 'Phase 1: Internal Testing'
+    name: 05 / Android / Publish — Internal Testing
     needs: [build-aab, validate-aab, release-notes]
     if: |
       always() && !inputs.dry-run &&
@@ -266,6 +315,10 @@ jobs:
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
 
       - name: Download build artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -296,7 +349,7 @@ jobs:
           if [[ -f release-notes.json ]]; then
             ARGS+=(--release-notes-file release-notes.json)
           fi
-          python3 scripts/android/upload_google_play.py "${ARGS[@]}"
+          python3 .toolkit/scripts/android/upload_google_play.py "${ARGS[@]}"
 
       - name: Summary
         run: |
@@ -307,7 +360,7 @@ jobs:
 
   # ─── PHASE 2: EXTERNAL TESTING ─────────────────────────────────────────────
   external-testing:
-    name: 'Phase 2: External Testing'
+    name: 06 / Android / Release — External Testing
     needs: [internal-testing]
     if: |
       always() && !inputs.dry-run && !inputs.skip-external &&
@@ -320,9 +373,13 @@ jobs:
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
 
       - name: Promote to alpha track
-        uses: ./.github/actions/google-play-promote
+        uses: ./.toolkit/.github/actions/google-play-promote
         with:
           package-name: ${{ inputs.package-name }}
           from-track: internal
@@ -336,7 +393,7 @@ jobs:
 
   # ─── PHASE 3: PRODUCTION ───────────────────────────────────────────────────
   production-release:
-    name: 'Phase 3: Production'
+    name: 06 / Android / Release — Production
     needs: [internal-testing, external-testing, release-notes]
     if: |
       always() && !inputs.dry-run &&
@@ -350,6 +407,10 @@ jobs:
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
 
       - name: Download release notes
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -373,7 +434,7 @@ jobs:
           echo "rollout-fraction=${FRACTION}" >> "${GITHUB_OUTPUT}"
 
       - name: Promote to production
-        uses: ./.github/actions/google-play-promote
+        uses: ./.toolkit/.github/actions/google-play-promote
         with:
           package-name: ${{ inputs.package-name }}
           from-track: ${{ steps.source.outputs.track }}

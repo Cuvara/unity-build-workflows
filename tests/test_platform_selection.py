@@ -104,6 +104,12 @@ def reusable_tests_wf():
 # GHA expression evaluator
 # ---------------------------------------------------------------------------
 
+class OutputsProxy(dict):
+    """Returns '' for missing output keys (avoids KeyError in expressions)."""
+    def __missing__(self, key):
+        return ""
+
+
 class NeedsProxy(dict):
     """Returns a safe default for jobs not explicitly in the dict.
 
@@ -111,13 +117,10 @@ class NeedsProxy(dict):
     This means a missing job is treated as skipped (not failure) and has no outputs.
     """
     def __missing__(self, key):
-        return {"result": "skipped", "outputs": {}}
-
-
-class OutputsProxy(dict):
-    """Returns '' for missing output keys (avoids KeyError in expressions)."""
-    def __missing__(self, key):
-        return ""
+        # outputs must be an OutputsProxy too: a job absent from the mock context
+        # is still allowed to be read for an output it does not define
+        # (e.g. needs.quality-gate.outputs.passed before the gate is seeded).
+        return {"result": "skipped", "outputs": OutputsProxy({})}
 
 
 def eval_gha_expr(expr: Any, context: dict) -> bool:
@@ -261,8 +264,17 @@ PLATFORM_BUILD_JOBS_FOR_ALL = [
 
 # Baseline needs when validate-project succeeded + build-addressables skipped.
 # resolve-config always carries outputs so the new outputs-based gating form works too.
+#
+# quality-gate (stage 02) is the single edge every stage-03 build now depends on,
+# so it is part of the baseline: `gate_passed=False` models a red test suite and
+# must leave every platform build unstarted.
 def _base_needs(validate="success", addressables="skipped",
-                rc_outputs: dict | None = None):
+                rc_outputs: dict | None = None, gate_passed=None):
+    # The gate closes on a failed stage-01 validation, so a context that models
+    # "validate-project failed" must also model a closed gate — that is the edge
+    # that now stops the builds.
+    if gate_passed is None:
+        gate_passed = validate == "success"
     return {
         "resolve-config": {
             "result": "success",
@@ -270,11 +282,15 @@ def _base_needs(validate="success", addressables="skipped",
         },
         "validate-project":   {"result": validate},
         "build-addressables": {"result": addressables},
+        "quality-gate": {
+            "result": "success" if gate_passed else "failure",
+            "outputs": {"passed": "true" if gate_passed else "false"},
+        },
     }
 
 
 def _ctx(platform="All", run_tests=False, build_addressables_input=False,
-         validate="success", addressables_result="skipped"):
+         validate="success", addressables_result="skipped", gate_passed=None):
     """
     Build a mock evaluation context that satisfies BOTH gating forms:
 
@@ -323,6 +339,7 @@ def _ctx(platform="All", run_tests=False, build_addressables_input=False,
             validate=validate,
             addressables=addressables_result,
             rc_outputs=rc_outputs,
+            gate_passed=gate_passed,
         ),
     }
 

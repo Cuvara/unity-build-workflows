@@ -29,6 +29,49 @@ on:
         required: true
         type: string
 
+      # ── Pipeline node identity (stage 03 — BUILD ARTIFACTS) ─────────────────
+      # GitHub renders a called workflow's node as "<caller job name> / <inner
+      # job name>". The caller owns the stage + platform half ("03 / Android");
+      # node-label owns the rest, so the graph reads
+      # "03 / Android / Production / AAB" instead of "build / build".
+      node-label:
+        description: >-
+          Display name for this workflow's job, appended after the caller's job
+          name in the Actions graph. Defaults to the legacy "Build <platform>".
+        required: false
+        default: ''
+        type: string
+
+      configuration:
+        description: >-
+          Build configuration shown in the node name and recorded in the
+          artifact manifest (Development | Staging | Production).
+          Empty falls back to `environment`.
+        required: false
+        default: ''
+        type: string
+
+      artifact-type:
+        description: >-
+          Artifact type this build is expected to produce
+          (AAB | APK | IPA | WEBGL | EXE | LINUX | ZIP | ADDRESSABLES).
+          Empty is inferred from the platform (and android-export-type).
+        required: false
+        default: ''
+        type: string
+
+      app-version:
+        description: Application version recorded in the artifact manifest.
+        required: false
+        default: ''
+        type: string
+
+      build-number:
+        description: Build number recorded in the artifact manifest.
+        required: false
+        default: ''
+        type: string
+
       # ── Version & paths ───────────────────────────────────────────────────────
       project-path:
         description: Path to the Unity project root relative to the workspace root.
@@ -53,6 +96,15 @@ on:
         description: Git ref of the toolkit repo (e.g. main, feature/explicit-platform-jobs).
         required: false
         default: 'main'
+        type: string
+
+      toolkit-repo:
+        description: >-
+          Toolkit repository checked out to .toolkit/ for the artifact-manifest
+          step. The runner workspace belongs to the CALLER, so the toolkit's own
+          scripts are not otherwise on disk here.
+        required: false
+        default: 'Cuvara/unity-build-workflows'
         type: string
 
       # ── Runtime behaviour ──────────────────────────────────────────────────────
@@ -237,9 +289,38 @@ on:
         description: Elapsed wall-clock seconds for the Unity build step.
         value: ${{ jobs.build.outputs.build-duration-seconds }}
 
+      # ── Artifact identity (stage 04/05 consume these) ────────────────────────
+      # Downstream stages must never rediscover where the artifact lives or what
+      # it is; the build that produced it says so explicitly.
+      artifact-type:
+        description: Resolved artifact type (AAB | APK | IPA | WEBGL | EXE | LINUX | ADDRESSABLES).
+        value: ${{ jobs.build.outputs.artifact-type }}
+
+      artifact-path:
+        description: Workspace-relative path of the artifact inside the build output.
+        value: ${{ jobs.build.outputs.artifact-path }}
+
+      artifact-size-bytes:
+        description: Size of the artifact in bytes (0 when no artifact was produced).
+        value: ${{ jobs.build.outputs.artifact-size-bytes }}
+
+      artifact-sha256:
+        description: SHA-256 of the artifact file, or empty for directory artifacts.
+        value: ${{ jobs.build.outputs.artifact-sha256 }}
+
+      manifest-artifact-name:
+        description: |
+          Name of the uploaded artifact-manifest artifact, or empty string.
+          Convention: build-manifest-<Platform>.
+        value: ${{ jobs.build.outputs.manifest-artifact-name }}
+
+      configuration:
+        description: Build configuration this artifact was produced under.
+        value: ${{ jobs.build.outputs.configuration }}
+
 jobs:
   build:
-    name: Build ${{ inputs.platform }}
+    name: ${{ inputs.node-label != '' && inputs.node-label || format('Build {0}', inputs.platform) }}
     timeout-minutes: ${{ inputs.build-timeout-minutes }}
     # ── Runner selection (V2) ────────────────────────────────────────────────
     # runs-on is driven directly by the resolver-provided runner-labels JSON
@@ -253,6 +334,14 @@ jobs:
       artifact-name:          ${{ steps.set-outputs.outputs.artifact-name }}
       unity-version-used:     ${{ steps.set-outputs.outputs.unity-version-used }}
       build-duration-seconds: ${{ steps.set-outputs.outputs.build-duration-seconds }}
+      # Prefer the manifest's value; fall back to the resolved type so stage 04
+      # still knows what to expect if the manifest step could not run.
+      artifact-type:          ${{ steps.manifest.outputs.artifact-type || steps.artifact-type.outputs.artifact-type }}
+      artifact-path:          ${{ steps.manifest.outputs.artifact-path }}
+      artifact-size-bytes:    ${{ steps.manifest.outputs.artifact-size-bytes }}
+      artifact-sha256:        ${{ steps.manifest.outputs.artifact-sha256 }}
+      manifest-artifact-name: ${{ steps.set-outputs.outputs.manifest-artifact-name }}
+      configuration:          ${{ steps.set-outputs.outputs.configuration }}
 
     steps:
 
@@ -979,6 +1068,88 @@ jobs:
           fi
           echo "BUILD_DURATION=${DURATION}" >> "$GITHUB_ENV"
 
+      # ── Step 10b: Artifact manifest (stage 03 → 04/05 hand-off) ───────────
+      # Stage 04 must not have to guess which file in build/ is "the artifact",
+      # and stage 05 must not have to re-derive the version it is publishing.
+      # The build that produced the artifact states both, once, here.
+      #
+      # The runner workspace is the CALLER's repository, so the toolkit's own
+      # scripts are not on disk — check them out into .toolkit/ first.
+      - name: Checkout toolkit (artifact manifest)
+        id: manifest-toolkit
+        if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+          clean: false
+
+      - name: Resolve artifact type
+        id: artifact-type
+        if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          TYPE="${{ inputs.artifact-type }}"
+          if [ -z "${TYPE}" ]; then
+            case "${{ inputs.platform }}" in
+              Android)      TYPE=$(printf '%s' "${{ inputs.android-export-type }}" | tr '[:lower:]' '[:upper:]') ;;
+              iOS)          TYPE="IPA" ;;
+              WebGL)        TYPE="WEBGL" ;;
+              Windows64)    TYPE="EXE" ;;
+              Linux64|LinuxServer) TYPE="LINUX" ;;
+              Addressables) TYPE="ADDRESSABLES" ;;
+              *)            TYPE="ZIP" ;;
+            esac
+          fi
+          # android-export-type may be blank on a non-Android build.
+          [ -z "${TYPE}" ] && TYPE="ZIP"
+          echo "artifact-type=${TYPE}" >> "$GITHUB_OUTPUT"
+          echo "[artifact-type] ${{ inputs.platform }} -> ${TYPE}"
+
+      - name: Generate artifact manifest
+        id: manifest
+        if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
+        # A manifest failure must not turn a green build red — stage 04 reports
+        # the missing manifest instead, and the binary artifact still uploads.
+        continue-on-error: true
+        shell: bash
+        env:
+          SEARCH_ROOT: ${{ inputs.platform == 'Addressables' && format('{0}/ServerData', inputs.project-path) || 'build' }}
+        run: |
+          set -Eeuo pipefail
+          if [ ! -f ".toolkit/scripts/common/artifact_manifest.py" ]; then
+            echo "::warning::toolkit checkout unavailable — skipping artifact manifest"
+            exit 0
+          fi
+          mkdir -p "${SEARCH_ROOT}"
+          python3 .toolkit/scripts/common/artifact_manifest.py \
+            --platform       "${{ inputs.platform }}" \
+            --configuration  "${{ inputs.configuration != '' && inputs.configuration || inputs.environment }}" \
+            --artifact-type  "${{ steps.artifact-type.outputs.artifact-type }}" \
+            --search-root    "${SEARCH_ROOT}" \
+            --project-path   "${{ inputs.project-path }}" \
+            --version        "${{ inputs.app-version }}" \
+            --build-number   "${{ github.run_number }}" \
+            --unity-version  "${{ inputs.unity-version }}" \
+            --commit         "${{ github.sha }}" \
+            --branch         "${{ github.ref_name }}" \
+            --artifact-name  "unity-build-${{ inputs.platform }}" \
+            --github-output \
+            > /dev/null
+
+      - name: Upload artifact manifest
+        if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-manifest-${{ inputs.platform }}
+          path: ${{ steps.manifest.outputs.manifest-path }}
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.artifact-retention-days }}
+
       # ── Step 11a: Upload binary build artifact ────────────────────────────
       # Skipped on blocked (iOS without macOS runner) and for Addressables platform.
       # if-no-files-found: warn — missing binary is a build failure already caught by exit code.
@@ -1073,7 +1244,21 @@ jobs:
             fi
           fi
 
+          # The manifest artifact exists whenever the build was not blocked —
+          # including on failure, where stage 07 uses it to say what was being
+          # built when it broke.
+          if [ "$BLOCKED" = "true" ]; then
+            MANIFEST_ARTIFACT_NAME=""
+          else
+            MANIFEST_ARTIFACT_NAME="build-manifest-${{ inputs.platform }}"
+          fi
+
+          CONFIGURATION="${{ inputs.configuration }}"
+          [ -z "${CONFIGURATION}" ] && CONFIGURATION="${{ inputs.environment }}"
+
           echo "result=${RESULT}"                          >> "$GITHUB_OUTPUT"
           echo "artifact-name=${ARTIFACT_NAME}"           >> "$GITHUB_OUTPUT"
           echo "unity-version-used=${{ inputs.unity-version }}" >> "$GITHUB_OUTPUT"
           echo "build-duration-seconds=${BUILD_DURATION:-0}"    >> "$GITHUB_OUTPUT"
+          echo "manifest-artifact-name=${MANIFEST_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
+          echo "configuration=${CONFIGURATION}"            >> "$GITHUB_OUTPUT"

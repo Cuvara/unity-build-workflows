@@ -10,7 +10,86 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+
+- **Pipeline stage architecture** — every user-visible node in `unity-pipeline.yml`,
+  `release-orchestrator.yml` and the three release pipelines is now named
+  `NN / Platform / Configuration / Artifact` (`03 / Android / Production / AAB`)
+  instead of `Build Android` / `build`. Job **ids** are unchanged, so `needs:`,
+  required status checks and existing consumer references keep working.
+  New: [docs/PIPELINE_ARCHITECTURE.md](docs/PIPELINE_ARCHITECTURE.md).
+- **`02 / Quality Gate`** in `unity-pipeline.yml` and `release-orchestrator.yml`.
+  Unity Tests previously ran *beside* the platform builds, so a red suite still
+  paid for a full Android + WebGL + Windows matrix. Every expensive build now
+  depends on this one node and checks its verdict
+  (`needs.quality-gate.outputs.passed == 'true'`). `skipped` stays a pass, so
+  `run-tests: false` and the local build engine behave as before.
+- **Stage 04 — artifact validation**, three new independent nodes in
+  `unity-pipeline.yml` (`04 / Android / Validate AAB`, `04 / WebGL / Validate`,
+  `04 / iOS / Validate Xcode Project`), each depending on exactly one build job:
+  - `scripts/android/validate_android_artifact.py` — AAB/APK type, zip structure,
+    dex, signing (v1 JAR entries and the v2+ APK Signing Block), package id,
+    versionName, versionCode, size floor/ceiling.
+  - `scripts/android/axml.py` — minimal compiled-AndroidManifest reader, so APK
+    identity is verifiable without the Android SDK on the runner.
+  - `scripts/webgl/validate_webgl_artifact.py` — index.html, the four Unity
+    player files, compression consistency (the loader-plain/wasm-brotli
+    blank-canvas trap), StreamingAssets, size.
+  - `scripts/ios/validate_xcode_project.py` — `.xcodeproj`, `project.pbxproj`,
+    Unity's `Classes/`/`Libraries/`/`Data/`, `Info.plist` identity, size.
+- **`scripts/common/artifact_manifest.py`** — stage 03 writes
+  `artifact-manifest.json` into the build output and uploads it as
+  `build-manifest-<Platform>`. `reusable-build-platform.yml` gained matching
+  outputs (`artifact-type`, `artifact-path`, `artifact-size-bytes`,
+  `artifact-sha256`, `manifest-artifact-name`, `configuration`) so stages 04–07
+  no longer rediscover the artifact location or re-derive its version.
+- **`pipeline-webgl-release.yml`** — WebGL gains the build → validate → deploy
+  pipeline Android and iOS already had, with `start-phase` retry and a
+  `production` environment approval boundary. Wired into
+  `release-orchestrator.yml` as an independent platform node.
+- `release-orchestrator.yml`: `WebGL` and `All` platform choices (`Both` still
+  accepted), plus `run-tests`, `test-mode`, `ios-bundle-id` and
+  `cloudflare-pages-project` inputs.
+- `reusable-build-platform.yml`: `node-label`, `configuration`, `artifact-type`,
+  `app-version`, `build-number` and `toolkit-repo` inputs. `node-label` defaults
+  to the previous `Build <platform>`, so existing callers keep their node names.
+- `pipeline-ios-release.yml`: `bundle-id` input, checked against the IPA's
+  `Info.plist` in stage 04 instead of letting App Store Connect reject the upload.
+- `discord-upload-build`: `failed-stage`, `configuration` and
+  `result-validation-{android,webgl,ios}` inputs. The message now names the stage
+  the pipeline stopped at and marks artifacts that built but failed validation.
+- **`actionlint` as a third CI gate** (`.github/workflows/ci.yml`), with
+  `.github/actionlint.yaml` declaring the self-hosted runner labels. A workflow
+  that parses as YAML but is invalid as a workflow is accepted by the pytest
+  suite and rejected by GitHub at dispatch — as a run with no jobs and no logs.
+  Three such defects were live on `main` before this change; the gate is what
+  stops the fourth.
+- `tests/test_pipeline_stages.py` (84 tests) — stage naming, quality-gate
+  ordering, platform fan-out independence, validation independence, publish
+  depends on validation, `start-phase` retry, production approval, artifact
+  metadata propagation, and the workflow_call nesting budget.
+- `tests/test_artifact_validation.py` (52 tests) — the manifest generator, the
+  AXML reader and all three validators, against synthesised artifacts.
+
 ### Fixed
+
+- **`pipeline-android-release.yml` was an invalid workflow file.** It referenced
+  `inputs.artifact-name`, which was declared as a workflow *output*, never as an
+  input. GitHub rejects such a file when the call is resolved, producing a run
+  with no jobs, no logs and a bare `failure` — the shape that made the
+  NDCUnityTemplate release dispatch fail with `Android Release` absent from the
+  job list entirely. `artifact-name` is now a real input (it is also the
+  publish-without-rebuild handle for `start-phase`).
+- **`unity-build-{android,webgl,linux}.yml` exported an empty `artifact-name`.**
+  The output read `steps.upload.outputs.artifact-name`, but
+  `actions/upload-artifact` returns `artifact-id` / `artifact-url` /
+  `artifact-digest` and has no `artifact-name` output. Every downstream
+  `download-artifact` therefore received an empty name and silently fell back to
+  "download every artifact in the run". The name is now resolved in its own step
+  and used both for the upload and for the output.
+- **`release-orchestrator.yml` called `version-bump.yml` with no secrets**, though
+  that workflow requires `APP_ID` / `APP_PRIVATE_KEY` to push the bump commit, so
+  a version bump could never have succeeded. Now `secrets: inherit`.
 
 - **`game-ci/unity-test-runner` pinned to `v4.3.2`.** The `@v4` tag moved to **v4.4.0** on
   2026-09-09 — not a bug-fix release but a rewrite: a thin wrapper around the new `game-ci`
@@ -39,6 +118,48 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   `v4.3.2` is the last release on the old, long-stable architecture and carries the
   `--shm-size` fix Unity 6.6+ needs. Adopting `v4.4.0` should be a tested branch, not a
   floating tag.
+
+- **Release pipelines were unusable when called cross-repository.** Nine
+  step-level `uses: ./.github/actions/…` references and
+  `python3 scripts/android/upload_google_play.py` in
+  `pipeline-android-release.yml` / `pipeline-ios-release.yml` resolve against the
+  runner *workspace*, which for a reusable workflow is the **caller's**
+  repository — where the toolkit's actions and scripts do not exist. Both
+  pipelines now check the toolkit out to `.toolkit/` (new `toolkit-repo` /
+  `toolkit-ref` inputs) and reference `./.toolkit/…`, matching the pattern
+  already used by `unity-pipeline.yml`'s Discord job.
+- **Build Only could not run without store credentials.** A `required: true`
+  secret is validated when a `workflow_call` is *resolved*, so
+  `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (Android) and the six iOS signing/ASC
+  secrets made a `dry-run` build impossible in a repository that has none. They
+  are now optional at the call boundary and checked in the publish jobs that use
+  them.
+- **Artifact validation was a file-size check.** `pipeline-android-release.yml`
+  accepted any AAB/APK over 1000 bytes and `pipeline-ios-release.yml` any IPA
+  over 5000 bytes — an unsigned bundle, the wrong artifact type or a mismatched
+  package id all reached the store. Both now run the real validators.
+- `scripts/ios/validate_ipa.sh`: verifies the embedded provisioning profile and
+  its expiry, checks expected bundle id / version / build number, emits a step
+  summary, and reports every failing check instead of exiting on the first. It
+  no longer requires macOS — `Info.plist` falls back to `plistlib`, and an
+  unverifiable signature is reported as unverified rather than as a pass.
+- `scripts/android/axml.py`: attribute offsets are relative to
+  `ResXMLTree_attrExt`, not to the chunk start (caught by the new tests).
+- `unity-pipeline.yml`'s final report and Discord status now gate on the stage-04
+  results too; previously an artifact could fail validation while the pipeline
+  reported green.
+
+### Changed
+
+- **Platform builds no longer start until Unity Tests finish.** This is the
+  intended trade: one extra gate node of latency, in exchange for never paying
+  for a build the test suite would have rejected. Wall-clock time for a green
+  run grows by roughly the test duration.
+- `unity-pipeline.yml`'s iOS stage-03 artifact type is `XCODEPROJ`, not `IPA` —
+  that lane exports an Xcode project; the IPA is produced by
+  `pipeline-ios-release.yml`.
+- The final report is grouped by stage and carries artifact type, size and build
+  duration per platform; its error line names the stage and node that failed.
 
 
 ## [2.2.5] — 2026-09-10
