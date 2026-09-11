@@ -637,3 +637,48 @@ def test_stage_04_jobs_do_not_add_a_nesting_level(pipeline_jobs):
         "and leave no room for the reusable build workflow underneath"
     )
     assert "runs-on" in pipeline_jobs[VALIDATE_JOB]
+
+
+# ---------------------------------------------------------------------------
+# Report readability
+# ---------------------------------------------------------------------------
+
+def _report_script(pipeline_jobs):
+    return "\n".join(str(s.get("run", "")) for s in pipeline_jobs["final-report"]["steps"])
+
+
+def test_report_draws_stage_progress(pipeline_jobs):
+    """GitHub renders no progress indicator on a workflow node, so the report
+    draws the pipeline's shape instead: which stages ran and where it stopped."""
+    body = _report_script(pipeline_jobs)
+    assert "def bar(" in body, "the report has no progress bar helper"
+    for stage in ("01 Prepare", "02 Quality Gate", "03 Build", "04 Validate"):
+        assert stage in body, f"the stage strip omits {stage!r}"
+
+
+def test_report_draws_per_platform_progress(pipeline_jobs):
+    body = _report_script(pipeline_jobs)
+    assert "platforms" in body and "████████ done" in body
+
+
+def test_release_report_hands_off_to_the_release_workflow(pipeline_jobs):
+    """A Build / Release run produced immutable artifacts and stopped, and
+    nothing told the reader what to do with them — which is why the release
+    layer looked absent."""
+    body = _report_script(pipeline_jobs)
+    assert "RELEASE_LANES" in body
+    for workflow in ("20-release-android.yml", "21-release-ios.yml", "22-release-webgl.yml"):
+        assert workflow in body, f"the hand-off never names {workflow}"
+
+
+def test_development_report_says_it_cannot_be_published(pipeline_jobs):
+    body = _report_script(pipeline_jobs)
+    assert "cannot be published" in body
+
+
+def test_stage_04_node_names_the_artifact_it_validates(pipeline_jobs):
+    name = str(pipeline_jobs[VALIDATE_JOB]["name"])
+    assert "matrix.artifact-type" in name, (
+        f"'{name}' does not say what it validates — '04 / Android / Validate AAB' "
+        "tells the reader more than '04 / Android / Validate'"
+    )
