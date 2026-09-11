@@ -138,6 +138,18 @@ def test_build_node_name_carries_the_platform(pipeline_jobs):
     assert name.startswith("03 / ")
 
 
+def test_build_node_name_does_not_repeat_the_node_label(pipeline_jobs):
+    """GitHub joins the caller's job name with the called workflow's own job
+    name, and the callee is already named after `node-label`. Putting
+    matrix.node in both halves rendered
+    "Development / 03 / Android / APK / APK"."""
+    name = str(pipeline_jobs[BUILD_JOB]["name"])
+    assert "matrix.node" not in name, (
+        f"the artifact type is supplied by node-label; naming it here doubles it: {name!r}"
+    )
+    assert pipeline_jobs[BUILD_JOB]["with"]["node-label"] == "${{ matrix.node }}"
+
+
 def test_validate_node_name_carries_the_platform(pipeline_jobs):
     name = str(pipeline_jobs[VALIDATE_JOB]["name"])
     assert "matrix.platform" in name
