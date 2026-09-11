@@ -114,3 +114,82 @@ def workflows_dir():
 @pytest.fixture(scope="session")
 def repo_root():
     return REPO_ROOT
+
+
+# ---------------------------------------------------------------------------
+# Build matrix (stage 01 → stage 03/04)
+# ---------------------------------------------------------------------------
+# Stage 03 and 04 are matrix jobs whose matrix is computed by the
+# `Resolve build matrix` step in unity-pipeline.yml. "Which platforms build?"
+# is therefore answered by that bash, not by per-job `if:` expressions — so the
+# tests run the real step rather than re-implementing it.
+
+PLATFORM_ENV = {
+    "Android": "SEL_ANDROID",
+    "WebGL": "SEL_WEBGL",
+    "Linux64": "SEL_LINUX64",
+    "LinuxServer": "SEL_LINUXSERVER",
+    "Windows64": "SEL_WINDOWS64",
+    "iOS": "SEL_IOS",
+}
+
+
+def _matrix_step_script():
+    import yaml
+    with (WORKFLOWS_DIR / "unity-pipeline.yml").open() as fh:
+        workflow = yaml.safe_load(fh)
+    steps = workflow["jobs"]["resolve-config"]["steps"]
+    for step in steps:
+        if step.get("id") == "matrix":
+            return step["run"]
+    raise AssertionError("unity-pipeline.yml has no `matrix` step in resolve-config")
+
+
+@pytest.fixture(scope="session")
+def resolve_matrix():
+    """Run the real matrix step; return its parsed $GITHUB_OUTPUT.
+
+    Usage:
+        out = resolve_matrix(["Android"])                 # single platform
+        out = resolve_matrix(["Android", "WebGL"], environment="staging")
+        out["build"]      -> [{'platform': 'Android', ...}, ...]
+        out["validate"]   -> rows for platforms that have a stage-04 validator
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    script = _matrix_step_script()
+
+    def run(platforms, environment="production", android_export="aab"):
+        env = dict(os.environ)
+        env["ENVIRONMENT"] = environment
+        env["ANDROID_TYPE"] = android_export
+        for platform, key in PLATFORM_ENV.items():
+            env[key] = "true" if platform in platforms else "false"
+
+        with tempfile.NamedTemporaryFile("w+", delete=False) as fh:
+            output_path = fh.name
+        env["GITHUB_OUTPUT"] = output_path
+        try:
+            proc = subprocess.run(
+                ["bash", "-c", script], env=env, capture_output=True, text=True
+            )
+            assert proc.returncode == 0, (
+                f"matrix step failed ({proc.returncode}):\n{proc.stderr}"
+            )
+            raw = {}
+            for line in open(output_path).read().strip().split("\n"):
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    raw[key] = value
+        finally:
+            os.unlink(output_path)
+
+        raw["build"] = json.loads(raw["build-matrix"])
+        raw["validate"] = json.loads(raw["validate-matrix"])
+        raw["build_platforms"] = [r["platform"] for r in raw["build"]]
+        raw["validate_platforms"] = [r["platform"] for r in raw["validate"]]
+        return raw
+
+    return run

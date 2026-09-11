@@ -242,6 +242,17 @@ def eval_gha_expr(expr: Any, context: dict) -> bool:
 # Helper to build mock contexts
 # ---------------------------------------------------------------------------
 
+# Stage 03 is one matrix job, so platforms are matrix rows rather than job ids.
+PLATFORM_BUILD_PLATFORMS = ["Android", "WebGL", "Linux64", "LinuxServer", "Windows64", "iOS"]
+
+# iOS never enters the All path automatically — it needs a self-hosted macOS
+# runner and an explicit selection.
+PLATFORM_BUILD_PLATFORMS_FOR_ALL = ["Android", "WebGL", "Linux64", "LinuxServer", "Windows64"]
+
+# The single matrix job that replaced the six per-platform jobs.
+BUILD_JOB = "build"
+VALIDATE_JOB = "validate-artifact"
+
 PLATFORM_BUILD_JOBS = [
     "build-android",
     "build-webgl",
@@ -325,6 +336,15 @@ def _ctx(platform="All", run_tests=False, build_addressables_input=False,
         "run-tests":        "true" if run_tests        else "false",
         "build-addressables": "true" if build_addressables_input else "false",
         "environment":      "development",
+        # Stage 03 is gated on the matrix being non-empty rather than on a
+        # per-platform flag, because a matrix with no vectors is a workflow error.
+        "has-builds": "true" if any(
+            (build_android, build_webgl, build_linux64,
+             build_linuxserver, build_windows64, build_ios)
+        ) else "false",
+        "has-validations": "true" if any(
+            (build_android, build_webgl, build_ios)
+        ) else "false",
     }
 
     return {
@@ -348,62 +368,90 @@ def _ctx(platform="All", run_tests=False, build_addressables_input=False,
 # R1 – platform=All → all 5 build jobs True
 # ---------------------------------------------------------------------------
 
-def test_r1_platform_all_enables_core_builds(job_ifs):
-    """R1: platform=All → Android/WebGL/Linux64/LinuxServer True; iOS False (omitted from All).
+def test_r1_platform_all_enables_core_builds(resolve_matrix):
+    """R1: platform=All → Android/WebGL/Linux64/LinuxServer in the matrix; iOS absent.
 
-    iOS is intentionally excluded from the All path until a self-hosted macOS runner
-    is provisioned (consumer workflow §3.3 iOS note).
+    iOS is intentionally excluded from the All path until a self-hosted macOS
+    runner is provisioned (consumer workflow §3.3 iOS note).
+
+    Stage 03 is a matrix job now, so "which platforms build" is decided by the
+    matrix the resolver emits — a platform that is not selected produces no row,
+    and therefore no node in the graph at all.
     """
-    ctx = _ctx(platform="All", addressables_result="skipped")
-    for job in PLATFORM_BUILD_JOBS_FOR_ALL:
-        assert job in job_ifs, f"Job {job!r} not found in consumer workflow"
-        result = eval_gha_expr(job_ifs[job], ctx)
-        assert result, (
-            f"R1: expected {job} if: True with platform=All, got False\n"
-            f"  expression: {job_ifs[job]!r}"
+    out = resolve_matrix(PLATFORM_BUILD_PLATFORMS_FOR_ALL)
+    for platform in PLATFORM_BUILD_PLATFORMS_FOR_ALL:
+        assert platform in out["build_platforms"], (
+            f"R1: {platform} missing from the build matrix for platform=All"
         )
-    # build-ios must be False for platform=All (explicit iOS required)
-    assert not eval_gha_expr(job_ifs["build-ios"], ctx), (
-        "R1: build-ios should be False when platform=All (iOS requires explicit dispatch)"
+    assert "iOS" not in out["build_platforms"], (
+        "R1: iOS must not appear in the All path without an explicit selection"
     )
 
 
-def test_r1_platform_all_with_addressables_success(job_ifs):
-    """R1 variant: build-addressables result=success also enables core platform builds."""
-    ctx = _ctx(platform="All", addressables_result="success")
-    for job in PLATFORM_BUILD_JOBS_FOR_ALL:
-        assert eval_gha_expr(job_ifs[job], ctx), (
-            f"R1: {job} should be True when addressables=success"
-        )
+def test_r1_unselected_platforms_produce_no_node(resolve_matrix):
+    """The defect this replaces: an `if:`-false job still drew a skipped node,
+    so an Android-only run advertised five platforms nobody asked for."""
+    out = resolve_matrix(["Android"])
+    assert out["build_platforms"] == ["Android"]
+    assert out["validate_platforms"] == ["Android"]
 
 
 # ---------------------------------------------------------------------------
 # R2-R6 – Single-platform dispatch
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("selected_platform,expected_true_job", [
-    ("Android",     "build-android"),
-    ("WebGL",       "build-webgl"),
-    ("Linux64",     "build-linux64"),
-    ("LinuxServer", "build-linuxserver"),
-    ("Windows64",   "build-windows64"),
-    ("iOS",         "build-ios"),
+@pytest.mark.parametrize("selected_platform", sorted(PLATFORM_BUILD_PLATFORMS))
+def test_r2_r6_single_platform(resolve_matrix, selected_platform):
+    """R2-R6: dispatch with a single platform → exactly that one matrix row."""
+    out = resolve_matrix([selected_platform])
+    assert out["build_platforms"] == [selected_platform], (
+        f"expected only {selected_platform} in the matrix, got {out['build_platforms']}"
+    )
+
+
+def test_android_artifact_type_follows_the_export_setting(resolve_matrix):
+    """APK/AAB is Android's own row, never a global switch."""
+    aab = resolve_matrix(["Android"], android_export="aab")["build"][0]
+    apk = resolve_matrix(["Android"], android_export="apk")["build"][0]
+    assert aab["artifact-type"] == "AAB" and aab["node"].endswith("/ AAB")
+    assert apk["artifact-type"] == "APK" and apk["node"].endswith("/ APK")
+
+
+def test_android_export_does_not_touch_other_platforms(resolve_matrix):
+    """The original UX defect, now pinned as behaviour."""
+    for export in ("apk", "aab"):
+        rows = {r["platform"]: r for r in
+                resolve_matrix(["WebGL", "iOS", "Linux64"], android_export=export)["build"]}
+        assert rows["WebGL"]["artifact-type"] == "WEBGL"
+        assert rows["iOS"]["artifact-type"] == "XCODEPROJ"
+        assert rows["Linux64"]["artifact-type"] == "LINUX"
+
+
+def test_only_platforms_with_a_validator_reach_stage_04(resolve_matrix):
+    """Linux and Windows have no artifact validator, so they contribute no
+    stage-04 node rather than a permanently skipped one."""
+    out = resolve_matrix(["Android", "iOS", "WebGL", "Linux64", "LinuxServer", "Windows64"])
+    assert sorted(out["validate_platforms"]) == ["Android", "WebGL", "iOS"].__class__(
+        sorted(["Android", "WebGL", "iOS"]))
+
+
+def test_empty_selection_yields_an_empty_matrix(resolve_matrix):
+    """A matrix with no vectors is a workflow error, so the jobs are gated on
+    `has-builds` rather than being handed an empty include list."""
+    out = resolve_matrix([])
+    assert out["build"] == [] and out["has-builds"] == "false"
+    assert out["validate"] == [] and out["has-validations"] == "false"
+
+
+@pytest.mark.parametrize("environment,expected", [
+    ("development", "Development"),
+    ("staging", "Staging"),
+    ("production", "Production"),
 ])
-def test_r2_r6_single_platform(job_ifs, selected_platform, expected_true_job):
-    """R2-R6: dispatch with a single platform → only that build job is True."""
-    ctx = _ctx(platform=selected_platform)
-    for job in PLATFORM_BUILD_JOBS:
-        result = eval_gha_expr(job_ifs[job], ctx)
-        if job == expected_true_job:
-            assert result, (
-                f"R{PLATFORM_BUILD_JOBS.index(job)+2}: expected {job} True "
-                f"when platform={selected_platform}, got False"
-            )
-        else:
-            assert not result, (
-                f"R{PLATFORM_BUILD_JOBS.index(job)+2}: expected {job} False "
-                f"when platform={selected_platform}, got True"
-            )
+def test_configuration_casing(resolve_matrix, environment, expected):
+    out = resolve_matrix(["Android"], environment=environment)
+    assert out["configuration"] == expected
+    assert out["build"][0]["node"].startswith(expected)
 
 
 # ---------------------------------------------------------------------------
@@ -453,10 +501,9 @@ def test_r9_build_addressables_false_platform_builds_still_run(job_ifs):
     # When build-addressables=false, the job is skipped → result='skipped'
     ctx = _ctx(platform="All", build_addressables_input=False,
                addressables_result="skipped")
-    for job in PLATFORM_BUILD_JOBS_FOR_ALL:
-        assert eval_gha_expr(job_ifs[job], ctx), (
-            f"R9: {job} should run when build-addressables is skipped"
-        )
+    assert eval_gha_expr(job_ifs[BUILD_JOB], ctx), (
+        "R9: the build matrix should run when build-addressables is skipped"
+    )
 
 
 def test_r9_build_addressables_true_enables_job(job_ifs):
@@ -470,10 +517,9 @@ def test_r9_build_addressables_true_enables_job(job_ifs):
 def test_r9_build_addressables_failure_blocks_platform_builds(job_ifs):
     """R9d: build-addressables job failed → core platform builds False."""
     ctx = _ctx(platform="All", addressables_result="failure")
-    for job in PLATFORM_BUILD_JOBS_FOR_ALL:
-        assert not eval_gha_expr(job_ifs[job], ctx), (
-            f"R9: {job} should be blocked when build-addressables failed"
-        )
+    assert not eval_gha_expr(job_ifs[BUILD_JOB], ctx), (
+        "R9: the build matrix should be blocked when build-addressables failed"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -600,14 +646,14 @@ def test_r12_final_report_if_is_always(job_ifs):
 def test_r13_validate_failure_blocks_platform_builds(job_ifs):
     """R13: validate-project=failure → all platform build jobs if: False."""
     ctx = _ctx(platform="All", validate="failure")
-    for job in PLATFORM_BUILD_JOBS:
-        assert not eval_gha_expr(job_ifs[job], ctx), (
-            f"R13: {job} should be False when validate-project failed"
-        )
-    # iOS explicit too
+    assert not eval_gha_expr(job_ifs[BUILD_JOB], ctx), (
+        "R13: the build matrix should be blocked when validate-project failed"
+    )
+    # iOS goes through the same single gate — there is no separate iOS job to
+    # forget about any more, which is part of the point of the matrix.
     ctx_ios = _ctx(platform="iOS", validate="failure")
-    assert not eval_gha_expr(job_ifs["build-ios"], ctx_ios), (
-        "R13: build-ios should be False when validate-project failed"
+    assert not eval_gha_expr(job_ifs[BUILD_JOB], ctx_ios), (
+        "R13: the build matrix should be blocked for iOS when validate-project failed"
     )
 
 
@@ -631,17 +677,17 @@ def test_r13_validate_failure_blocks_build_addressables(job_ifs):
 # Structural sanity — all expected jobs exist
 # ---------------------------------------------------------------------------
 
+# Stage 03/04 are matrix jobs, so there is one `build` and one
+# `validate-artifact` job rather than one per platform.
 EXPECTED_JOBS = [
     "resolve-config",
     "validate-project",
+    "validate-license",
     "unity-tests",
+    "quality-gate",
     "build-addressables",
-    "build-android",
-    "build-webgl",
-    "build-linux64",
-    "build-linuxserver",
-    "build-windows64",
-    "build-ios",
+    "build",
+    "validate-artifact",
     "final-report",
     "notify-discord",
 ]
@@ -665,79 +711,51 @@ def test_job_if_expressions_are_parseable(job_ifs):
 
 
 # ---------------------------------------------------------------------------
-# R4w – build-windows64 gates on resolve-config outputs (mirrors Linux64)
+# R4w – Windows64 selection (a matrix row now, not its own job)
 # ---------------------------------------------------------------------------
+# These previously probed a `build-windows64` job and self-skipped when it was
+# absent. Stage 03 is one matrix job, so the same guarantees are asserted
+# against the matrix — and they no longer silently skip.
 
-def test_r4w_build_windows64_job_exists(job_ifs):
-    """R4w: build-windows64 job is present in unity-pipeline.yml."""
-    if "build-windows64" not in job_ifs:
-        pytest.skip(
-            "build-windows64 job not yet present in unity-pipeline.yml — "
-            "waiting for github-actions-engineer to add it."
-        )
-    # Job exists — subsequent tests will exercise it.
-
-
-def test_r4w_build_windows64_enabled_when_output_true(job_ifs):
-    """R4w: build-windows64 if: True when resolve-config outputs build-windows64=true,
-    validate-project success, build-addressables skipped."""
-    if "build-windows64" not in job_ifs:
-        pytest.skip("build-windows64 job not in pipeline yet")
-    ctx = _ctx(platform="Windows64", validate="success", addressables_result="skipped")
-    assert eval_gha_expr(job_ifs["build-windows64"], ctx), (
-        "R4w: build-windows64 if: should be True when output build-windows64='true' "
-        "and validate succeeded"
-    )
+def test_r4w_windows64_selected_produces_a_row(resolve_matrix):
+    out = resolve_matrix(["Windows64"])
+    assert out["build_platforms"] == ["Windows64"]
+    assert out["build"][0]["artifact-type"] == "EXE"
 
 
-def test_r4w_build_windows64_enabled_in_all(job_ifs):
-    """R4w: build-windows64 if: True when platform=All (Windows64 is in All)."""
-    if "build-windows64" not in job_ifs:
-        pytest.skip("build-windows64 job not in pipeline yet")
-    ctx = _ctx(platform="All", validate="success", addressables_result="skipped")
-    assert eval_gha_expr(job_ifs["build-windows64"], ctx), (
-        "R4w: build-windows64 should run for platform=All"
-    )
+def test_r4w_windows64_included_in_all(resolve_matrix):
+    out = resolve_matrix(PLATFORM_BUILD_PLATFORMS_FOR_ALL)
+    assert "Windows64" in out["build_platforms"]
 
 
-def test_r4w_build_windows64_disabled_when_output_false(job_ifs):
-    """R4w: build-windows64 if: False when resolve-config outputs build-windows64=false."""
-    if "build-windows64" not in job_ifs:
-        pytest.skip("build-windows64 job not in pipeline yet")
-    ctx = _ctx(platform="Android", validate="success", addressables_result="skipped")
-    assert not eval_gha_expr(job_ifs["build-windows64"], ctx), (
-        "R4w: build-windows64 if: should be False when build-windows64='false'"
-    )
+def test_r4w_windows64_absent_when_not_selected(resolve_matrix):
+    out = resolve_matrix(["Android"])
+    assert "Windows64" not in out["build_platforms"]
 
 
-def test_r4w_build_windows64_blocked_when_validate_failed(job_ifs):
-    """R4w: validate-project failure → build-windows64 if: False (mirrors R13)."""
-    if "build-windows64" not in job_ifs:
-        pytest.skip("build-windows64 job not in pipeline yet")
+def test_r4w_windows64_has_no_stage_04_validator(resolve_matrix):
+    """There is no Windows artifact validator, so it must contribute no
+    stage-04 node rather than a permanently skipped one."""
+    out = resolve_matrix(["Windows64"])
+    assert out["validate_platforms"] == []
+    assert out["has-validations"] == "false"
+
+
+@pytest.mark.parametrize("addressables_result,should_run", [
+    ("success", True),
+    ("skipped", True),
+    ("failure", False),
+])
+def test_r4w_windows64_respects_the_addressables_gate(job_ifs, addressables_result, should_run):
+    """Windows64 goes through the same single gate as every other platform."""
+    ctx = _ctx(platform="Windows64", validate="success",
+               addressables_result=addressables_result)
+    assert eval_gha_expr(job_ifs[BUILD_JOB], ctx) is should_run
+
+
+def test_r4w_windows64_blocked_when_validate_failed(job_ifs):
     ctx = _ctx(platform="Windows64", validate="failure")
-    assert not eval_gha_expr(job_ifs["build-windows64"], ctx), (
-        "R4w: build-windows64 should be False when validate-project failed"
-    )
-
-
-def test_r4w_build_windows64_blocked_when_addressables_failed(job_ifs):
-    """R4w: build-addressables failure → build-windows64 if: False (mirrors Linux64 pattern)."""
-    if "build-windows64" not in job_ifs:
-        pytest.skip("build-windows64 job not in pipeline yet")
-    ctx = _ctx(platform="Windows64", validate="success", addressables_result="failure")
-    assert not eval_gha_expr(job_ifs["build-windows64"], ctx), (
-        "R4w: build-windows64 should be False when build-addressables failed"
-    )
-
-
-def test_r4w_build_windows64_passes_with_addressables_success(job_ifs):
-    """R4w: build-addressables success (not just skipped) also allows build-windows64."""
-    if "build-windows64" not in job_ifs:
-        pytest.skip("build-windows64 job not in pipeline yet")
-    ctx = _ctx(platform="Windows64", validate="success", addressables_result="success")
-    assert eval_gha_expr(job_ifs["build-windows64"], ctx), (
-        "R4w: build-windows64 should run when addressables succeeded"
-    )
+    assert not eval_gha_expr(job_ifs[BUILD_JOB], ctx)
 
 
 # ---------------------------------------------------------------------------
