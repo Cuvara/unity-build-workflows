@@ -249,10 +249,32 @@ jobs:
       # ── 4a. Run tests — Docker lane (EditMode) ────────────────────────────────
       # game-ci/unity-test-runner handles activation via UNITY_LICENSE+EMAIL+PASSWORD.
       # Run EditMode first; PlayMode step uses if:always() so it still runs if EditMode fails.
+      #
+      # PINNED EXACTLY, not `@v4`. On 2026-09-09 the `v4` tag moved to v4.4.0, which is
+      # not a bug-fix release but a REWRITE: a thin wrapper around the new game-ci CLI,
+      # which it then resolves at `cliVersion: latest`. Two floating versions stacked, one
+      # of them a different program.
+      #
+      # It broke every consumer the next morning, and it did not look like a version
+      # problem. Every run reported:
+      #
+      #   Unclassified error occured while trying to activate license.
+      #   [Licensing::Client] Error: Code 400 ... (status: TimeStamp validation failed)
+      #   ::error::No test result files were produced (runner/activation error).
+      #
+      # i.e. a licence failure, sending the reader to UNITY_LICENSE and the runner clock.
+      # The builds in the same run activated fine with the same secret, which is the tell:
+      # they use unity-builder, a different action. game-ci's own v4.3.2 notes warn about
+      # this exact confusion — a failure "which surfaced as a retry-then-fail loop that
+      # looked like a license activation problem".
+      #
+      # v4.3.2 is the last release on the old, long-stable architecture, and carries the
+      # --shm-size fix Unity 6.6+ needs. Revisit by TESTING v4.4.0 on a branch, never by
+      # floating back to `@v4` and finding out in production.
       - name: Run EditMode tests (Docker)
         if: ${{ inputs.build-engine == 'docker' && (inputs.test-mode == 'EditMode' || inputs.test-mode == 'All') }}
         continue-on-error: true   # job result is decided by parsed tests-failed, not the runner's exit code
-        uses: game-ci/unity-test-runner@v4
+        uses: game-ci/unity-test-runner@v4.3.2
         env:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
@@ -274,7 +296,7 @@ jobs:
             (inputs.test-mode == 'PlayMode' || inputs.test-mode == 'All')
           }}
         continue-on-error: true   # no PlayMode tests => non-zero exit; not a real failure
-        uses: game-ci/unity-test-runner@v4
+        uses: game-ci/unity-test-runner@v4.3.2
         env:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
