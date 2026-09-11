@@ -12,6 +12,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **A missing Play service account read as a corrupt one.** An unset secret
+  interpolates as an empty string, which reached the JSON parser and produced
+  "service account JSON is not valid JSON" — sending whoever read the log
+  looking for a broken key instead of an absent one. The value is stripped
+  before the emptiness check, so a blank or whitespace secret reports as
+  missing.
 - **A failed identity check did not stop a promotion.** Every job in the three
   promotion pipelines listed `verify-artifact` in `needs` but guarded itself
   with `if: always()`, which ignores the result. Publishing was reachable: a

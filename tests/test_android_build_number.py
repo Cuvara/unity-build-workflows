@@ -218,3 +218,17 @@ def test_the_promotion_workflow_runs_the_guard_before_publishing():
             assert workflow.index(publish) > guard_at, (
                 f"{publish} is defined before the versionCode guard runs"
             )
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n"])
+def test_a_blank_secret_is_reported_as_missing_not_corrupt(blank, capsys):
+    """An unset GitHub secret interpolates as an empty string. Sending that to
+    the JSON parser produced "service account JSON is not valid JSON", which
+    sends whoever reads the log looking for a broken key instead of an absent
+    one."""
+    assert guard.main(["--package-name", "com.example.game",
+                       "--build-number", "5",
+                       "--service-account-json", blank]) == 1
+    err = capsys.readouterr().err
+    assert "no Google Play service account provided" in err
+    assert "not valid JSON" not in err

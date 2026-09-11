@@ -107,7 +107,12 @@ def main(argv=None):
         print(f"::error::build-number {candidate} must be positive", file=sys.stderr)
         return 2
 
-    raw = args.service_account_json or os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
+    # Strip first: an unset secret interpolates as an empty string, and a
+    # placeholder secret is usually a stray newline. Both reached the JSON
+    # parser and came back as "service account JSON is not valid JSON", which
+    # reads like a corrupt key rather than a missing one.
+    raw = (args.service_account_json or
+           os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")).strip()
     if not raw:
         message = "no Google Play service account provided, so the versionCode could not be checked"
         if args.allow_unverified:
