@@ -149,6 +149,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **`resolve-unity-image` required an `image-namespace` the toolkit already
+  knew.** A release pipeline asked only to build an AAB failed with
+  `image-namespace input is required for resolve-unity-image` before Unity
+  started, even though `config/unity-build-defaults.json` records the
+  namespace. It now falls back to that default and logs where the value came
+  from, erroring only when there is genuinely nothing to use.
 - **`start-phase: build` could never work in any release pipeline.** They call
   the platform build with `integration-mode: remote`, which requires
   `workflow-repository` and `workflow-ref`, but passed neither unless the
