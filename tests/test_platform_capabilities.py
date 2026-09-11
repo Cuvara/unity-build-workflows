@@ -671,3 +671,13 @@ def test_nothing_downstream_of_a_failed_identity_check_runs(platform):
             f"{platform}:{name} runs regardless of whether the artifact's "
             f"identity was verified"
         )
+        # GitHub skips a job when anything in `needs` was skipped, unless the
+        # `if` contains a status function. Without one, every publishing job
+        # inherited the skip from `validate-artifact` — which is skipped by
+        # design whenever start-phase is a later phase — so a promotion started
+        # at `internal` did nothing and reported success. Observed on a real
+        # run before this assertion existed.
+        assert "!cancelled()" in condition or "always()" in condition, (
+            f"{platform}:{name} has no status function, so it will be skipped "
+            f"whenever an upstream job is skipped — including on purpose"
+        )

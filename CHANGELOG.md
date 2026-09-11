@@ -34,6 +34,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **A promotion started at a later phase did nothing and reported success.**
+  Gating the publishing jobs on `verify-artifact.result == 'success'` replaced
+  the `always()` they used to carry, and GitHub skips a job whenever anything
+  in its `needs` was skipped *unless* the `if` contains a status function. So
+  every publishing job inherited the skip from `validate-artifact`, which is
+  skipped by design whenever `start-phase` is a later phase — the retry path
+  the phase input exists for. `!cancelled()` restores the override without
+  restoring the hole: the explicit verify check still gates on identity. Found
+  by running a Linux promotion at `start-phase: internal`.
 - **The desktop validator failed every Linux build on its first real run.**
   GitHub stores artifacts in a zip, which carries no POSIX modes, so a Linux
   binary downloaded from any artifact is always `0644` — the transport dropped

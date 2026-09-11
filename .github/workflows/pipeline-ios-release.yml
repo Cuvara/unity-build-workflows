@@ -260,6 +260,7 @@ jobs:
     name: 04 / iOS / Release Notes
     needs: [verify-artifact]
     if: |
+      !cancelled() &&
       needs.verify-artifact.result == 'success' &&
       true
     runs-on: ubuntu-latest
@@ -297,6 +298,7 @@ jobs:
     name: 05 / iOS / Publish — TestFlight Internal
     needs: [verify-artifact, release-notes]
     if: |
+      !cancelled() &&
       needs.verify-artifact.result == 'success' &&
       !inputs.dry-run &&
       (inputs.start-phase == 'validate' || inputs.start-phase == 'internal')
@@ -354,6 +356,7 @@ jobs:
     name: 06 / iOS / Release — TestFlight External
     needs: [verify-artifact, internal-testing]
     if: |
+      !cancelled() &&
       needs.verify-artifact.result == 'success' &&
       !inputs.dry-run &&
       (
@@ -385,6 +388,7 @@ jobs:
     name: 06 / iOS / Release — App Store
     needs: [verify-artifact, internal-testing, external-testing, release-notes]
     if: |
+      !cancelled() &&
       needs.verify-artifact.result == 'success' &&
       !inputs.dry-run &&
       (
