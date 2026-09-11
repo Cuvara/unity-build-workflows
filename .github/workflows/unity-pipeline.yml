@@ -1283,6 +1283,78 @@ jobs:
           retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
 
   # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 05 — RELEASE MANIFEST  (release builds only)
+  # ════════════════════════════════════════════════════════════════════════════
+  # One Build / Release run is a Release Set: one commit, one version, one build
+  # number, one Unity version, and the artifacts produced from them.
+  #
+  # The manifest is what makes that set identifiable later and what a promotion
+  # checks an artifact against before publishing it. Without it a promotion can
+  # only trust a filename, which establishes nothing about the bytes.
+  #
+  # It runs after validation, so an artifact that failed stage 04 never becomes
+  # part of a promotable set.
+  # ════════════════════════════════════════════════════════════════════════════
+  release-manifest:
+    name: 05 / Release Manifest
+    needs: [resolve-config, build, sign-ios, validate-artifact]
+    if: >-
+      !cancelled() &&
+      needs.resolve-config.outputs.build-type == 'release' &&
+      needs.build.result == 'success' &&
+      (needs.sign-ios.result == 'success' || needs.sign-ios.result == 'skipped') &&
+      (needs.validate-artifact.result == 'success' || needs.validate-artifact.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ needs.resolve-config.outputs.toolkit-ref }}
+          path: .toolkit
+
+      # Every artifact of this Release Set, so the manifest can hash the exact
+      # bytes rather than trusting what the build job reported.
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ needs.resolve-config.outputs.build-type }}-*
+          path: artifacts
+
+      - name: Generate release manifest
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py generate \
+            --search-root    artifacts \
+            --artifacts-root artifacts \
+            --output         release-manifest.json \
+            --version        "${{ needs.resolve-config.outputs.app-version }}" \
+            --build-number   "${{ needs.resolve-config.outputs.build-number }}" \
+            --commit         "${{ github.sha }}" \
+            --ref            "${{ github.ref_name }}" \
+            --run-id         "${{ github.run_id }}" \
+            --run-number     "${{ github.run_number }}" \
+            --run-url        "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --unity-version  "${{ needs.resolve-config.outputs.unity-version }}" \
+            --build-type     "${{ needs.resolve-config.outputs.build-type }}" \
+            --configuration  "${{ needs.resolve-config.outputs.configuration }}" \
+            --environment    "${{ needs.resolve-config.outputs.environment }}" \
+            --define-symbols "${{ needs.resolve-config.outputs.define-symbols }}" \
+            --require-artifacts \
+            > /dev/null
+
+      # Long retention: a production artifact whose manifest has expired cannot
+      # be verified, and an unverifiable artifact cannot be promoted.
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # ════════════════════════════════════════════════════════════════════════════
   # STAGE 07 — FINAL REPORT
   # ════════════════════════════════════════════════════════════════════════════
   # Stages 03 and 04 are matrix jobs, and GitHub does not expose a matrix leg's
@@ -1306,6 +1378,7 @@ jobs:
       - build-addressables
       - build
       - validate-artifact
+      - release-manifest
     if: always()
     runs-on: ubuntu-latest
     environment: ${{ needs.resolve-config.outputs.gh-environment }}

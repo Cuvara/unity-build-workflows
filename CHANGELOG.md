@@ -10,6 +10,38 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+
+- **Platform capabilities.** A project declares which targets it can build via
+  the `PLATFORMS` variable (`Android,WebGL`). That is a different question from
+  `*_BUILD_PLATFORMS`, which says which of them a branch builds — capability
+  wins, so asking for a platform the project does not support produces no job
+  at all. Enforced at `set_platforms_from_list`, the one chokepoint every path
+  (branch flow and manual dispatch) already went through, so there is no second
+  configuration system. Unset means all platforms, leaving existing projects
+  unaffected. Windows and Linux go through the identical gate — no separate
+  code path, no distribution provider required to produce an artifact.
+- **Release Set manifest** (`scripts/common/release_manifest.py`). One
+  `Build / Release` run is one Release Set: a commit, a version, a build
+  number, a Unity version and the artifacts built from them. Stage 05 collects
+  the per-platform manifests, hashes the real bytes, refuses a set whose
+  artifacts disagree on commit or version, and uploads `release-manifest` with
+  90-day retention.
+- **Artifact identity verification.** Each promotion now begins with
+  `04 / <Platform> / Verify Release Identity`, which downloads the manifest
+  from the source run and checks run id, version, build number, commit,
+  artifact name and SHA-256 before anything else runs. It fails closed: a
+  promotion that cannot prove what it is holding does not publish it. A
+  filename establishes nothing.
+- **Pipeline invariant policy and checker** —
+  `.github/pipeline-policy/invariants.md` and
+  `scripts/common/validate_pipeline_invariants.py`, wired into CI as a required
+  gate. 25 static checks covering the immutable-artifact boundary, promotion
+  purity, release-set consistency, capability filtering, build-number
+  resolution and production Environment protection. These are properties that
+  do not fail a build when broken — they produce a pipeline that looks healthy
+  and ships the wrong bytes.
+
 ### Changed
 
 - **BREAKING — iOS production signing moved into `Build / Release` (stage 03b).**

@@ -199,9 +199,53 @@ on:
         default: false
 
 jobs:
+  # ─── 04 — VERIFY RELEASE IDENTITY ───────────────────────────────────────────
+  # A filename establishes nothing. This proves the downloaded bytes are the
+  # ones the named Release Set produced: same run, same commit, same version,
+  # same build number, same SHA-256. It fails closed — a promotion that cannot
+  # prove what it is holding must not publish it.
+  verify-artifact:
+    name: 04 / Android / Verify Release Identity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Download artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: promoted/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             Android \
+            --artifact-path        promoted \
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
   # ─── VALIDATE AAB ───────────────────────────────────────────────────────────
   validate-aab:
     name: 04 / Android / Validate AAB
+    needs: [verify-artifact]
     if: |
       always() &&
       inputs.start-phase == 'validate'
@@ -252,6 +296,7 @@ jobs:
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
   release-notes:
     name: 04 / Android / Release Notes
+    needs: [verify-artifact]
     if: |
       always() &&
       true
@@ -288,7 +333,7 @@ jobs:
   # ─── PHASE 1: INTERNAL TESTING ──────────────────────────────────────────────
   internal-testing:
     name: 05 / Android / Publish — Internal Testing
-    needs: [validate-aab, release-notes]
+    needs: [verify-artifact, validate-aab, release-notes]
     if: |
       always() && !inputs.dry-run &&
       (
@@ -348,7 +393,7 @@ jobs:
   # ─── PHASE 2: EXTERNAL TESTING ─────────────────────────────────────────────
   external-testing:
     name: 06 / Android / Release — External Testing
-    needs: [internal-testing]
+    needs: [verify-artifact, internal-testing]
     if: |
       always() && !inputs.dry-run && !inputs.skip-external &&
       (
@@ -381,7 +426,7 @@ jobs:
   # ─── PHASE 3: PRODUCTION ───────────────────────────────────────────────────
   production-release:
     name: 06 / Android / Release — Production
-    needs: [internal-testing, external-testing, release-notes]
+    needs: [verify-artifact, internal-testing, external-testing, release-notes]
     if: |
       always() && !inputs.dry-run &&
       (
@@ -448,7 +493,7 @@ jobs:
   # to Discord.
   report:
     name: 07 / Android / Report & Notify
-    needs: [validate-aab, release-notes, internal-testing, external-testing, production-release]
+    needs: [verify-artifact, validate-aab, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -471,6 +516,7 @@ jobs:
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
           phases: |
+            04 Verify Release Identity=${{ needs.verify-artifact.result }}
             04 Validate AAB=${{ needs.validate-aab.result }}
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — Internal Testing=${{ needs.internal-testing.result }}

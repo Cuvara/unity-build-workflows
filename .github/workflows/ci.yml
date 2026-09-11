@@ -108,9 +108,31 @@ jobs:
           "$PWD/actionlint" -color -shellcheck= -pyflakes= \
             $(printf "%s\n" "$WORK/.github/workflows/"*.yml)
 
+  # The invariants in .github/pipeline-policy/invariants.md describe properties
+  # that do not fail a build when broken — they produce a pipeline that looks
+  # healthy and ships the wrong bytes. Every check exists because the matching
+  # mistake was made and only found by running a real release.
+  invariants:
+    name: Pipeline invariants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Validate pipeline invariants
+        run: python3 scripts/common/validate_pipeline_invariants.py --repo-root .
+
   ci-report:
     name: CI Report
-    needs: [tests, shellcheck, actionlint]
+    needs: [tests, shellcheck, actionlint, invariants]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -121,14 +143,16 @@ jobs:
             echo "- Tests:      ${{ needs.tests.result }}"
             echo "- Shellcheck: ${{ needs.shellcheck.result }}"
             echo "- Workflow lint: ${{ needs.actionlint.result }}"
+            echo "- Pipeline invariants: ${{ needs.invariants.result }}"
           } >> "$GITHUB_STEP_SUMMARY"
           [ "${{ needs.tests.result }}" = "success" ] \
             && [ "${{ needs.shellcheck.result }}" = "success" ] \
-            && [ "${{ needs.actionlint.result }}" = "success" ]
+            && [ "${{ needs.actionlint.result }}" = "success" ] \
+            && [ "${{ needs.invariants.result }}" = "success" ]
 
   auto-merge:
     name: Auto-merge develop → main
-    needs: [tests, shellcheck, actionlint]
+    needs: [tests, shellcheck, actionlint, invariants]
     if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
     uses: ./.github/workflows/auto-merge.yml
     with:
