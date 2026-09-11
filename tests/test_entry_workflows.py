@@ -226,18 +226,72 @@ def test_only_android_passes_an_android_export(entry):
     )
 
 
-def test_auto_sentinel_is_translated_to_the_engine_default(entry):
+def _eval_ternary(expression, value):
+    """Evaluate GitHub's `A && B || C` for one input value.
+
+    GitHub's `&&`/`||` return operands, not booleans, and an empty string is
+    FALSY — so `X == 'auto' && '' || X` can never produce ''. It falls through
+    to X. That is not visible by reading the expression, which is why the
+    previous version of this test (a substring check) passed while every
+    dispatch failed with `Invalid runner-type='auto'`.
+    """
+    body = expression.strip()
+    assert body.startswith("${{") and body.endswith("}}"), body
+    body = body[3:-2].strip()
+    left, _, right = body.partition("||")
+    cond, _, then = left.partition("&&")
+
+    def resolve(token):
+        token = token.strip()
+        if token.startswith("'") and token.endswith("'"):
+            return token[1:-1]
+        assert token.startswith("inputs."), token
+        return value
+
+    # cond is `inputs.X <op> 'literal'`
+    cond = cond.strip()
+    if "!=" in cond:
+        a, _, b = cond.partition("!=")
+        truth = resolve(a) != resolve(b)
+    else:
+        a, _, b = cond.partition("==")
+        truth = resolve(a) == resolve(b)
+
+    result = resolve(then) if truth else False
+    # GitHub's || returns the first truthy operand; '' is falsy.
+    return result if result else resolve(right)
+
+
+@pytest.mark.parametrize("field", ["runner-type", "build-engine"])
+def test_auto_sentinel_actually_resolves_to_empty(entry, field):
     """'auto' on the form means "use the repository variable", which the engine
-    spells as an empty string."""
+    spells as an empty string. It must actually evaluate to '' — the resolver
+    rejects the literal 'auto' outright."""
     key, workflow = entry
     job = next(iter(workflow["jobs"].values()))
-    for name in ("runner-type", "build-engine"):
-        value = str(job["with"].get(name, ""))
-        if not value:
-            continue
-        assert f"inputs.{name} == 'auto'" in value, (
-            f"{key}: {name} passes the raw 'auto' sentinel to the engine instead of ''"
-        )
+    expression = str(job["with"].get(field, ""))
+    if not expression:
+        return
+    assert _eval_ternary(expression, "auto") == "", (
+        f"{key}: {field} passes the literal 'auto' to the engine, which rejects it "
+        f"(`Invalid {field}='auto'`). Expression: {expression}"
+    )
+
+
+@pytest.mark.parametrize("field,concrete", [
+    ("runner-type", "self-hosted"),
+    ("build-engine", "docker"),
+])
+def test_explicit_lane_choice_is_passed_through(entry, field, concrete):
+    """The sentinel fix must not swallow a real selection."""
+    key, workflow = entry
+    job = next(iter(workflow["jobs"].values()))
+    expression = str(job["with"].get(field, ""))
+    if not expression:
+        return
+    assert _eval_ternary(expression, concrete) == concrete, (
+        f"{key}: {field}={concrete} does not reach the engine"
+    )
 
 
 def test_entry_points_share_one_engine_reference(entry):
