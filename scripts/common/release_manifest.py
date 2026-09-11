@@ -188,6 +188,17 @@ def cmd_generate(args):
             print(f"::error::Release Set is inconsistent — {line}", file=sys.stderr)
         return 1
 
+    # A Release Set is identified by version + build number + commit. An empty
+    # version is not a cosmetic gap: `verify --expect-version ''` compares
+    # nothing and passes, so the promotion's identity check quietly loses one
+    # of its three fields. Fail closed on a release; a development set may
+    # legitimately have no version.
+    if args.build_type == "release" and not args.version:
+        print("::error::Release Set has no version. The version is part of the "
+              "release identity a promotion verifies; an empty one makes that "
+              "check vacuous.", file=sys.stderr)
+        return 1
+
     # I-008. Not "every release must use a digest"; a release must be able to
     # say what built it. `unknown` means the build recorded nothing, and a
     # release nobody can trace back to a builder is not releasable.
