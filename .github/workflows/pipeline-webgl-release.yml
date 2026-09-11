@@ -195,10 +195,11 @@ on:
 jobs:
   # ─── 03 — BUILD ARTIFACTS ───────────────────────────────────────────────────
   build-webgl:
-    name: 03 / WebGL / Release
+    name: 03 / WebGL
     if: inputs.start-phase == 'build'
     uses: ./.github/workflows/unity-build-webgl.yml
     with:
+      node-label: ${{ inputs.build-version }}
       project-path: ${{ inputs.project-path || '.' }}
       unity-version: ${{ inputs.unity-version }}
       build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
@@ -214,8 +215,12 @@ jobs:
       image-namespace: ${{ inputs.image-namespace || '' }}
       image-name: ${{ inputs.image-name || '' }}
       image-digest: ${{ inputs.image-digest || '' }}
-      workflow-repository: ${{ inputs.workflow-repository || '' }}
-      workflow-ref: ${{ inputs.workflow-ref || '' }}
+      # integration-mode `remote` requires both of these. Falling back to the
+      # toolkit this pipeline was called from means a caller that only wants a
+      # build does not have to know they exist — without it, start-phase:build
+      # failed with "workflow-repository input is required" before Unity ran.
+      workflow-repository: ${{ inputs.workflow-repository || inputs.toolkit-repo }}
+      workflow-ref: ${{ inputs.workflow-ref || inputs.toolkit-ref }}
       integration-mode: ${{ inputs.integration-mode || 'remote' }}
       toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
     secrets: inherit
