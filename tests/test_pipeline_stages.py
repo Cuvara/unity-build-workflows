@@ -761,3 +761,30 @@ def test_release_report_is_one_shared_implementation(repo_root):
     for path, _ in RELEASE_PIPELINES.values():
         body = yaml.dump(load(path)["jobs"]["report"])
         assert "release-report" in body, f"{path.name} does not use the shared action"
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_release_build_supplies_what_remote_integration_needs(key, spec):
+    """`integration-mode: remote` requires workflow-repository and workflow-ref.
+
+    Neither was passed unless the caller set them explicitly, so
+    `start-phase: build` failed before Unity ran:
+
+        ##[error]workflow-repository input is required (integration-mode: remote)
+
+    The pipeline already knows the toolkit it was called from; falling back to
+    that means a caller who only wants a build need not know these exist.
+    """
+    path, _ = spec
+    jobs = load(path)["jobs"]
+    build_job = next(j for jid, j in jobs.items() if jid.startswith("build-"))
+    with_block = build_job["with"]
+    if "remote" not in str(with_block.get("integration-mode", "")):
+        return
+    for field, fallback in (("workflow-repository", "toolkit-repo"),
+                            ("workflow-ref", "toolkit-ref")):
+        value = str(with_block.get(field, ""))
+        assert f"inputs.{fallback}" in value, (
+            f"{path.name}: {field} has no fallback, so start-phase:build fails "
+            f"unless the caller passes it. Got: {value}"
+        )

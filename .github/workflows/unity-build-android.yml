@@ -3,6 +3,14 @@ name: Unity Build Android
 on:
   workflow_call:
     inputs:
+      node-label:
+        description: >-
+          Display name for this workflow's job. GitHub appends it to the
+          caller's job name, so the caller owns the stage and platform and this
+          owns what is left. Empty keeps the standalone name.
+        required: false
+        default: ''
+        type: string
       project-path:
         description: Path to the Unity project root relative to the consumer repo root
         type: string
@@ -131,7 +139,7 @@ on:
 
 jobs:
   build:
-    name: Build Android (${{ inputs.environment }})
+    name: ${{ inputs.node-label != '' && inputs.node-label || format('Build Android ({0})', inputs.environment) }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     outputs:

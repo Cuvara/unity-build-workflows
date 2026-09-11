@@ -206,10 +206,11 @@ on:
 jobs:
   # ─── BUILD XCODE PROJECT ───────────────────────────────────────────────────
   build-xcode:
-    name: 03 / iOS / Release / Xcode Project
+    name: 03 / iOS / Xcode Project
     if: inputs.start-phase == 'build'
     uses: ./.github/workflows/unity-build-ios.yml
     with:
+      node-label: ${{ inputs.build-version }}
       project-path: ${{ inputs.project-path || '.' }}
       unity-version: ${{ inputs.unity-version }}
       build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
@@ -219,15 +220,19 @@ jobs:
       build-addressables: ${{ inputs.build-addressables == '' && true || inputs.build-addressables }}
       upload-artifact: true
       ios-runner-label: ${{ inputs.ios-runner-label || 'macos-unity-xcode' }}
-      workflow-repository: ${{ inputs.workflow-repository || '' }}
-      workflow-ref: ${{ inputs.workflow-ref || '' }}
+      # integration-mode `remote` requires both of these. Falling back to the
+      # toolkit this pipeline was called from means a caller that only wants a
+      # build does not have to know they exist — without it, start-phase:build
+      # failed with "workflow-repository input is required" before Unity ran.
+      workflow-repository: ${{ inputs.workflow-repository || inputs.toolkit-repo }}
+      workflow-ref: ${{ inputs.workflow-ref || inputs.toolkit-ref }}
       integration-mode: ${{ inputs.integration-mode || 'remote' }}
       toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
     secrets: inherit
 
   # ─── ARCHIVE & EXPORT IPA ──────────────────────────────────────────────────
   archive-export:
-    name: 03 / iOS / Release / IPA
+    name: 03 / iOS / IPA
     needs: [build-xcode]
     if: |
       always() &&

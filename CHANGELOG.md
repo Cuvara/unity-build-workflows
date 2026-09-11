@@ -149,6 +149,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **`start-phase: build` could never work in any release pipeline.** They call
+  the platform build with `integration-mode: remote`, which requires
+  `workflow-repository` and `workflow-ref`, but passed neither unless the
+  caller supplied them — so the first real `Release / Android` dry run failed
+  before Unity started with `workflow-repository input is required
+  (integration-mode: remote)`. Both now fall back to the toolkit the pipeline
+  was called from.
+- **The release node chain repeated the platform three times** —
+  `Android / 03 / Android / Release / AAB / Build Android (production)`. The
+  `node-label` split already used by `reusable-build-platform.yml` now applies
+  to `unity-build-{android,ios,webgl}.yml` too, and the release entry
+  workflows name their job after the layer rather than the platform:
+  `Release / 03 / Android / AAB / 0.1.0`.
 - **`pipeline-android-release.yml` and `pipeline-webgl-release.yml` used
   `DISCORD_WEBHOOK_URL` without declaring it.** An undeclared secret in a
   reusable workflow is always empty, so the notification would have silently
