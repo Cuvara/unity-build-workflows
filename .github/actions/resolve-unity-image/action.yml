@@ -63,11 +63,26 @@ runs:
         IMAGE_DIGEST: ${{ inputs.image-digest }}
         RELEASE_MODE: ${{ inputs.release-mode }}
       run: |
-        # Fail fast if namespace not provided — script cannot derive a valid image path without it.
+        # The toolkit already records a default namespace in
+        # config/unity-build-defaults.json. Requiring the input outright meant a
+        # caller that had never heard of Docker image namespaces — a release
+        # pipeline asked only to build an AAB — failed with "image-namespace
+        # input is required" before Unity started. Fall back to the configured
+        # default, say where it came from, and only error when there is
+        # genuinely nothing to use.
         if [ -z "$IMAGE_NAMESPACE" ]; then
-          echo "::error::image-namespace input is required for resolve-unity-image."
-          echo "::error::Set image-namespace to the registry namespace hosting your Unity images"
-          echo "::error::(e.g. myorg/unity-images). Passed via the workflow image-namespace input."
+          DEFAULTS="${{ github.action_path }}/../../../config/unity-build-defaults.json"
+          if [ -f "$DEFAULTS" ]; then
+            IMAGE_NAMESPACE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("imageNamespace",""))' "$DEFAULTS" 2>/dev/null || echo "")
+            if [ -n "$IMAGE_NAMESPACE" ]; then
+              echo "[resolve-unity-image] image-namespace not set; using '$IMAGE_NAMESPACE' from config/unity-build-defaults.json"
+            fi
+          fi
+        fi
+        if [ -z "$IMAGE_NAMESPACE" ]; then
+          echo "::error::image-namespace could not be resolved for resolve-unity-image."
+          echo "::error::Pass the image-namespace input, or set imageNamespace in"
+          echo "::error::config/unity-build-defaults.json (e.g. myorg/unity-images)."
           exit 1
         fi
         # NOTE: arg names --image-registry / --image-namespace / --image-name are the expected
