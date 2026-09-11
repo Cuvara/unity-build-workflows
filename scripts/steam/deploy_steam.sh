@@ -73,6 +73,27 @@ stage_content() {
   # shipping it to players would leak nothing sensitive, but it is not part of
   # the build and does not belong in a depot.
   find "${STAGING_DIR}" -maxdepth 2 -name 'artifact-manifest.json' -delete
+
+  restore_executable_bits
+}
+
+# GitHub stores artifacts in a zip, which carries no POSIX modes, so every
+# Linux binary downloaded from an artifact arrives 0644 and cannot be launched.
+# The bit is restored on the STAGING COPY only: file CONTENT is untouched (the
+# fingerprint check below hashes content, and still matches), and the
+# downloaded artifact is left exactly as it arrived. This is not a
+# modification of the build — it is undoing something the transport did.
+restore_executable_bits() {
+  local restored=0 file
+  while IFS= read -r -d '' file; do
+    if head -c 4 "${file}" | grep -q $'\x7fELF'; then
+      chmod +x "${file}"
+      restored=$((restored + 1))
+    fi
+  done < <(find "${STAGING_DIR}" -type f ! -perm -u+x -print0)
+  if [ "${restored}" -gt 0 ]; then
+    log "Restored the executable bit on ${restored} ELF binar(y/ies) that the artifact zip dropped"
+  fi
 }
 
 verify_staging_matches_source() {
