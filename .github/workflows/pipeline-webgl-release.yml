@@ -222,8 +222,8 @@ jobs:
         with:
           name: release-manifest
           path: release-set/
-          run-id: ${ inputs.source-run-id }
-          github-token: ${ github.token }
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Verify release identity and checksum
         shell: bash
@@ -233,9 +233,9 @@ jobs:
             --manifest             release-set/release-manifest.json \
             --platform             WebGL \
             --artifact-path        build-artifact \
-            --expect-run-id        "${ inputs.source-run-id }" \
-            --expect-artifact-name "${ inputs.artifact-name }" \
-            --expect-version       "${ inputs.build-version }"
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
 
       - name: Validate artifact
         shell: bash
@@ -331,8 +331,8 @@ jobs:
         with:
           name: release-manifest
           path: release-set/
-          run-id: ${ inputs.source-run-id }
-          github-token: ${ github.token }
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Verify release identity and checksum
         shell: bash
@@ -342,9 +342,9 @@ jobs:
             --manifest             release-set/release-manifest.json \
             --platform             WebGL \
             --artifact-path        build-artifact \
-            --expect-run-id        "${ inputs.source-run-id }" \
-            --expect-artifact-name "${ inputs.artifact-name }" \
-            --expect-version       "${ inputs.build-version }"
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
 
       - name: Deploy to Cloudflare Pages
         id: deploy
@@ -424,8 +424,8 @@ jobs:
         with:
           name: release-manifest
           path: release-set/
-          run-id: ${ inputs.source-run-id }
-          github-token: ${ github.token }
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Verify release identity and checksum
         shell: bash
@@ -435,9 +435,9 @@ jobs:
             --manifest             release-set/release-manifest.json \
             --platform             WebGL \
             --artifact-path        build-artifact \
-            --expect-run-id        "${ inputs.source-run-id }" \
-            --expect-artifact-name "${ inputs.artifact-name }" \
-            --expect-version       "${ inputs.build-version }"
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
 
       - name: Deploy to Cloudflare Pages
         id: deploy

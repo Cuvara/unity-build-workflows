@@ -217,6 +217,13 @@ jobs:
     outputs:
       artifact-name: ${{ inputs.artifact-name }}
     steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
       - name: Download artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
@@ -234,8 +241,8 @@ jobs:
         with:
           name: release-manifest
           path: release-set/
-          run-id: ${ inputs.source-run-id }
-          github-token: ${ github.token }
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Verify release identity and checksum
         shell: bash
@@ -245,20 +252,13 @@ jobs:
             --manifest             release-set/release-manifest.json \
             --platform             Android \
             --artifact-path        build-artifact \
-            --expect-run-id        "${ inputs.source-run-id }" \
-            --expect-artifact-name "${ inputs.artifact-name }" \
-            --expect-version       "${ inputs.build-version }"
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
 
       # A >1000-byte file was the whole of the old gate, so an unsigned AAB, an
       # APK where an AAB was expected, or a bundle with the wrong package id all
       # reached Google Play and failed there. Validate the artifact properly.
-      - name: Checkout toolkit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          repository: ${{ inputs.toolkit-repo }}
-          ref: ${{ inputs.toolkit-ref }}
-          path: .toolkit
-
       - name: Validate build artifact
         id: validate
         shell: bash
@@ -380,8 +380,8 @@ jobs:
         with:
           name: release-manifest
           path: release-set/
-          run-id: ${ inputs.source-run-id }
-          github-token: ${ github.token }
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Verify release identity and checksum
         shell: bash
@@ -391,9 +391,9 @@ jobs:
             --manifest             release-set/release-manifest.json \
             --platform             Android \
             --artifact-path        build-artifact \
-            --expect-run-id        "${ inputs.source-run-id }" \
-            --expect-artifact-name "${ inputs.artifact-name }" \
-            --expect-version       "${ inputs.build-version }"
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
 
       - name: Download release notes
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -523,8 +523,8 @@ jobs:
         with:
           name: release-manifest
           path: release-set/
-          run-id: ${ inputs.source-run-id }
-          github-token: ${ github.token }
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Verify release identity and checksum
         shell: bash
@@ -534,9 +534,9 @@ jobs:
             --manifest             release-set/release-manifest.json \
             --platform             Android \
             --artifact-path        . \
-            --expect-run-id        "${ inputs.source-run-id }" \
-            --expect-artifact-name "${ inputs.artifact-name }" \
-            --expect-version       "${ inputs.build-version }"
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
 
       - name: Determine source track and rollout fraction
         id: source

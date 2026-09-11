@@ -198,8 +198,8 @@ jobs:
         with:
           name: release-manifest
           path: release-set/
-          run-id: ${ inputs.source-run-id }
-          github-token: ${ github.token }
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       # This job fetched the artifact itself, so it checks the bytes it holds
       # rather than trusting that an earlier job checked a different download.
@@ -211,9 +211,9 @@ jobs:
             --manifest             release-set/release-manifest.json \
             --platform             Linux64 \
             --artifact-path        build-artifact \
-            --expect-run-id        "${ inputs.source-run-id }" \
-            --expect-artifact-name "${ inputs.artifact-name }" \
-            --expect-version       "${ inputs.build-version }"
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
 
       - name: Validate Linux artifact
         shell: bash

@@ -793,3 +793,49 @@ def test_a_release_form_passes_only_what_the_pipeline_declares(name):
     declared = set((pipeline.get("on") or pipeline[True])["workflow_call"]["inputs"])
     passed = set(job.get("with") or {})
     assert not (passed - declared), sorted(passed - declared)
+
+
+# ---------------------------------------------------------------------------
+# Two classes of workflow bug that only show up at runtime
+# ---------------------------------------------------------------------------
+
+def test_no_workflow_has_a_collapsed_expression():
+    """`${ inputs.x }` is not an expression — it is a literal string, and
+    GitHub says nothing about it. A generator that lost one brace turned a
+    download's `github-token` into the text "${ github.token }", which failed
+    at runtime as "Bad credentials" and looked like a permissions problem.
+    actionlint does not flag it either.
+    """
+    import re
+
+    pattern = re.compile(r"\$\{ [a-z]+\.[a-z0-9.-]+ \}")
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            assert not pattern.search(line), f"{path.name}:{number}: {line.strip()}"
+
+
+def test_nothing_uses_the_toolkit_before_checking_it_out():
+    """Step order is invisible in review and fatal at runtime: the step that
+    needs `.toolkit/` was inserted next to the download it verifies, which put
+    it in front of the checkout that supplies the script."""
+    import yaml
+
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text())
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            checkout = next(
+                (i for i, s in enumerate(steps)
+                 if "checkout" in str(s.get("uses", ""))
+                 and ".toolkit" in str(s.get("with", {}))), None)
+            first_use = next(
+                (i for i, s in enumerate(steps)
+                 if ".toolkit/" in str(s.get("run", ""))
+                 or ".toolkit/" in str(s.get("uses", ""))), None)
+            if first_use is None:
+                continue
+            assert checkout is not None, f"{path.name}:{job_id} uses .toolkit without checking it out"
+            assert checkout < first_use, (
+                f"{path.name}:{job_id} uses .toolkit at step {first_use} but "
+                f"checks it out at step {checkout}"
+            )
