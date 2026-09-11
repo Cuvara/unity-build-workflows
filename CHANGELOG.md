@@ -12,6 +12,13 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **Release Sets were written with no version.** The stage-01 shallow checkout
+  fetched `ProjectVersion.txt` but not `ProjectSettings.asset`, so the metadata
+  step took its "file not found" path and `app-version` resolved empty.
+  `verify --expect-version ''` then compared nothing and passed, leaving the
+  promotion identity check running on two of its three fields. The file is now
+  checked out, and generating a *release* manifest without a version fails
+  closed.
 - **The platform capability gate was inert.** `unity-pipeline.yml` never passed
   `vars.PLATFORMS` to `resolve_build_flow.sh`, so a project declaring
   `Android,WebGL` still built Windows64 when asked — found by running it, not
