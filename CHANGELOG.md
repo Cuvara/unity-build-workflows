@@ -105,6 +105,16 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **The WebGL validator failed every brotli build.** It required all four
+  player files to share one compression mode, but Unity deliberately leaves
+  `.loader.js` uncompressed — the browser fetches and executes it *before* any
+  decompression logic exists — so `loader=none, data=brotli, framework=brotli,
+  wasm=brotli` is the normal, correct output of a brotli WebGL build. The
+  consistency check now covers the payload (`framework`, `data`, `wasm`) only,
+  which still catches the half-compressed artifact that renders as a blank
+  canvas. A *compressed* loader now warns instead, since it only works when the
+  host negotiates `Content-Encoding`. Caught on NDCUnityTemplate run
+  34564185431, where a perfectly good WebGL build was failed.
 - **The artifact manifest was never written on the docker lane.** `build/` is
   created by the Unity container under a different UID, so the runner could not
   write into it — `PermissionError: [Errno 13] Permission denied:

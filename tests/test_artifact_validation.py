@@ -73,7 +73,7 @@ def make_aab(path, *, signed=True, with_dex=True, padding=2_000_000):
 
 
 def make_webgl(root, *, compression="none", with_index=True, streaming_assets=False,
-               padding=2_000_000, mixed=False):
+               padding=2_000_000, mixed=False, compressed_loader=False):
     """A directory shaped like a Unity WebGL player."""
     root.mkdir(parents=True, exist_ok=True)
     suffix = {"none": "", "gzip": ".gz", "brotli": ".br"}[compression]
@@ -85,10 +85,18 @@ def make_webgl(root, *, compression="none", with_index=True, streaming_assets=Fa
         "app.data": b"\x00" * padding,
         "app.wasm": b"\x00asm",
     }
-    for i, (name, content) in enumerate(roles.items()):
-        # `mixed` leaves the loader uncompressed while the rest are compressed —
-        # the shape that renders as a blank canvas in a browser.
-        this_suffix = "" if (mixed and i == 0) else suffix
+    for name, content in roles.items():
+        role = name.split(".", 1)[1]
+        if role == "loader.js":
+            # Unity leaves the loader uncompressed even for a brotli build: the
+            # browser must execute it before any decompression exists.
+            this_suffix = suffix if compressed_loader else ""
+        elif mixed and role == "framework.js":
+            # A genuinely half-compressed payload — plain framework beside a
+            # brotli wasm — which renders as a blank canvas.
+            this_suffix = ""
+        else:
+            this_suffix = suffix
         (build / (name + this_suffix)).write_bytes(content)
     if with_index:
         (root / "index.html").write_text(
@@ -526,12 +534,35 @@ class TestWebGLValidation:
         )
         assert not result.failed, result.to_dict()
         assert result.facts["compressionMode"] == compression
+        # The loader stays plain regardless of the payload's compression.
+        assert result.facts["loaderCompression"] == "none"
 
     def test_rejects_mixed_compression(self, tmp_path):
-        """Loader plain + wasm brotli is the blank-canvas trap."""
+        """A plain framework beside a brotli wasm is the blank-canvas trap."""
         make_webgl(tmp_path / "out", compression="brotli", mixed=True)
         result = validate_webgl.validate(Args(search_root=str(tmp_path)))
         assert "compression-consistent" in failed_checks(result)
+
+    def test_uncompressed_loader_is_not_a_defect(self, tmp_path):
+        """Unity's normal brotli output: loader plain, payload brotli.
+
+        Rejecting this failed a perfectly good WebGL build on NDCUnityTemplate
+        run 34564185431 — the loader is fetched and executed before any
+        decompression logic exists, so it is never compressed.
+        """
+        make_webgl(tmp_path / "out", compression="brotli")
+        result = validate_webgl.validate(Args(search_root=str(tmp_path)))
+        assert not result.failed, result.to_dict()
+        assert result.facts["compressionMode"] == "brotli"
+        assert result.facts["loaderCompression"] == "none"
+
+    def test_compressed_loader_warns_but_does_not_fail(self, tmp_path):
+        """It only works when the host negotiates Content-Encoding."""
+        make_webgl(tmp_path / "out", compression="brotli", compressed_loader=True)
+        result = validate_webgl.validate(Args(search_root=str(tmp_path)))
+        assert not result.failed, result.to_dict()
+        warned = {n for status, n, _ in result.checks if status == "warn"}
+        assert "loader-compression" in warned
 
     def test_rejects_unexpected_compression(self, tmp_path):
         make_webgl(tmp_path / "out", compression="gzip")
