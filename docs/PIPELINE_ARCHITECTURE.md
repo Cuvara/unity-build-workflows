@@ -68,47 +68,86 @@ pipelines. That separation is the point: see §4.
 
 ---
 
-## 1a. Entry workflows — the user-facing layer
+## 1a. Three layers — CI, Build, Release
 
-Stages 01–08 describe the *engine*. What a person actually clicks is a separate
-concern, and it is solved with separate files rather than a bigger form.
+Stages 01–08 describe the *engine*. What a developer clicks is a separate
+concern, and it is three layers, not one.
 
-| Workflow | Trigger | Purpose |
+| Workflow | Trigger | Question it answers |
 |---|---|---|
-| `unity-build.yml` | push / pull_request | **Automatic** CI. No form at all — every setting is resolved per branch by `resolve_build_flow.sh` from the repository variables. |
-| `build-android.yml` | manual | Android only. The **only** place the APK/AAB choice appears. |
-| `build-ios.yml` | manual | iOS only. Exposes the macOS runner labels the lane needs. |
-| `build-webgl.yml` | manual | WebGL only. |
-| `build-all.yml` | manual | Every platform in the environment's `*_BUILD_PLATFORMS` variable. |
+| `01-ci.yml` — **CI / Validate & Test** | push / PR | *Is this code safe to merge?* Validates, tests, reports. **Builds no player.** |
+| `10-build-development.yml` — **Build / Development** | manual | *Give me something to test with.* Android ships an APK. |
+| `11-build-release.yml` — **Build / Release** | manual | *Give me something we could ship.* Signed, store-shaped, immutable. |
+| `20-release-android.yml` — **Release / Android** | manual | Promote a release AAB to Google Play. |
+| `21-release-ios.yml` — **Release / iOS** | manual | Promote a release IPA to App Store Connect. |
+| `22-release-webgl.yml` — **Release / WebGL** | manual | Promote a release WebGL build to hosting. |
 
-All five call the same `unity-pipeline.yml` engine. None of them contains build
-logic — each is a single delegating job with a `with:` block. Templates live in
-`templates/consumer-build-*.yml`; `tests/test_entry_workflows.py` pins the
-contract.
+All of them call the same `unity-pipeline.yml` engine. None contains build
+logic. Templates live in `templates/consumer-*.yml`;
+`tests/test_entry_workflows.py` pins the contract.
 
-### Why separate files instead of one form
+The numeric prefixes order the Actions sidebar by layer instead of
+alphabetically — the list reads CI, then build, then release.
+
+### Build / Release is not Build / Development with `environment=production`
+
+They differ on their own axis, `build-type`, which is what names the artifacts:
+
+| Platform | Development | Release |
+|---|---|---|
+| Android | `development-android-apk` | `release-android-aab` |
+| iOS | `development-ios-xcodeproj` | `release-ios-xcodeproj` |
+| WebGL | `development-webgl` | `release-webgl` |
+| Windows | `development-windows` | `release-windows` |
+| Linux | `development-linux` | `release-linux` |
+| Linux (server) | `development-linux-server` | `release-linux-server` |
+
+Slugs are the platform a person would name, not the internal Unity target id —
+`release-windows`, not `release-windows64-exe`. The artifact type is appended
+only where it distinguishes two real outputs, so Android carries `apk`/`aab`
+and WebGL does not become `webgl-webgl`.
+
+A caller that omits `build-type` gets the historical mapping from
+`environment`, so consumers that predate the axis keep working.
+
+`environment`, `build-type` and `platform` are three separate things:
+
+```
+build-type   development | release        what shape the artifact is
+environment  development | staging | production   what config it is built with
+platform     Android | iOS | WebGL | Windows64 | Linux64 | LinuxServer
+```
+
+### The CI lane builds nothing
+
+`01-ci.yml` passes `platform: None`. That has to be honoured in the matrix
+step rather than the resolver, because on a push the resolver takes the
+platform set from the branch's `*_BUILD_PLATFORMS` variable and never looks at
+the input. Without it, every merge check paid for six Unity builds.
+
+### Why separate files rather than a smarter form
 
 `workflow_dispatch` has **no conditional input visibility**. A single
-multi-platform form therefore has to show every platform's options to everyone:
+multi-platform form therefore shows every platform's options to everyone:
 choosing `Target platform: iOS` still left `Android output: APK/AAB` on screen,
-and the form had grown to fourteen fields, most irrelevant to any given run.
+and the form had grown to fourteen fields.
 
-GitHub offers no way to hide an input based on another input's value, and
-faking one (a `platform` input that silently ignores the fields that do not
-apply) trades a visible problem for an invisible one. Splitting the **entry
-point** is the only mechanism that produces a form containing just the
-applicable options — and it costs nothing structurally, because the
-implementation is shared underneath:
+Faking conditionality — an input silently ignored for the platform you picked —
+trades a visible problem for an invisible one. Splitting the **entry point** is
+the only mechanism that yields a form containing just the applicable options,
+and it costs nothing structurally because the implementation is shared:
 
 ```
-build-android.yml ──┐
-build-ios.yml     ──┤
-build-webgl.yml   ──┼──→ unity-pipeline.yml ──→ reusable-build-platform.yml
-build-all.yml     ──┤        (stages 01–08)          (the one build executor)
-unity-build.yml   ──┘
+01-ci.yml               ──┐
+10-build-development.yml──┼──→ unity-pipeline.yml ──→ reusable-build-platform.yml
+11-build-release.yml    ──┘        (stages 01–08)          (the one executor)
+
+20-release-android.yml  ──→ pipeline-android-release.yml ──→ unity-build-android.yml
+21-release-ios.yml      ──→ pipeline-ios-release.yml     ──→ unity-build-ios.yml
+22-release-webgl.yml    ──→ pipeline-webgl-release.yml   ──→ unity-build-webgl.yml
 ```
 
-Nesting: entry → pipeline → platform executor = **3 of GitHub's 4** levels.
+Nesting: entry → pipeline → executor = **3 of GitHub's 4** levels.
 
 ### Input groups
 
@@ -117,44 +156,44 @@ group as a prefix and the declaration order is the display order:
 
 | Group | Inputs | Who changes them |
 |---|---|---|
-| `GENERAL` | environment | everyone |
-| `ANDROID` / `IOS` / `WEBGL` | platform-specific (e.g. output format) | everyone, on that platform |
+| `GENERAL` | platform, environment | everyone |
+| `ANDROID` | `android-export` — **Build / Release only** | on a release |
 | `QUALITY` | run-tests, test-mode | everyone |
 | `CONTENT` | build-addressables | everyone |
 | `UNITY` | unity-version, clean-build, define-symbols | occasionally |
-| `ADVANCED` | runner-type, build-engine, activation-strategy, runner-labels | rarely — infrastructure |
+| `ADVANCED` | runner-type, build-engine, runner-labels | rarely |
 
-A normal developer needs `GENERAL` and the platform group. Everything under
-`ADVANCED` defaults to `auto`, meaning "use the repository variable"; the engine
-spells that as an empty string, and the entry point translates.
+`ADVANCED` defaults to `auto`, meaning "use the repository variable", which the
+engine spells as an empty string. Write that translation as
+`inputs.x != 'auto' && inputs.x || ''` — the reverse,
+`inputs.x == 'auto' && '' || inputs.x`, can never produce `''`, because
+GitHub's `&&`/`||` return operands and `''` is falsy. That bug shipped once and
+failed every dispatch with `Invalid runner-type='auto'`.
 
-### What is deliberately *not* on these forms
+### What is deliberately not on these forms
 
-- **`android-export` on `build-all.yml`.** An output format for one platform
-  does not belong on a multi-platform form. Build All takes the format from the
-  environment (release → AAB, otherwise APK). Use `build-android.yml` to
-  override.
-- **A platform picker on `build-all.yml`.** The platform set is the
-  environment's `*_BUILD_PLATFORMS` variable, so a dropdown could only drift
-  from it. Build one platform with its own workflow.
+A knob the engine ignores is a lie in the form.
+
+- **`android-export` on Build / Development.** Development always ships an APK;
+  offering the choice would invite an AAB labelled `development-`.
 - **WebGL compression.** `compress_webgl.sh` runs in `unity-build-webgl.yml`,
-  the deployment lane used by `pipeline-webgl-release.yml` — *not* in the
-  `reusable-build-platform.yml` lane these entry points drive. A knob the
-  engine does not read would be a lie in the form. On this lane compression is
-  whatever the Unity project's WebGL settings emit, and stage 04 validates that
-  it is at least *consistent*.
+  the deployment lane, not the lane these entry points drive. Stage 04 still
+  validates that whatever Unity emitted is *consistent*.
 - **iOS signing/export.** Certificates live in the release pipeline. Stage 03
-  for iOS emits the Unity-exported Xcode project; the IPA is produced,
-  signed and validated by `pipeline-ios-release.yml`.
-- **`runner-mode`.** Superseded by `runner-type` + `build-engine`. The engine
-  still accepts it for backward compatibility; new forms do not offer it.
+  emits the Xcode project; the IPA comes from `pipeline-ios-release.yml`.
+- **A platform picker on Release / \*.** The platform *is* the workflow.
 
-### Adding a new entry workflow
+### Windows and Linux
 
-Copy the nearest `templates/consumer-build-*.yml`, change `platform:`, the job
-`name:`, and the concurrency group, then add the platform's own inputs under
-their own group. Add the key to `ENTRY_POINTS` in
-`tests/test_entry_workflows.py` and the shared contract is enforced for it.
+Both are first-class Unity build targets (`StandaloneWindows64`,
+`StandaloneLinux64`, and `+Server` for the dedicated-server subtarget) and
+appear in both build matrices.
+
+Neither has a release workflow. They produce standalone artifacts and this
+project has no distribution target for them; inventing one would be fiction.
+When a real target appears — Steam, itch, direct download — it becomes
+`23-release-windows.yml` alongside the others, with no change to the build
+layer.
 
 ---
 
@@ -434,18 +473,23 @@ job. There is no YAML to copy.
    #    selected?      platform  artifact  node suffix  validator (empty = no stage 04)
    ```
 
-4. **Stage 04** — if the platform has a validator, add its script and one
+4. **Artifact name** — if the platform's artifact type distinguishes two real
+   outputs (as Android's APK/AAB does), add it to the `Android|iOS` arm of
+   `add()`; otherwise the default `<build-type>-<slug>` is right. Add a slug to
+   `slug_of` only if the Unity target id is not what a person would call the
+   platform.
+5. **Stage 04** — if the platform has a validator, add its script and one
    `case` branch in the validate job's dispatch. Leave the validator field
    empty to skip stage 04 entirely; the platform then contributes no node
    rather than a permanently skipped one.
-5. **Stages 07/08** — nothing. The report and the Discord message are built
+6. **Stages 07/08** — nothing. The report and the Discord message are built
    from the matrix legs' own result artifacts, so a new platform appears
    automatically.
-6. **Tests** — add the platform to `PLATFORM_BUILD_PLATFORMS` in
+7. **Tests** — add the platform to `PLATFORM_BUILD_PLATFORMS` in
    `tests/test_platform_selection.py`. The selection, isolation and gating
    tests then cover it.
-7. **Entry workflow** — optional; only if the platform deserves its own
-   Run-workflow form (§1a).
+8. **Release workflow** — only if the platform has a real distribution
+   target. A standalone artifact with nowhere to go does not need one.
 
 ## 10. Adding a build configuration
 
