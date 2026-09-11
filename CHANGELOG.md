@@ -12,6 +12,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **Stages 03 and 04 are matrix jobs**, replacing six per-platform build jobs
+  and three per-platform validation jobs with two jobs driven by a matrix that
+  stage 01 computes. The graph now contains exactly the platforms that were
+  selected: an Android-only run draws one build node and one validation node,
+  where before it drew Android plus five greyed-out platforms and two
+  greyed-out validations. Adding a platform is one `add` line in the resolver
+  instead of a 45-line job, and `unity-pipeline.yml` loses 284 lines.
+- Per-leg result artifacts (`pipeline-result-build-<Platform>`,
+  `pipeline-result-validate-<Platform>`). A matrix job's legs are not
+  addressable through `needs`, so each leg publishes its own result and stage
+  07 aggregates them. The Final Report is now generated from that data — it
+  covers whichever platforms actually ran and carries real per-platform
+  artifact type, size and duration rather than a hardcoded table.
 - **Per-platform entry workflows** — `templates/consumer-build-{android,ios,webgl,all}.yml`.
   `workflow_dispatch` has no conditional input visibility, so the single
   multi-platform form had grown to fourteen fields and showed Android's
@@ -92,6 +105,14 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **The artifact manifest was never written on the docker lane.** `build/` is
+  created by the Unity container under a different UID, so the runner could not
+  write into it — `PermissionError: [Errno 13] Permission denied:
+  'build/artifact-manifest.json'`. The step is `continue-on-error`, so every
+  Android build silently shipped without a manifest. It is now written to
+  `$RUNNER_TEMP`, uploaded as `build-manifest-<Platform>`, and copied into the
+  build output only as a best effort. Stage 04 downloads it alongside the
+  binary so the validators keep their identity fallback.
 - **`pipeline-android-release.yml` was an invalid workflow file.** It referenced
   `inputs.artifact-name`, which was declared as a workflow *output*, never as an
   input. GitHub rejects such a file when the call is resolved, producing a run

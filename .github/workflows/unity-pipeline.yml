@@ -217,16 +217,14 @@ jobs:
       store-link:         ${{ steps.meta.outputs.store-link-android }}
       android-export-type: ${{ steps.flow.outputs.android-export-type }}
       define-symbols-count: ${{ steps.meta.outputs.define-symbols-count }}
-      # ── Node display labels (stage 03 node names) ──────────────────────────
-      configuration:          ${{ steps.labels.outputs.configuration }}
-      android-artifact-type:  ${{ steps.labels.outputs.android-artifact-type }}
-      label-android:          ${{ steps.labels.outputs.label-android }}
-      label-ios:              ${{ steps.labels.outputs.label-ios }}
-      label-webgl:            ${{ steps.labels.outputs.label-webgl }}
-      label-linux64:          ${{ steps.labels.outputs.label-linux64 }}
-      label-linuxserver:      ${{ steps.labels.outputs.label-linuxserver }}
-      label-windows64:        ${{ steps.labels.outputs.label-windows64 }}
-      label-addressables:     ${{ steps.labels.outputs.label-addressables }}
+      # ── Build matrix + node display labels (stages 03/04) ──────────────────
+      configuration:          ${{ steps.matrix.outputs.configuration }}
+      android-artifact-type:  ${{ steps.matrix.outputs.android-artifact-type }}
+      label-addressables:     ${{ steps.matrix.outputs.label-addressables }}
+      build-matrix:           ${{ steps.matrix.outputs.build-matrix }}
+      validate-matrix:        ${{ steps.matrix.outputs.validate-matrix }}
+      has-builds:             ${{ steps.matrix.outputs.has-builds }}
+      has-validations:        ${{ steps.matrix.outputs.has-validations }}
     steps:
       - name: Checkout (shallow — only needs ProjectVersion.txt)
         uses: actions/checkout@v4
@@ -367,19 +365,30 @@ jobs:
           echo "Flow resolver: event=${EVENT_NAME} ref=${REF_NAME} base=${BASE_REF:-<none>}"
           bash .toolkit/scripts/common/resolve_build_flow.sh
 
-      # ── Node display labels ────────────────────────────────────────────────
-      # Stage 03 node names must read "03 / Android / Production / AAB" in the
-      # Actions graph. GitHub expressions have no upper()/title(), so the
-      # human-facing casing is resolved once here and passed down, rather than
-      # each build job re-deriving it.
-      - name: Resolve node display labels
-        id: labels
+      # ── Build matrix ───────────────────────────────────────────────────────
+      # The platform set is DATA, not nine hardcoded jobs. Nine `if:`-gated jobs
+      # meant GitHub drew a skipped node for every platform you did not ask for,
+      # so an Android-only run still rendered WebGL, iOS, Linux64, LinuxServer,
+      # Windows64 and two artifact validations greyed out. A matrix renders
+      # exactly the platforms that were selected — and adding a platform becomes
+      # a row here instead of a new 45-line job.
+      #
+      # Casing lives here too: GitHub expressions have no upper()/title(), so
+      # resolving "Production" and "AAB" once beats seven copies of `tr`.
+      - name: Resolve build matrix
+        id: matrix
         shell: bash
         env:
           ENVIRONMENT:  ${{ steps.flow.outputs.environment }}
           ANDROID_TYPE: ${{ steps.flow.outputs.android-export-type }}
+          SEL_ANDROID:     ${{ steps.flow.outputs.build-android }}
+          SEL_WEBGL:       ${{ steps.flow.outputs.build-webgl }}
+          SEL_LINUX64:     ${{ steps.flow.outputs.build-linux64 }}
+          SEL_LINUXSERVER: ${{ steps.flow.outputs.build-linuxserver }}
+          SEL_WINDOWS64:   ${{ steps.flow.outputs.build-windows64 }}
+          SEL_IOS:         ${{ steps.flow.outputs.build-ios }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
           case "${ENVIRONMENT}" in
             development) CONFIG="Development" ;;
@@ -388,26 +397,49 @@ jobs:
             "")          CONFIG="Production" ;;
             *)           CONFIG="$(printf '%s' "${ENVIRONMENT:0:1}" | tr '[:lower:]' '[:upper:]')${ENVIRONMENT:1}" ;;
           esac
-
           ANDROID_ARTIFACT=$(printf '%s' "${ANDROID_TYPE:-apk}" | tr '[:lower:]' '[:upper:]')
 
+          BUILD_ROWS=""
+          VALIDATE_ROWS=""
+
+          # add <selected> <platform> <artifact-type> <node-suffix> <validator>
+          # node-suffix is appended after "03 / <platform>" in the graph, so it
+          # only carries what the platform name does not already say.
+          # validator is empty for platforms with no stage-04 checker.
+          add() {
+            [ "$1" = "true" ] || return 0
+            local platform="$2" artifact="$3" suffix="$4" validator="$5"
+            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"artifact-type\":\"${artifact}\",\"node\":\"${suffix}\"},"
+            if [ -n "${validator}" ]; then
+              VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"${platform}\",\"artifact-type\":\"${artifact}\",\"validator\":\"${validator}\",\"node\":\"${suffix}\"},"
+            fi
+          }
+
+          add "${SEL_ANDROID}"     Android     "${ANDROID_ARTIFACT}" "${CONFIG} / ${ANDROID_ARTIFACT}" android
+          add "${SEL_IOS}"         iOS         XCODEPROJ             "${CONFIG} / Xcode Project"      ios
+          add "${SEL_WEBGL}"       WebGL       WEBGL                 "${CONFIG}"                      webgl
+          add "${SEL_LINUX64}"     Linux64     LINUX                 "${CONFIG}"                      ""
+          add "${SEL_LINUXSERVER}" LinuxServer LINUX                 "${CONFIG}"                      ""
+          add "${SEL_WINDOWS64}"   Windows64   EXE                   "${CONFIG}"                      ""
+
+          BUILD_MATRIX="[${BUILD_ROWS%,}]"
+          VALIDATE_MATRIX="[${VALIDATE_ROWS%,}]"
+
+          # A matrix with no vectors is a workflow error, so the jobs are also
+          # gated on these being non-empty.
           {
             echo "configuration=${CONFIG}"
             echo "android-artifact-type=${ANDROID_ARTIFACT}"
-            # The caller job already names the platform ("03 / Android"), and
-            # GitHub joins the two halves. Only append an artifact type when it
-            # says something the platform name does not — otherwise the node
-            # reads "03 / WebGL / Production / WebGL".
-            echo "label-android=${CONFIG} / ${ANDROID_ARTIFACT}"
-            echo "label-ios=${CONFIG} / Xcode Project"
-            echo "label-webgl=${CONFIG}"
-            echo "label-linux64=${CONFIG}"
-            echo "label-linuxserver=${CONFIG}"
-            echo "label-windows64=${CONFIG}"
             echo "label-addressables=${CONFIG}"
+            echo "build-matrix=${BUILD_MATRIX}"
+            echo "validate-matrix=${VALIDATE_MATRIX}"
+            echo "has-builds=$([ "${BUILD_MATRIX}" = "[]" ] && echo false || echo true)"
+            echo "has-validations=$([ "${VALIDATE_MATRIX}" = "[]" ] && echo false || echo true)"
           } >> "$GITHUB_OUTPUT"
 
-          echo "[labels] configuration=${CONFIG} android-artifact=${ANDROID_ARTIFACT}"
+          echo "[matrix] configuration=${CONFIG}"
+          echo "[matrix] build=${BUILD_MATRIX}"
+          echo "[matrix] validate=${VALIDATE_MATRIX}"
 
       - name: Write config summary
         if: always()
@@ -780,22 +812,36 @@ jobs:
       SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
-  # JOB 5: build-android
+  # STAGE 03 — BUILD ARTIFACTS  (one matrix job, not one job per platform)
   # ════════════════════════════════════════════════════════════════════════════
-  build-android:
-    name: 03 / Android
+  # This was six near-identical jobs, each gated by `if:`. GitHub renders an
+  # `if:`-false job as a SKIPPED NODE, so an Android-only run drew WebGL, iOS,
+  # Linux64, LinuxServer and Windows64 greyed out next to it — the graph
+  # advertised five platforms nobody had asked for, and adding a sixth meant
+  # copying a 45-line block.
+  #
+  # The matrix comes from stage 01, so the graph contains exactly the platforms
+  # that were selected. `fail-fast: false` keeps the platforms independent: a
+  # failed iOS leg must not cancel a running Android leg.
+  # ════════════════════════════════════════════════════════════════════════════
+  build:
+    name: 03 / ${{ matrix.platform }}
     needs: [resolve-config, quality-gate, build-addressables]
     if: >-
       !cancelled() &&
       needs.quality-gate.outputs.passed == 'true' &&
       (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
-      needs.resolve-config.outputs.build-android == 'true'
+      needs.resolve-config.outputs.has-builds == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve-config.outputs.build-matrix) }}
     uses: ./.github/workflows/reusable-build-platform.yml
     with:
-      platform:            Android
-      node-label:          ${{ needs.resolve-config.outputs.label-android }}
+      platform:            ${{ matrix.platform }}
+      node-label:          ${{ matrix.node }}
+      artifact-type:       ${{ matrix.artifact-type }}
       configuration:       ${{ needs.resolve-config.outputs.configuration }}
-      artifact-type:       ${{ needs.resolve-config.outputs.android-artifact-type }}
       app-version:         ${{ needs.resolve-config.outputs.app-version }}
       toolkit-repo:        ${{ inputs.toolkit-repo }}
       unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
@@ -829,281 +875,37 @@ jobs:
       SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
-  # JOB 6: build-webgl
-  # ════════════════════════════════════════════════════════════════════════════
-  build-webgl:
-    name: 03 / WebGL
-    needs: [resolve-config, quality-gate, build-addressables]
-    if: >-
-      !cancelled() &&
-      needs.quality-gate.outputs.passed == 'true' &&
-      (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
-      needs.resolve-config.outputs.build-webgl == 'true'
-    uses: ./.github/workflows/reusable-build-platform.yml
-    with:
-      platform:            WebGL
-      node-label:          ${{ needs.resolve-config.outputs.label-webgl }}
-      configuration:       ${{ needs.resolve-config.outputs.configuration }}
-      artifact-type:       WEBGL
-      app-version:         ${{ needs.resolve-config.outputs.app-version }}
-      toolkit-repo:        ${{ inputs.toolkit-repo }}
-      unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
-      project-path:        ${{ needs.resolve-config.outputs.project-path }}
-      environment:         ${{ needs.resolve-config.outputs.environment }}
-      runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels }}
-      build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
-      activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
-      clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
-      build-addressables:  false
-      toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
-      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
-      define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
-      build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
-      cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
-      cache-gradle:            ${{ fromJSON(needs.resolve-config.outputs.cache-gradle) }}
-      cache-addressables:      ${{ fromJSON(needs.resolve-config.outputs.cache-addressables) }}
-      cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
-      artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
-      artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
-      build-method:            ${{ needs.resolve-config.outputs.build-method }}
-      runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
-      runner-macos-label:      ${{ needs.resolve-config.outputs.runner-macos-label }}
-      runner-linux-label:      ${{ needs.resolve-config.outputs.runner-linux-label }}
-    secrets:
-      UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
-      UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
-      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # JOB 7: build-linux64
-  # ════════════════════════════════════════════════════════════════════════════
-  build-linux64:
-    name: 03 / Linux64
-    needs: [resolve-config, quality-gate, build-addressables]
-    if: >-
-      !cancelled() &&
-      needs.quality-gate.outputs.passed == 'true' &&
-      (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
-      needs.resolve-config.outputs.build-linux64 == 'true'
-    uses: ./.github/workflows/reusable-build-platform.yml
-    with:
-      platform:            Linux64
-      node-label:          ${{ needs.resolve-config.outputs.label-linux64 }}
-      configuration:       ${{ needs.resolve-config.outputs.configuration }}
-      artifact-type:       LINUX
-      app-version:         ${{ needs.resolve-config.outputs.app-version }}
-      toolkit-repo:        ${{ inputs.toolkit-repo }}
-      unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
-      project-path:        ${{ needs.resolve-config.outputs.project-path }}
-      environment:         ${{ needs.resolve-config.outputs.environment }}
-      runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels }}
-      build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
-      activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
-      clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
-      build-addressables:  false
-      toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
-      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
-      define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
-      build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
-      cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
-      cache-gradle:            ${{ fromJSON(needs.resolve-config.outputs.cache-gradle) }}
-      cache-addressables:      ${{ fromJSON(needs.resolve-config.outputs.cache-addressables) }}
-      cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
-      artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
-      artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
-      build-method:            ${{ needs.resolve-config.outputs.build-method }}
-      runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
-      runner-macos-label:      ${{ needs.resolve-config.outputs.runner-macos-label }}
-      runner-linux-label:      ${{ needs.resolve-config.outputs.runner-linux-label }}
-    secrets:
-      UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
-      UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
-      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # JOB 8: build-linuxserver
-  # ════════════════════════════════════════════════════════════════════════════
-  build-linuxserver:
-    name: 03 / LinuxServer
-    needs: [resolve-config, quality-gate, build-addressables]
-    if: >-
-      !cancelled() &&
-      needs.quality-gate.outputs.passed == 'true' &&
-      (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
-      needs.resolve-config.outputs.build-linuxserver == 'true'
-    uses: ./.github/workflows/reusable-build-platform.yml
-    with:
-      platform:            LinuxServer
-      node-label:          ${{ needs.resolve-config.outputs.label-linuxserver }}
-      configuration:       ${{ needs.resolve-config.outputs.configuration }}
-      artifact-type:       LINUX
-      app-version:         ${{ needs.resolve-config.outputs.app-version }}
-      toolkit-repo:        ${{ inputs.toolkit-repo }}
-      unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
-      project-path:        ${{ needs.resolve-config.outputs.project-path }}
-      environment:         ${{ needs.resolve-config.outputs.environment }}
-      runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels }}
-      build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
-      activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
-      clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
-      build-addressables:  false
-      toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
-      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
-      define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
-      build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
-      cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
-      cache-gradle:            ${{ fromJSON(needs.resolve-config.outputs.cache-gradle) }}
-      cache-addressables:      ${{ fromJSON(needs.resolve-config.outputs.cache-addressables) }}
-      cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
-      artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
-      artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
-      build-method:            ${{ needs.resolve-config.outputs.build-method }}
-      runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
-      runner-macos-label:      ${{ needs.resolve-config.outputs.runner-macos-label }}
-      runner-linux-label:      ${{ needs.resolve-config.outputs.runner-linux-label }}
-    secrets:
-      UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
-      UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
-      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # JOB 9: build-windows64
-  #
-  # NOTE: The docker lane builds StandaloneWindows64 with the MONO scripting
-  # backend. Windows IL2CPP cannot cross-compile on Linux — use
-  # runner-mode=self-hosted-windows for IL2CPP Windows builds.
-  # ════════════════════════════════════════════════════════════════════════════
-  build-windows64:
-    name: 03 / Windows64
-    needs: [resolve-config, quality-gate, build-addressables]
-    if: >-
-      !cancelled() &&
-      needs.quality-gate.outputs.passed == 'true' &&
-      (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
-      needs.resolve-config.outputs.build-windows64 == 'true'
-    uses: ./.github/workflows/reusable-build-platform.yml
-    with:
-      platform:            Windows64
-      node-label:          ${{ needs.resolve-config.outputs.label-windows64 }}
-      configuration:       ${{ needs.resolve-config.outputs.configuration }}
-      artifact-type:       EXE
-      app-version:         ${{ needs.resolve-config.outputs.app-version }}
-      toolkit-repo:        ${{ inputs.toolkit-repo }}
-      unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
-      project-path:        ${{ needs.resolve-config.outputs.project-path }}
-      environment:         ${{ needs.resolve-config.outputs.environment }}
-      runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels }}
-      build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
-      activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
-      clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
-      build-addressables:  false
-      toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
-      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
-      define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
-      build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
-      cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
-      cache-gradle:            ${{ fromJSON(needs.resolve-config.outputs.cache-gradle) }}
-      cache-addressables:      ${{ fromJSON(needs.resolve-config.outputs.cache-addressables) }}
-      cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
-      artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
-      artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
-      build-method:            ${{ needs.resolve-config.outputs.build-method }}
-      runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
-      runner-macos-label:      ${{ needs.resolve-config.outputs.runner-macos-label }}
-      runner-linux-label:      ${{ needs.resolve-config.outputs.runner-linux-label }}
-    secrets:
-      UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
-      UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
-      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # JOB 10: build-ios
-  #   Only triggered when flow resolver sets build-ios=true (manual dispatch only).
-  #   runner-mode HARDCODED to self-hosted-macos. Reusable exits 0 with
-  #   result=blocked if no macOS runner is registered.
-  # ════════════════════════════════════════════════════════════════════════════
-  build-ios:
-    name: 03 / iOS
-    needs: [resolve-config, quality-gate, build-addressables]
-    if: >-
-      !cancelled() &&
-      needs.quality-gate.outputs.passed == 'true' &&
-      (needs.build-addressables.result == 'success' || needs.build-addressables.result == 'skipped') &&
-      needs.resolve-config.outputs.build-ios == 'true'
-    uses: ./.github/workflows/reusable-build-platform.yml
-    with:
-      platform:            iOS
-      node-label:          ${{ needs.resolve-config.outputs.label-ios }}
-      configuration:       ${{ needs.resolve-config.outputs.configuration }}
-      # Stage 03 emits the Unity-exported Xcode project. Archiving, signing and
-      # the IPA belong to pipeline-ios-release.yml (stages 05/06).
-      artifact-type:       XCODEPROJ
-      app-version:         ${{ needs.resolve-config.outputs.app-version }}
-      toolkit-repo:        ${{ inputs.toolkit-repo }}
-      unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
-      project-path:        ${{ needs.resolve-config.outputs.project-path }}
-      environment:         ${{ needs.resolve-config.outputs.environment }}
-      runner-mode:         self-hosted-macos
-      # iOS is always local macOS — literal labels (iOS never uses github-hosted/docker).
-      runner-labels:       '["self-hosted","macOS"]'
-      build-engine:        local
-      activation-strategy: preactivated
-      clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
-      build-addressables:  false
-      toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
-      submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
-      define-symbols:      ${{ needs.resolve-config.outputs.define-symbols }}
-      build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
-      cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
-      cache-gradle:            ${{ fromJSON(needs.resolve-config.outputs.cache-gradle) }}
-      cache-addressables:      ${{ fromJSON(needs.resolve-config.outputs.cache-addressables) }}
-      cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
-      artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
-      artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
-      build-method:            ${{ needs.resolve-config.outputs.build-method }}
-      runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
-      runner-macos-label:      ${{ needs.resolve-config.outputs.runner-macos-label }}
-      runner-linux-label:      ${{ needs.resolve-config.outputs.runner-linux-label }}
-    secrets: inherit
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # STAGE 04 — ARTIFACT VALIDATION
+  # STAGE 04 — ARTIFACT VALIDATION  (one matrix job, not one job per platform)
   # ════════════════════════════════════════════════════════════════════════════
   # "The build exited 0" and "the artifact is shippable" are different claims.
   # Unity happily writes a 4 KB APK with no dex, a WebGL folder with a plain
   # loader next to a brotli wasm, or an Xcode export missing Libraries/ — all
   # exit 0, all fail hours later in a store upload or a blank browser canvas.
   #
-  # Each validation node depends on ONE build node, so a failed Android build
-  # never marks the WebGL artifact unvalidated, and re-running a single failed
-  # validation does not rebuild anything (it downloads the stored artifact).
+  # The matrix carries only platforms that HAVE a validator, so Linux and
+  # Windows contribute no node rather than a permanently skipped one.
   #
-  # These are plain jobs, not workflow_call: caller → unity-pipeline →
+  # `needs: [build]` is the whole build matrix, which means a failed iOS leg
+  # delays Android's validation until the matrix settles. That is a GitHub
+  # limitation — a matrix job cannot be depended on leg-by-leg. It costs
+  # ordering, never correctness: each leg downloads its own stored artifact and
+  # re-running one validation rebuilds nothing.
+  #
+  # A plain job, not a workflow_call: caller → unity-pipeline →
   # reusable-build-platform already spends 3 of GitHub's 4 nesting levels.
   # ════════════════════════════════════════════════════════════════════════════
-
-  # ── JOB 11: validate-artifact-android ──────────────────────────────────────
-  validate-artifact-android:
-    # Static: a `needs.*` expression in a job name is left uninterpolated when the
-    # job is skipped, so the graph showed the raw ${{ … }} text. The concrete
-    # artifact type is reported by the job itself and by stage 07.
-    name: 04 / Android / Validate Artifact
-    needs: [resolve-config, build-android]
+  validate-artifact:
+    name: 04 / ${{ matrix.platform }} / Validate
+    needs: [resolve-config, build]
     if: >-
       !cancelled() &&
-      needs.build-android.result == 'success' &&
-      needs.build-android.outputs.artifact-name != ''
+      needs.build.result == 'success' &&
+      needs.resolve-config.outputs.has-validations == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve-config.outputs.validate-matrix) }}
     runs-on: ubuntu-latest
-    outputs:
-      status: ${{ steps.validate.outcome }}
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@v4
@@ -1115,122 +917,99 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build-android.outputs.artifact-name }}
+          name: unity-build-${{ matrix.platform }}
+          path: build-artifact/
+
+      # The manifest is its own artifact because the build output directory is
+      # owned by the Unity container on the docker lane and is not writable by
+      # the runner. Landing it alongside the binary here is what lets the
+      # validators fall back to the shipped identity when no Android SDK is
+      # available to read the artifact directly.
+      - name: Download artifact manifest
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: build-manifest-${{ matrix.platform }}
           path: build-artifact/
 
       - name: Validate artifact
         id: validate
         shell: bash
+        env:
+          VALIDATOR:     ${{ matrix.validator }}
+          ARTIFACT_TYPE: ${{ matrix.artifact-type }}
+          ENVIRONMENT:   ${{ needs.resolve-config.outputs.environment }}
         run: |
           set -Eeuo pipefail
-          python3 .toolkit/scripts/android/validate_android_artifact.py \
-            --search-root   build-artifact \
-            --expected-type "${{ needs.build-android.outputs.artifact-type }}" \
-            --report        validation-android.json \
-            ${{ needs.resolve-config.outputs.environment == 'production' && '--require-signed' || '' }}
+          case "${VALIDATOR}" in
+            android)
+              ARGS=(--search-root build-artifact --expected-type "${ARTIFACT_TYPE}"
+                    --report validation-${VALIDATOR}.json)
+              # A production artifact that is not signed cannot ship, so the
+              # check is a gate there and a warning everywhere else.
+              [ "${ENVIRONMENT}" = "production" ] && ARGS+=(--require-signed)
+              python3 .toolkit/scripts/android/validate_android_artifact.py "${ARGS[@]}"
+              ;;
+            webgl)
+              python3 .toolkit/scripts/webgl/validate_webgl_artifact.py \
+                --search-root build-artifact --report validation-${VALIDATOR}.json
+              ;;
+            ios)
+              python3 .toolkit/scripts/ios/validate_xcode_project.py \
+                --search-root build-artifact --report validation-${VALIDATOR}.json
+              ;;
+            *)
+              echo "::error::No validator registered for '${VALIDATOR}'"
+              exit 1
+              ;;
+          esac
 
-      - name: Upload validation report
+      - name: Record platform result
+        if: always()
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          OUTCOME:  ${{ steps.validate.outcome }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p pipeline-results
+          printf '{"platform":"%s","stage":"04","result":"%s"}\n' \
+            "${PLATFORM}" "${OUTCOME}" > "pipeline-results/validate-${PLATFORM}.json"
+
+      # Matrix legs are not addressable from `needs`, so each leg writes its own
+      # result file and stage 07 aggregates them. This is what lets the report
+      # say "iOS failed at stage 04" instead of "the pipeline failed".
+      - name: Upload platform result
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: validation-report-Android
-          path: validation-android.json
-          if-no-files-found: ignore
+          name: pipeline-result-validate-${{ matrix.platform }}
+          path: pipeline-results/
           retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
 
-  # ── JOB 12: validate-artifact-webgl ────────────────────────────────────────
-  validate-artifact-webgl:
-    name: 04 / WebGL / Validate
-    needs: [resolve-config, build-webgl]
-    if: >-
-      !cancelled() &&
-      needs.build-webgl.result == 'success' &&
-      needs.build-webgl.outputs.artifact-name != ''
-    runs-on: ubuntu-latest
-    outputs:
-      status: ${{ steps.validate.outcome }}
-    steps:
-      - name: Checkout toolkit
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.toolkit-repo }}
-          ref: ${{ needs.resolve-config.outputs.toolkit-ref }}
-          path: .toolkit
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.build-webgl.outputs.artifact-name }}
-          path: build-artifact/
-
-      - name: Validate artifact
-        id: validate
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/webgl/validate_webgl_artifact.py \
-            --search-root build-artifact \
-            --report      validation-webgl.json
-
       - name: Upload validation report
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: validation-report-WebGL
-          path: validation-webgl.json
-          if-no-files-found: ignore
-          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
-
-  # ── JOB 13: validate-artifact-ios ──────────────────────────────────────────
-  # Stage 03 produced an Xcode project, so that is what is validated here. The
-  # IPA is validated by pipeline-ios-release.yml, which is where it is created.
-  validate-artifact-ios:
-    name: 04 / iOS / Validate Xcode Project
-    needs: [resolve-config, build-ios]
-    if: >-
-      !cancelled() &&
-      needs.build-ios.result == 'success' &&
-      needs.build-ios.outputs.artifact-name != ''
-    runs-on: ubuntu-latest
-    outputs:
-      status: ${{ steps.validate.outcome }}
-    steps:
-      - name: Checkout toolkit
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.toolkit-repo }}
-          ref: ${{ needs.resolve-config.outputs.toolkit-ref }}
-          path: .toolkit
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.build-ios.outputs.artifact-name }}
-          path: build-artifact/
-
-      - name: Validate artifact
-        id: validate
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/ios/validate_xcode_project.py \
-            --search-root build-artifact \
-            --report      validation-ios.json
-
-      - name: Upload validation report
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: validation-report-iOS
-          path: validation-ios.json
+          name: validation-report-${{ matrix.platform }}
+          path: validation-${{ matrix.validator }}.json
           if-no-files-found: ignore
           retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
 
   # ════════════════════════════════════════════════════════════════════════════
-  # JOB 14: final-report
+  # STAGE 07 — FINAL REPORT
+  # ════════════════════════════════════════════════════════════════════════════
+  # Stages 03 and 04 are matrix jobs, and GitHub does not expose a matrix leg's
+  # result through `needs` — `needs.build.result` is one aggregate for the whole
+  # matrix. Each leg therefore writes a small JSON result file and uploads it as
+  # `pipeline-result-*`; this job collects them.
+  #
+  # That indirection buys something the old fixed table could not do: the report
+  # covers whichever platforms actually ran, so adding a platform needs no change
+  # here, and it carries real per-platform artifact type, size and duration
+  # rather than a hardcoded artifact name.
   # ════════════════════════════════════════════════════════════════════════════
   final-report:
     name: 07 / Final Report
@@ -1241,264 +1020,212 @@ jobs:
       - unity-tests
       - quality-gate
       - build-addressables
-      - build-android
-      - build-webgl
-      - build-linux64
-      - build-linuxserver
-      - build-windows64
-      - build-ios
-      - validate-artifact-android
-      - validate-artifact-webgl
-      - validate-artifact-ios
+      - build
+      - validate-artifact
     if: always()
     runs-on: ubuntu-latest
     environment: ${{ needs.resolve-config.outputs.gh-environment }}
+    outputs:
+      overall: ${{ steps.report.outputs.overall }}
+      failed-stage: ${{ steps.report.outputs.failed-stage }}
+      platform-summary: ${{ steps.report.outputs.platform-summary }}
     steps:
+      - name: Collect platform results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pipeline-result-*
+          path: pipeline-results
+          merge-multiple: true
+
       - name: Write step summary
+        id: report
         shell: bash
         env:
-          # ── Run context ────────────────────────────────────────────────────
           RUN_ID:        ${{ github.run_id }}
+          RUN_URL:       ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT:        ${{ github.sha }}
           EVENT_NAME:    ${{ github.event_name }}
           REF_NAME:      ${{ github.ref_name }}
           BASE_REF:      ${{ github.base_ref }}
-          # ── Resolved config ────────────────────────────────────────────────
           UNITY_VERSION: ${{ needs.resolve-config.outputs.unity-version }}
           FLOW_TYPE:     ${{ needs.resolve-config.outputs.flow-type }}
           ENVIRONMENT:   ${{ needs.resolve-config.outputs.environment }}
-          RUNNER_MODE:   ${{ inputs.runner-mode || 'docker' }}
-          # ── Resolver platform flags (true/false) ───────────────────────────
-          SEL_ANDROID:     ${{ needs.resolve-config.outputs.build-android }}
-          SEL_WEBGL:       ${{ needs.resolve-config.outputs.build-webgl }}
-          SEL_LINUX64:     ${{ needs.resolve-config.outputs.build-linux64 }}
-          SEL_LINUXSERVER: ${{ needs.resolve-config.outputs.build-linuxserver }}
-          SEL_WINDOWS64:   ${{ needs.resolve-config.outputs.build-windows64 }}
-          SEL_IOS:         ${{ needs.resolve-config.outputs.build-ios }}
-          SEL_ADDR:        ${{ needs.resolve-config.outputs.build-addressables }}
-          SEL_TESTS:       ${{ needs.resolve-config.outputs.run-tests }}
-          TEST_MODE:       ${{ needs.resolve-config.outputs.test-mode }}
-          SIGNING:         ${{ needs.resolve-config.outputs.signing }}
-          PLATFORM_SOURCE: ${{ needs.resolve-config.outputs.platform-source }}
-          # ── Repository Variables (for report display) ─────────────────────
-          VAR_DEV_PLAT: ${{ vars.DEVELOP_BUILD_PLATFORMS || '' }}
-          VAR_STG_PLAT: ${{ vars.STAGING_BUILD_PLATFORMS || '' }}
-          VAR_REL_PLAT: ${{ vars.RELEASE_BUILD_PLATFORMS || '' }}
-          # ── Job results ────────────────────────────────────────────────────
+          CONFIGURATION: ${{ needs.resolve-config.outputs.configuration }}
+          APP_VERSION:   ${{ needs.resolve-config.outputs.app-version }}
+          BUILD_NUMBER:  ${{ github.run_number }}
+          SIGNING:       ${{ needs.resolve-config.outputs.signing }}
+          TEST_MODE:     ${{ needs.resolve-config.outputs.test-mode }}
+          BUILD_MATRIX:  ${{ needs.resolve-config.outputs.build-matrix }}
           R_VALIDATE:    ${{ needs.validate-project.result }}
           R_LICENSE:     ${{ needs.validate-license.result }}
           R_TESTS:       ${{ needs.unity-tests.result }}
           R_GATE:        ${{ needs.quality-gate.result }}
           GATE_BLOCKER:  ${{ needs.quality-gate.outputs.blocking-stage }}
           R_ADDR:        ${{ needs.build-addressables.result }}
-          R_ANDROID:     ${{ needs.build-android.result }}
-          R_WEBGL:       ${{ needs.build-webgl.result }}
-          R_LINUX64:     ${{ needs.build-linux64.result }}
-          R_LINUXSERVER: ${{ needs.build-linuxserver.result }}
-          R_WINDOWS64:   ${{ needs.build-windows64.result }}
-          R_IOS:         ${{ needs.build-ios.result }}
-          # ── Stage 04: artifact validation ──────────────────────────────────
-          V_ANDROID:     ${{ needs.validate-artifact-android.result }}
-          V_WEBGL:       ${{ needs.validate-artifact-webgl.result }}
-          V_IOS:         ${{ needs.validate-artifact-ios.result }}
-          # ── Stage 03: artifact identity ────────────────────────────────────
-          CONFIGURATION: ${{ needs.resolve-config.outputs.configuration }}
-          APP_VERSION:   ${{ needs.resolve-config.outputs.app-version }}
-          A_ANDROID_TYPE: ${{ needs.build-android.outputs.artifact-type }}
-          A_ANDROID_SIZE: ${{ needs.build-android.outputs.artifact-size-bytes }}
-          A_ANDROID_SECS: ${{ needs.build-android.outputs.build-duration-seconds }}
-          A_WEBGL_SIZE:   ${{ needs.build-webgl.outputs.artifact-size-bytes }}
-          A_WEBGL_SECS:   ${{ needs.build-webgl.outputs.build-duration-seconds }}
-          A_IOS_SIZE:     ${{ needs.build-ios.outputs.artifact-size-bytes }}
-          A_IOS_SECS:     ${{ needs.build-ios.outputs.build-duration-seconds }}
-          A_LINUX64_SECS: ${{ needs.build-linux64.outputs.build-duration-seconds }}
-          A_LINUXSERVER_SECS: ${{ needs.build-linuxserver.outputs.build-duration-seconds }}
-          A_WINDOWS64_SECS:   ${{ needs.build-windows64.outputs.build-duration-seconds }}
+          R_BUILD:       ${{ needs.build.result }}
+          R_VALIDATION:  ${{ needs.validate-artifact.result }}
         run: |
-          emoji() {
-            case "$1" in
-              success)   echo "✅" ;;
-              failure)   echo "❌" ;;
-              skipped)   echo "⏭️" ;;
-              cancelled) echo "🚫" ;;
-              blocked)   echo "⛔" ;;
-              *)         echo "❓" ;;
-            esac
-          }
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, sys
 
-          # Artifact sizes and durations come from stage-03 job outputs, which are
-          # empty for a platform that never ran. Render an em dash rather than
-          # "0 MB", which reads as a real measurement of an empty build.
-          mib() {
-            case "${1:-}" in
-              ''|0) echo "—" ;;
-              *) awk -v b="$1" 'BEGIN { printf "%.1f MB", b/1048576 }' ;;
-            esac
-          }
-          dur() {
-            case "${1:-}" in
-              ''|0) echo "—" ;;
-              *) echo "$(( $1 / 60 ))m $(( $1 % 60 ))s" ;;
-            esac
-          }
+          env = os.environ
+          results_dir = pathlib.Path("pipeline-results")
 
-          SELECTED="" SKIPPED="" BLOCKERS=""
-          for plat in Android WebGL Linux64 LinuxServer Windows64; do
-            case "$plat" in
-              Android)     flag="${SEL_ANDROID}" ;;
-              WebGL)       flag="${SEL_WEBGL}" ;;
-              Linux64)     flag="${SEL_LINUX64}" ;;
-              LinuxServer) flag="${SEL_LINUXSERVER}" ;;
-              Windows64)   flag="${SEL_WINDOWS64}" ;;
-            esac
-            if [ "${flag}" = "true" ]; then
-              SELECTED="${SELECTED:+$SELECTED, }${plat}"
-            else
-              SKIPPED="${SKIPPED:+$SKIPPED, }${plat}"
-            fi
-          done
-          if [ "${SEL_IOS}" = "true" ]; then
-            SELECTED="${SELECTED:+$SELECTED, }iOS"
-            BLOCKERS="iOS requires self-hosted macOS runner (result: ${R_IOS})"
-          else
-            SKIPPED="${SKIPPED:+$SKIPPED, }iOS (auto-excluded)"
-          fi
-          [ -z "${SELECTED}" ] && SELECTED="(none)"
-          [ -z "${SKIPPED}"  ] && SKIPPED="(none)"
-          [ -z "${BLOCKERS}" ] && BLOCKERS="(none)"
+          # ── Collect what the matrix legs reported ────────────────────────
+          builds, validations = {}, {}
+          for path in sorted(results_dir.rglob("*.json")) if results_dir.is_dir() else []:
+              try:
+                  row = json.loads(path.read_text())
+              except (OSError, json.JSONDecodeError):
+                  continue
+              target = builds if row.get("stage") == "03" else validations
+              target[row.get("platform", "?")] = row
 
-          TARGET_BRANCH="${BASE_REF:--}"
+          # Platforms the pipeline INTENDED to build. A platform present here but
+          # absent from `builds` never reported — that is a real failure mode
+          # (a cancelled leg), not an empty row to hide.
+          try:
+              planned = [r["platform"] for r in json.loads(env.get("BUILD_MATRIX") or "[]")]
+          except json.JSONDecodeError:
+              planned = []
+          for platform in planned:
+              builds.setdefault(platform, {"platform": platform, "stage": "03",
+                                           "result": "", "artifactType": "",
+                                           "artifactSizeBytes": "0", "durationSeconds": "0"})
 
-          {
-            echo "## Unity Build — Final Report"
-            echo ""
-            echo "### Run Info"
-            echo "| Field | Value |"
-            echo "|---|---|"
-            echo "| Run ID | \`${RUN_ID}\` |"
-            echo "| Commit | \`${COMMIT:0:8}\` |"
-            echo "| Event | \`${EVENT_NAME}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Target branch | \`${TARGET_BRANCH}\` |"
-            echo "| Flow type | \`${FLOW_TYPE:-unknown}\` |"
-            echo "| Unity version | \`${UNITY_VERSION:-unknown}\` |"
-            echo "| Environment | \`${ENVIRONMENT:-unknown}\` |"
-            echo "| Runner mode | \`${RUNNER_MODE}\` |"
-            echo "| Signing | \`${SIGNING:-none}\` |"
-            echo "| Platform source | \`${PLATFORM_SOURCE:-default}\` |"
-            echo ""
-            echo "### Platform Selection"
-            echo "| | Platforms |"
-            echo "|---|---|"
-            echo "| Selected | ${SELECTED} |"
-            echo "| Skipped  | ${SKIPPED} |"
-            echo "| Blockers | ${BLOCKERS} |"
-            echo ""
-            if [ "${PLATFORM_SOURCE}" = "variable" ]; then
-              echo "### Repository Variables"
-              echo "| Variable | Value |"
-              echo "|---|---|"
-              [ -n "${VAR_DEV_PLAT}" ] && echo "| \`DEVELOP_BUILD_PLATFORMS\` | \`${VAR_DEV_PLAT}\` |"
-              [ -n "${VAR_STG_PLAT}" ] && echo "| \`STAGING_BUILD_PLATFORMS\` | \`${VAR_STG_PLAT}\` |"
-              [ -n "${VAR_REL_PLAT}" ] && echo "| \`RELEASE_BUILD_PLATFORMS\` | \`${VAR_REL_PLAT}\` |"
-              echo ""
-            fi
-            echo ""
-            echo "### Stage Results"
-            echo ""
-            echo "**01 — PREPARE**"
-            echo "| Node | Result |"
-            echo "|---|---|"
-            echo "| 01 / Validate Unity Project | $(emoji "${R_VALIDATE}") \`${R_VALIDATE}\` |"
-            echo "| 01 / Validate Unity License | $(emoji "${R_LICENSE}") \`${R_LICENSE}\` |"
-            echo ""
-            echo "**02 — QUALITY GATE** (test-mode: \`${TEST_MODE:-N/A}\`)"
-            echo "| Node | Result | Artifact |"
-            echo "|---|---|---|"
-            echo "| 02 / Unity Tests | $(emoji "${R_TESTS}") \`${R_TESTS}\` | \`unity-tests-${TEST_MODE:-All}\` |"
-            echo "| 02 / Quality Gate | $(emoji "${R_GATE}") \`${R_GATE}\` | — |"
-            if [ -n "${GATE_BLOCKER}" ]; then
-              echo ""
-              echo "> ⛔ Quality gate closed at **${GATE_BLOCKER}** — no stage 03 build was started."
-            fi
-            echo ""
-            echo "**03 — BUILD ARTIFACTS** (configuration: \`${CONFIGURATION:-unknown}\`, version: \`${APP_VERSION:-unknown}\`)"
-            echo "| Node | Result | Type | Size | Duration | Artifact |"
-            echo "|---|---|---|---|---|---|"
-            echo "| 03 / Addressables | $(emoji "${R_ADDR}") \`${R_ADDR}\` | ADDRESSABLES | — | — | \`unity-build-Addressables\` |"
-            echo "| 03 / Android / ${CONFIGURATION} / ${A_ANDROID_TYPE:-?} | $(emoji "${R_ANDROID}") \`${R_ANDROID}\` | \`${A_ANDROID_TYPE:-—}\` | $(mib "${A_ANDROID_SIZE}") | $(dur "${A_ANDROID_SECS}") | \`unity-build-Android\` |"
-            echo "| 03 / WebGL / ${CONFIGURATION} | $(emoji "${R_WEBGL}") \`${R_WEBGL}\` | \`WEBGL\` | $(mib "${A_WEBGL_SIZE}") | $(dur "${A_WEBGL_SECS}") | \`unity-build-WebGL\` |"
-            echo "| 03 / iOS / ${CONFIGURATION} | $(emoji "${R_IOS}") \`${R_IOS}\` | \`XCODEPROJ\` | $(mib "${A_IOS_SIZE}") | $(dur "${A_IOS_SECS}") | \`unity-build-iOS\` |"
-            echo "| 03 / Linux64 / ${CONFIGURATION} | $(emoji "${R_LINUX64}") \`${R_LINUX64}\` | \`LINUX\` | — | $(dur "${A_LINUX64_SECS}") | \`unity-build-Linux64\` |"
-            echo "| 03 / LinuxServer / ${CONFIGURATION} | $(emoji "${R_LINUXSERVER}") \`${R_LINUXSERVER}\` | \`LINUX\` | — | $(dur "${A_LINUXSERVER_SECS}") | \`unity-build-LinuxServer\` |"
-            echo "| 03 / Windows64 / ${CONFIGURATION} | $(emoji "${R_WINDOWS64}") \`${R_WINDOWS64}\` | \`EXE\` | — | $(dur "${A_WINDOWS64_SECS}") | \`unity-build-Windows64\` |"
-            echo ""
-            echo "**04 — ARTIFACT VALIDATION**"
-            echo "| Node | Result | Report |"
-            echo "|---|---|---|"
-            echo "| 04 / Android / Validate ${A_ANDROID_TYPE:-artifact} | $(emoji "${V_ANDROID}") \`${V_ANDROID}\` | \`validation-report-Android\` |"
-            echo "| 04 / WebGL / Validate | $(emoji "${V_WEBGL}") \`${V_WEBGL}\` | \`validation-report-WebGL\` |"
-            echo "| 04 / iOS / Validate Xcode Project | $(emoji "${V_IOS}") \`${V_IOS}\` | \`validation-report-iOS\` |"
-            echo ""
-            echo "> Log artifacts: \`unity-build-<Platform>-logs\`. Artifact manifests: \`build-manifest-<Platform>\`."
-            echo "> Publishing is a separate pipeline — see \`pipeline-android-release.yml\` / \`pipeline-ios-release.yml\` / \`pipeline-webgl-release.yml\`."
-          } >> "$GITHUB_STEP_SUMMARY"
+          EMOJI = {"success": "✅", "failure": "❌", "skipped": "⏭️",
+                   "cancelled": "🚫", "blocked": "⛔"}
+          def emoji(result):
+              return EMOJI.get(result, "❓")
 
-          # Gate on EVERY result the table above prints, and treat anything that is
-          # not a pass as a failure.
-          #
-          # Two defects this replaces, both of which let a red pipeline report green:
-          #
-          # 1. `[ "${result}" = "failure" ]` matched ONLY the literal string `failure`.
-          #    A `cancelled` job — the shape a timeout produces — sailed through. That
-          #    is not hypothetical: Cuvara/IndieRPGMMOAdventure collected three
-          #    cancelled Unity Build runs on `staging` in a week, one of them a
-          #    120-minute Addressables timeout that took every platform build down with
-          #    it, and this gate called each of them a pass.
-          #
-          # 2. R_TESTS, R_ADDR and R_IOS were printed in the summary table but were
-          #    absent from the loop. **Final Report went green when the tests failed.**
-          #    On `develop` that was masked, because Unity Tests is separately a
-          #    required check there. Nothing masks it on a branch where it is not.
-          #
-          # `skipped` stays a pass: platforms outside the environment's build list are
-          # legitimately skipped, and so is Addressables when the env disables it.
-          # Everything else — failure, cancelled, timed_out, or an empty/unknown value
-          # from a job that never reported — fails, and is NAMED, because "one or more
-          # build jobs failed" sent people to read seven job logs to find out which.
-          FAILED=0
-          FAILED_NAMES=""
-          check_result() { # name value
-            case "$2" in
-              success|skipped) return 0 ;;
-              *)
-                FAILED=1
-                FAILED_NAMES="${FAILED_NAMES} $1=${2:-<no result>}"
-                ;;
-            esac
-          }
-          # Named by STAGE / NODE so the error line alone says where the pipeline
-          # broke — "01 / Validate Unity Project" instead of "validate".
-          check_result "01/validate-project" "${R_VALIDATE}"
-          check_result "01/validate-license" "${R_LICENSE}"
-          check_result "02/unity-tests"      "${R_TESTS}"
-          check_result "02/quality-gate"     "${R_GATE}"
-          check_result "03/addressables"     "${R_ADDR}"
-          check_result "03/android"          "${R_ANDROID}"
-          check_result "03/webgl"            "${R_WEBGL}"
-          check_result "03/linux64"          "${R_LINUX64}"
-          check_result "03/linuxserver"      "${R_LINUXSERVER}"
-          check_result "03/windows64"        "${R_WINDOWS64}"
-          check_result "03/ios"              "${R_IOS}"
-          # Stage 04 is a real gate: an artifact that fails validation must not
-          # report the pipeline green, because stage 05 would publish it.
-          check_result "04/android-validate" "${V_ANDROID}"
-          check_result "04/webgl-validate"   "${V_WEBGL}"
-          check_result "04/ios-validate"     "${V_IOS}"
-          if [ "${FAILED}" -eq 1 ]; then
-            echo "::error::Pipeline failed at:${FAILED_NAMES}. See the matching job logs."
-            exit 1
-          fi
+          def mib(value):
+              try:
+                  n = int(value)
+              except (TypeError, ValueError):
+                  return "—"
+              return f"{n / 1048576:.1f} MB" if n else "—"
+
+          def dur(value):
+              try:
+                  n = int(value)
+              except (TypeError, ValueError):
+                  return "—"
+              return f"{n // 60}m {n % 60}s" if n else "—"
+
+          def passed(result):
+              return result in ("success", "skipped")
+
+          # ── Overall verdict + the stage that broke it ────────────────────
+          failed_stage = ""
+          ordered = [
+              ("01 PREPARE / Validate Unity Project", env.get("R_VALIDATE", "")),
+              ("01 PREPARE / Validate Unity License", env.get("R_LICENSE", "")),
+              ("02 QUALITY GATE / Unity Tests",       env.get("R_TESTS", "")),
+              ("02 QUALITY GATE",                     env.get("R_GATE", "")),
+              ("03 BUILD ARTIFACTS / Addressables",   env.get("R_ADDR", "")),
+          ]
+          for label, result in ordered:
+              if not passed(result) and not failed_stage:
+                  failed_stage = f"{label} ({result or 'no result'})"
+          if not failed_stage and env.get("GATE_BLOCKER"):
+              failed_stage = f"02 QUALITY GATE / {env['GATE_BLOCKER']}"
+          for platform, row in sorted(builds.items()):
+              if not passed(row.get("result", "")) and not failed_stage:
+                  failed_stage = f"03 BUILD ARTIFACTS / {platform} ({row.get('result') or 'no result'})"
+          for platform, row in sorted(validations.items()):
+              if not passed(row.get("result", "")) and not failed_stage:
+                  failed_stage = f"04 ARTIFACT VALIDATION / {platform} ({row.get('result') or 'no result'})"
+
+          overall = "failure" if failed_stage else "success"
+
+          # ── Step summary ─────────────────────────────────────────────────
+          out = []
+          w = out.append
+          w("## Unity Build — Final Report")
+          w("")
+          w(f"**{emoji(overall)} {overall.upper()}**"
+            + (f" — failed at **{failed_stage}**" if failed_stage else ""))
+          w("")
+          w("| Field | Value |")
+          w("|---|---|")
+          w(f"| Environment | `{env.get('ENVIRONMENT') or 'unknown'}` "
+            f"({env.get('CONFIGURATION') or '—'}) |")
+          w(f"| Version | `{env.get('APP_VERSION') or 'unknown'}` |")
+          w(f"| Build number | `{env.get('BUILD_NUMBER')}` |")
+          w(f"| Commit | `{(env.get('COMMIT') or '')[:8]}` |")
+          w(f"| Branch | `{env.get('REF_NAME')}` |")
+          w(f"| Flow | `{env.get('FLOW_TYPE') or 'unknown'}` |")
+          w(f"| Unity | `{env.get('UNITY_VERSION') or 'unknown'}` |")
+          w(f"| Signing | `{env.get('SIGNING') or 'none'}` |")
+          w(f"| Run | [{env.get('RUN_ID')}]({env.get('RUN_URL')}) |")
+          w("")
+          w("### 01–02 — Prepare & Quality Gate")
+          w("| Node | Result |")
+          w("|---|---|")
+          for label, key in (("01 / Validate Unity Project", "R_VALIDATE"),
+                             ("01 / Validate Unity License", "R_LICENSE"),
+                             (f"02 / Unity Tests ({env.get('TEST_MODE') or 'N/A'})", "R_TESTS"),
+                             ("02 / Quality Gate", "R_GATE")):
+              result = env.get(key, "")
+              w(f"| {label} | {emoji(result)} `{result or 'no result'}` |")
+          if env.get("GATE_BLOCKER"):
+              w("")
+              w(f"> ⛔ Gate closed at **{env['GATE_BLOCKER']}** — no platform build was started.")
+          w("")
+          w("### 03 — Build Artifacts")
+          if builds:
+              w("| Platform | Result | Type | Size | Duration | Artifact |")
+              w("|---|---|---|---|---|---|")
+              addr = env.get("R_ADDR", "")
+              w(f"| Addressables | {emoji(addr)} `{addr or 'no result'}` | — | — | — | "
+                "`unity-build-Addressables` |")
+              for platform, row in sorted(builds.items()):
+                  result = row.get("result", "")
+                  w(f"| {platform} | {emoji(result)} `{result or 'no result'}` | "
+                    f"`{row.get('artifactType') or '—'}` | {mib(row.get('artifactSizeBytes'))} | "
+                    f"{dur(row.get('durationSeconds'))} | `{row.get('artifactName') or '—'}` |")
+          else:
+              w("_No platform build ran._")
+          w("")
+          w("### 04 — Artifact Validation")
+          if validations:
+              w("| Platform | Result | Report |")
+              w("|---|---|---|")
+              for platform, row in sorted(validations.items()):
+                  result = row.get("result", "")
+                  w(f"| {platform} | {emoji(result)} `{result or 'no result'}` | "
+                    f"`validation-report-{platform}` |")
+          else:
+              w("_No artifact validation ran._")
+          w("")
+          w("> Logs: `unity-build-<Platform>-logs`. Manifests: `build-manifest-<Platform>`.")
+          w("> Publishing is a separate pipeline — see `pipeline-android-release.yml`, "
+            "`pipeline-ios-release.yml`, `pipeline-webgl-release.yml`.")
+
+          summary = "\n".join(out)
+          with open(env["GITHUB_STEP_SUMMARY"], "a") as fh:
+              fh.write(summary + "\n")
+
+          # ── Outputs for the Discord stage ────────────────────────────────
+          compact = [
+              {"platform": p,
+               "build": builds[p].get("result", ""),
+               "validation": validations.get(p, {}).get("result", ""),
+               "artifactType": builds[p].get("artifactType", ""),
+               "artifactSizeBytes": builds[p].get("artifactSizeBytes", "0")}
+              for p in sorted(builds)
+          ]
+          with open(env["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"overall={overall}\n")
+              fh.write(f"failed-stage={failed_stage}\n")
+              fh.write("platform-summary=" + json.dumps(compact) + "\n")
+
+          if failed_stage:
+              print(f"::error::Pipeline failed at {failed_stage}. See the matching job logs.")
+              sys.exit(1)
+          PY
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 12: notify-discord
@@ -1510,16 +1237,9 @@ jobs:
       - validate-project
       - unity-tests
       - build-addressables
-      - build-android
-      - build-webgl
-      - build-linux64
-      - build-linuxserver
-      - build-windows64
-      - build-ios
+      - build
       - quality-gate
-      - validate-artifact-android
-      - validate-artifact-webgl
-      - validate-artifact-ios
+      - validate-artifact
       - final-report
     if: always()
     runs-on: ubuntu-latest
@@ -1538,70 +1258,76 @@ jobs:
           R_VALIDATE:    ${{ needs.validate-project.result }}
           R_TESTS:       ${{ needs.unity-tests.result }}
           R_ADDR:        ${{ needs.build-addressables.result }}
-          R_ANDROID:     ${{ needs.build-android.result }}
-          R_WEBGL:       ${{ needs.build-webgl.result }}
-          R_LINUX64:     ${{ needs.build-linux64.result }}
-          R_LINUXSERVER: ${{ needs.build-linuxserver.result }}
-          R_WINDOWS64:   ${{ needs.build-windows64.result }}
-          R_IOS:         ${{ needs.build-ios.result }}
+          R_BUILD:       ${{ needs.build.result }}
+          PLATFORM_SUMMARY: ${{ needs.final-report.outputs.platform-summary }}
           R_GATE:        ${{ needs.quality-gate.result }}
           GATE_BLOCKER:  ${{ needs.quality-gate.outputs.blocking-stage }}
-          V_ANDROID:     ${{ needs.validate-artifact-android.result }}
-          V_WEBGL:       ${{ needs.validate-artifact-webgl.result }}
-          V_IOS:         ${{ needs.validate-artifact-ios.result }}
+          V_ALL:         ${{ needs.validate-artifact.result }}
+          REPORT_OVERALL: ${{ needs.final-report.outputs.overall }}
+          REPORT_FAILED_STAGE: ${{ needs.final-report.outputs.failed-stage }}
         run: |
-          # R_TESTS, R_ADDR and R_IOS were missing from this job's env AND from both
-          # loops below, so Discord announced a green pipeline when the tests had
-          # failed. Unlike the Final Report gate this job already handled `cancelled`
-          # correctly; the omitted results were its whole defect.
-          #
-          # Tests, validate and Addressables count toward `fail` but NOT toward `ok`:
-          # `ok` exists to detect a PARTIAL platform build (some targets up, some
-          # down), and a passing test run is not a platform that built.
-          set +e
-          overall=success
-          for r in "$R_VALIDATE" "$R_TESTS" "$R_ADDR" "$R_ANDROID" "$R_WEBGL" "$R_LINUX64" "$R_LINUXSERVER" "$R_WINDOWS64" "$R_IOS"; do
-            [ "$r" = "cancelled" ] && overall=cancelled
-          done
-          if [ "$overall" != "cancelled" ]; then
-            fail=0; ok=0
-            [ "$R_VALIDATE" = "failure" ] && fail=1
-            [ "$R_TESTS" = "failure" ] && fail=1
-            [ "$R_ADDR" = "failure" ] && fail=1
-            for r in "$R_ANDROID" "$R_WEBGL" "$R_LINUX64" "$R_LINUXSERVER" "$R_WINDOWS64" "$R_IOS"; do
-              [ "$r" = "failure" ] && fail=1
-              [ "$r" = "success" ] && ok=1
-            done
-            # Stage 04: a platform that built but failed artifact validation is
-            # a failure — publishing it is exactly what stage 04 exists to stop.
-            for r in "$V_ANDROID" "$V_WEBGL" "$V_IOS"; do
-              [ "$r" = "failure" ] && fail=1
-            done
-            if [ "$fail" = 1 ] && [ "$ok" = 1 ]; then overall=partial
-            elif [ "$fail" = 1 ]; then overall=failure
-            else overall=success; fi
-          fi
+          set -Eeuo pipefail
+          # Stage 07 already collected every matrix leg's result and decided the
+          # verdict; re-deriving it here from `needs` is impossible anyway,
+          # because a matrix job reports one aggregate result for all legs.
+          # This step only unpacks that summary into the per-platform inputs the
+          # Discord action takes.
+          python3 - <<'PY'
+          import json, os
 
-          # ── Name the stage that stopped the pipeline ─────────────────────
-          # First failure in stage order wins; the quality gate reports the
-          # node it closed on rather than just "quality gate".
-          FAILED_STAGE=""
-          note() { [ -z "${FAILED_STAGE}" ] && FAILED_STAGE="$1"; }
-          [ "$R_VALIDATE" = "failure" ] && note "01 PREPARE / Validate Unity Project"
-          [ "$R_TESTS" = "failure" ]    && note "02 QUALITY GATE / Unity Tests"
-          [ "$R_GATE" = "failure" ]     && note "02 QUALITY GATE${GATE_BLOCKER:+ / ${GATE_BLOCKER}}"
-          [ "$R_ADDR" = "failure" ]     && note "03 BUILD ARTIFACTS / Addressables"
-          for entry in "Android:$R_ANDROID" "WebGL:$R_WEBGL" "Linux64:$R_LINUX64" \
-                       "LinuxServer:$R_LINUXSERVER" "Windows64:$R_WINDOWS64" "iOS:$R_IOS"; do
-            [ "${entry##*:}" = "failure" ] && note "03 BUILD ARTIFACTS / ${entry%%:*}"
-          done
-          for entry in "Android:$V_ANDROID" "WebGL:$V_WEBGL" "iOS:$V_IOS"; do
-            [ "${entry##*:}" = "failure" ] && note "04 ARTIFACT VALIDATION / ${entry%%:*}"
-          done
+          env = os.environ
+          try:
+              summary = json.loads(env.get("PLATFORM_SUMMARY") or "[]")
+          except json.JSONDecodeError:
+              summary = []
 
-          echo "overall=$overall" >> "$GITHUB_OUTPUT"
-          echo "failed-stage=$FAILED_STAGE" >> "$GITHUB_OUTPUT"
-          echo "Overall Discord status: $overall${FAILED_STAGE:+ (failed at ${FAILED_STAGE})}"
+          by_platform = {row.get("platform", ""): row for row in summary}
+
+          # `ok` exists to detect a PARTIAL build — some platforms up, some down.
+          # A passing test run is not a platform that built, so tests/validate/
+          # Addressables count toward `fail` but never toward `ok`.
+          fail = ok = False
+          cancelled = env.get("R_BUILD") == "cancelled" or env.get("V_ALL") == "cancelled"
+          for key in ("R_VALIDATE", "R_TESTS", "R_ADDR"):
+              value = env.get(key, "")
+              if value == "cancelled":
+                  cancelled = True
+              elif value == "failure":
+                  fail = True
+
+          lines = []
+          for platform, row in by_platform.items():
+              build = row.get("build", "")
+              validation = row.get("validation", "")
+              if build == "cancelled" or validation == "cancelled":
+                  cancelled = True
+              if build == "failure" or validation == "failure":
+                  fail = True
+              if build == "success":
+                  ok = True
+              lines.append(f"result-{platform.lower()}={build or 'skipped'}")
+              if validation:
+                  lines.append(f"validation-{platform.lower()}={validation}")
+
+          if cancelled:
+              overall = "cancelled"
+          elif fail and ok:
+              overall = "partial"
+          elif fail:
+              overall = "failure"
+          else:
+              # Trust stage 07 when it saw something this step cannot.
+              overall = "failure" if env.get("REPORT_OVERALL") == "failure" else "success"
+
+          with open(env["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"overall={overall}\n")
+              for line in lines:
+                  fh.write(line + "\n")
+
+          print(f"Overall Discord status: {overall}")
+          if env.get("REPORT_FAILED_STAGE"):
+              print(f"Failed at: {env['REPORT_FAILED_STAGE']}")
+          PY
 
       # A local (./) composite action resolves from the runner workspace, which
       # for a reusable workflow is the CALLER's repo — not this toolkit. So we
@@ -1717,18 +1443,20 @@ jobs:
           commit-sha:          ${{ github.sha }}
           branch:              ${{ github.ref_name }}
           unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
-          result-android:      ${{ needs.build-android.result }}
-          result-webgl:        ${{ needs.build-webgl.result }}
-          result-linux64:      ${{ needs.build-linux64.result }}
-          result-linuxserver:  ${{ needs.build-linuxserver.result }}
-          result-windows64:    ${{ needs.build-windows64.result }}
-          result-ios:          ${{ needs.build-ios.result }}
+          # Per-platform results come from the matrix legs via stage 07, since a
+          # matrix job's legs are not addressable through `needs`.
+          result-android:      ${{ steps.status.outputs.result-android }}
+          result-webgl:        ${{ steps.status.outputs.result-webgl }}
+          result-linux64:      ${{ steps.status.outputs.result-linux64 }}
+          result-linuxserver:  ${{ steps.status.outputs.result-linuxserver }}
+          result-windows64:    ${{ steps.status.outputs.result-windows64 }}
+          result-ios:          ${{ steps.status.outputs.result-ios }}
           result-addressables: ${{ needs.build-addressables.result }}
           result-tests:        ${{ needs.unity-tests.result }}
-          result-validation-android: ${{ needs.validate-artifact-android.result }}
-          result-validation-webgl:   ${{ needs.validate-artifact-webgl.result }}
-          result-validation-ios:     ${{ needs.validate-artifact-ios.result }}
-          failed-stage:        ${{ steps.status.outputs.failed-stage }}
+          result-validation-android: ${{ steps.status.outputs.validation-android }}
+          result-validation-webgl:   ${{ steps.status.outputs.validation-webgl }}
+          result-validation-ios:     ${{ steps.status.outputs.validation-ios }}
+          failed-stage:        ${{ needs.final-report.outputs.failed-stage }}
           configuration:       ${{ needs.resolve-config.outputs.configuration }}
           thread-id:           ${{ vars.DISCORD_THREAD_ID }}
           artifact-dir:        ./artifacts
