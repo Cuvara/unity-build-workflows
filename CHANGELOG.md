@@ -12,6 +12,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **Stage 07 — Report & Notify in the release pipelines.** They ended at stage
+  06, so a release run produced no report at all: the only way to see how far
+  a promotion got was to read the graph. Each pipeline now ends with
+  `07 / <Platform> / Report & Notify`, which says which phase the release
+  reached — or which one stopped it — with a progress bar, the artifact that
+  was promoted, and the destination, and posts the same to Discord. One shared
+  composite action (`.github/actions/release-report`), three thin call sites;
+  a composite rather than a reusable workflow because those already spend 3 of
+  GitHub's 4 `workflow_call` levels.
 - **Progress visualisation in the Final Report.** GitHub renders no progress
   indicator on a workflow node, so the report draws the pipeline's shape
   instead — a stage strip (`01 Prepare ████████ 3/3 ok`) and a per-platform
@@ -140,6 +149,10 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **`pipeline-android-release.yml` and `pipeline-webgl-release.yml` used
+  `DISCORD_WEBHOOK_URL` without declaring it.** An undeclared secret in a
+  reusable workflow is always empty, so the notification would have silently
+  never fired.
 - **Every entry-workflow dispatch failed at stage 01.** The `ADVANCED` inputs
   use `auto` to mean "take the repository variable", which the engine spells as
   an empty string — but the translation was written
