@@ -373,6 +373,13 @@ The artifact is fetched from artifact storage, so re-publishing publishes the
   That is the one piece of indirection the matrix costs — and it buys a report
   that covers whichever platforms actually ran, with real per-platform artifact
   type, size and duration instead of a hardcoded table.
+* **A skipped matrix job shows its name uninterpolated.** On a run where no
+  platform builds — a PR to `develop`, which is validation-only — the graph
+  renders `03 / ${{ matrix.platform }}` rather than a resolved name, because
+  GitHub does not evaluate the `matrix` context for a job it never expanded.
+  The alternative is a static name such as `03 / Build`, which would cost the
+  per-platform node names on every run that *does* build. The trade is
+  deliberate: the ugly text appears only when there is nothing to look at.
 * **Stage 04 waits for the whole build matrix.** `needs: [build]` cannot depend
   on a single leg, so Android's validation starts once every build leg has
   settled. It costs ordering, never correctness: each leg downloads its own
