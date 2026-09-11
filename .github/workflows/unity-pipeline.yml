@@ -1083,20 +1083,28 @@ jobs:
               target = builds if row.get("stage") == "03" else validations
               target[row.get("platform", "?")] = row
 
-          # Platforms the pipeline INTENDED to build. A platform present here but
-          # absent from `builds` never reported — that is a real failure mode
-          # (a cancelled leg), not an empty row to hide.
+          # Platforms the pipeline INTENDED to build. One present here but absent
+          # from `builds` did not report its result.
+          #
+          # Whether that is a failure depends on the matrix's own verdict. If
+          # the build matrix succeeded, a missing file is a REPORTING gap and
+          # must not fail an otherwise green run — that exact bug failed
+          # NDCUnityTemplate run 34567145749, where Android and WebGL both
+          # built and validated and only the report went red. If the matrix did
+          # not succeed, a missing file means that leg died, and it counts.
           try:
               planned = [r["platform"] for r in json.loads(env.get("BUILD_MATRIX") or "[]")]
           except json.JSONDecodeError:
               planned = []
+          matrix_result = env.get("R_BUILD", "")
+          unreported = "unreported" if matrix_result == "success" else ""
           for platform in planned:
               builds.setdefault(platform, {"platform": platform, "stage": "03",
-                                           "result": "", "artifactType": "",
+                                           "result": unreported, "artifactType": "",
                                            "artifactSizeBytes": "0", "durationSeconds": "0"})
 
           EMOJI = {"success": "✅", "failure": "❌", "skipped": "⏭️",
-                   "cancelled": "🚫", "blocked": "⛔"}
+                   "cancelled": "🚫", "blocked": "⛔", "unreported": "➖"}
           def emoji(result):
               return EMOJI.get(result, "❓")
 
@@ -1115,7 +1123,9 @@ jobs:
               return f"{n // 60}m {n % 60}s" if n else "—"
 
           def passed(result):
-              return result in ("success", "skipped")
+              # "unreported" = the leg's result file is missing but the matrix
+              # succeeded. Surfaced in the table, never fatal.
+              return result in ("success", "skipped", "unreported")
 
           # ── Overall verdict + the stage that broke it ────────────────────
           failed_stage = ""

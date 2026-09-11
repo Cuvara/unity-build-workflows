@@ -539,6 +539,47 @@ def test_final_report_collects_matrix_leg_results(pipeline_jobs):
     assert "download-artifact" in steps
 
 
+def test_build_result_is_uploaded_after_it_is_written(repo_root):
+    """Ordering, not presence.
+
+    The upload step originally sat before `Set job outputs`, which is the step
+    that writes the file — so it uploaded an empty directory on every build and
+    `if-no-files-found: ignore` kept that quiet. Stage 07 then saw no result for
+    a platform that had built fine and failed the run
+    (NDCUnityTemplate run 34567145749).
+    """
+    import yaml as _yaml
+    with (repo_root / ".github" / "workflows" / "reusable-build-platform.yml").open() as fh:
+        engine = _yaml.safe_load(fh)
+    steps = engine["jobs"]["build"]["steps"]
+    names = [str(step.get("name", "")) for step in steps]
+    writer = names.index("Set job outputs")
+    uploader = names.index("Upload platform result")
+    assert uploader > writer, (
+        "the platform result is uploaded before the step that writes it, so the "
+        "artifact is always empty"
+    )
+    assert steps[uploader]["with"].get("if-no-files-found") != "ignore", (
+        "a missing result file must not be silent — it makes stage 07 report a "
+        "successful platform as unreported"
+    )
+
+
+def test_report_tolerates_a_missing_leg_result(pipeline_jobs):
+    """A reporting gap must not fail a green build, but a dead leg still must."""
+    body = "\n".join(
+        str(step.get("run", "")) for step in pipeline_jobs["final-report"]["steps"]
+    )
+    assert "unreported" in body, (
+        "the report has no state for 'the matrix succeeded but this leg did not "
+        "report', so a reporting gap fails an otherwise green run"
+    )
+    assert "R_BUILD" in body, (
+        "the report must consult the matrix's own verdict to decide whether a "
+        "missing result file is a gap or a dead leg"
+    )
+
+
 def test_build_and_validate_legs_publish_their_results(pipeline_jobs, repo_root):
     """The other half of that contract."""
     validate_steps = yaml.dump(pipeline_jobs[VALIDATE_JOB]["steps"])
