@@ -110,6 +110,15 @@ EVENT_NAME="${EVENT_NAME:-}"
 REF_NAME="${REF_NAME:-}"
 BASE_REF="${BASE_REF:-}"
 IN_PLATFORM="${IN_PLATFORM:-}"
+
+# ── Platform capabilities ──────────────────────────────────────────────────
+# PLATFORMS declares which targets this project can build at all — a different
+# question from *_BUILD_PLATFORMS, which says which of them a branch builds.
+# Accepts the same CSV/space forms as the platform lists. Unset means all, so
+# projects that predate the capability model are unaffected.
+PLATFORM_CAPABILITIES="$(printf '%s' "${NEW_PLATFORMS:-${PLATFORMS:-}}" | tr ',' ' ' | tr -s ' ')"
+PLATFORM_CAPABILITIES="${PLATFORM_CAPABILITIES# }"
+PLATFORM_CAPABILITIES="${PLATFORM_CAPABILITIES% }"
 IN_ENVIRONMENT="${IN_ENVIRONMENT:-production}"
 IN_RUN_TESTS="${IN_RUN_TESTS:-false}"
 IN_TEST_MODE="${IN_TEST_MODE:-All}"
@@ -174,6 +183,28 @@ parse_platforms() {
 # set_platforms_from_list SPACE_SEPARATED_LIST
 #   Sets build_android/webgl/linux64/linuxserver/ios from a validated platform list.
 #   iOS is NEVER set from branch flows (only manual dispatch).
+# ---------------------------------------------------------------------------
+# platform_enabled PLATFORM
+#   True when the project declares this platform as a capability.
+#
+#   PLATFORMS is the project's capability declaration: which targets it can
+#   build AT ALL. That is a different question from *_BUILD_PLATFORMS, which
+#   says which of them a given branch builds. A project that cannot build iOS
+#   should never see an iOS job, whatever a branch variable says.
+#
+#   Unset means every platform, so projects that predate the capability model
+#   keep their current behaviour. Declare PLATFORMS to narrow it.
+# ---------------------------------------------------------------------------
+platform_enabled() {
+    local plat="$1"
+    [[ -z "${PLATFORM_CAPABILITIES}" ]] && return 0
+    local cap
+    for cap in ${PLATFORM_CAPABILITIES}; do
+        [[ "${cap}" == "${plat}" ]] && return 0
+    done
+    return 1
+}
+
 set_platforms_from_list() {
     local list="$1" allow_ios="${2:-false}"
     build_android="false"
@@ -185,6 +216,13 @@ set_platforms_from_list() {
         build_ios="false"
     fi
     for plat in ${list}; do
+        # Capability wins over selection. Every platform path funnels through
+        # here, so filtering once covers branch flow and manual dispatch alike.
+        if ! platform_enabled "${plat}"; then
+            log_warn "${plat} requested but not in PLATFORMS; skipping (project capability)"
+            skipped_platforms+=("${plat}: not enabled in PLATFORMS")
+            continue
+        fi
         case "${plat}" in
             Android)     build_android="true" ;;
             WebGL)       build_webgl="true" ;;
@@ -771,23 +809,25 @@ case "${EVENT_NAME}" in
     define_symbols="${IN_DEFINE_SYMBOLS}"
     log_info "workflow_dispatch: platform=${IN_PLATFORM} environment=${environment} run-tests=${run_tests}"
 
-    # Platform selection — iOS is only ever built via explicit manual dispatch
+    # Platform selection — iOS is only ever built via explicit manual dispatch.
+    # Routed through set_platforms_from_list so a manual dispatch is filtered by
+    # the project's PLATFORMS capability exactly like a branch build. Asking for
+    # a platform the project cannot build must not produce a job.
     case "${IN_PLATFORM}" in
       All)
         # All excludes iOS — no macOS runner in automatic builds
-        build_android="true"; build_webgl="true"
-        build_linux64="true"; build_linuxserver="true"
-        build_windows64="true"
+        set_platforms_from_list "Android WebGL Linux64 LinuxServer Windows64"
         skipped_platforms+=("iOS: manual-only, not included in 'All'")
         ;;
-      Android)     build_android="true" ;;
-      WebGL)       build_webgl="true" ;;
-      Linux64)     build_linux64="true" ;;
-      LinuxServer) build_linuxserver="true" ;;
-      Windows64)   build_windows64="true" ;;
+      Android|WebGL|Linux64|LinuxServer)
+        set_platforms_from_list "${IN_PLATFORM}"
+        ;;
+      Windows64)
+        set_platforms_from_list "Windows64"
+        ;;
       iOS)
-        # iOS: manual only; reusable guard will block if no macOS runner
-        build_ios="true"
+        # iOS: manual only; reusable guard blocks it without a macOS runner
+        set_platforms_from_list "iOS" "true"
         ;;
       "")
         log_warn "IN_PLATFORM not set for workflow_dispatch; no platform builds will run"

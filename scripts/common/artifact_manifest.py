@@ -153,6 +153,78 @@ def ci_context(env=None):
     }
 
 
+# I-008. Two honest strengths, never one dressed as the other:
+#
+#   immutable — the builder is pinned to content (a digest). Re-running the
+#               same reference gets the same environment.
+#   auditable — the builder is identified but could move: a tag, or whatever
+#               Unity a runner happens to have installed.
+#
+# A release must reach at least `auditable`. `unknown` means the build could
+# not say what produced it, and the invariant check treats that as a failure
+# rather than quietly accepting a hole in the provenance.
+PROVENANCE_STRENGTHS = ("immutable", "auditable", "unknown")
+
+
+def classify_provenance(image_digest="", image_reference="", unity_version=""):
+    """Strength this provenance actually has — not the one we would prefer.
+
+    A digest pins content, so it is immutable. A bare tag, or a runner's own
+    Unity install, identifies the builder well enough to audit but not well
+    enough to reproduce. Nothing at all is `unknown`, and saying so is the
+    point: a silent empty field reads like "fine" to a human skimming a
+    manifest, and `unknown` does not.
+    """
+    if image_digest:
+        return "immutable"
+    if image_reference or unity_version:
+        return "auditable"
+    return "unknown"
+
+
+def build_provenance(
+    builder="",
+    builder_kind="",
+    image_reference="",
+    image_digest="",
+    provenance_strength="",
+    runner="",
+    unity_version="",
+    env=None,
+):
+    """The 'what produced this binary?' block, answerable months later."""
+    env = os.environ if env is None else env
+
+    # Normalise a digest to the bare sha256:… even when handed repo@sha256:….
+    digest = image_digest.split("@")[-1] if image_digest else ""
+    if digest and not digest.startswith("sha256:"):
+        digest = f"sha256:{digest}" if len(digest) == 64 else digest
+
+    strength = provenance_strength or classify_provenance(
+        image_digest=digest, image_reference=image_reference, unity_version=unity_version
+    )
+    if strength not in PROVENANCE_STRENGTHS:
+        strength = "unknown"
+    # Never let a caller label a mutable reference immutable.
+    if strength == "immutable" and not digest:
+        strength = classify_provenance(
+            image_reference=image_reference, unity_version=unity_version
+        )
+
+    return {
+        "builder": builder or "",
+        # docker | native — which lane, so a reader knows whether an absent
+        # image is a gap or simply not applicable.
+        "builderKind": builder_kind or "",
+        "imageReference": image_reference or "",
+        "imageDigest": digest,
+        "unityVersion": unity_version or "",
+        "runner": runner or f"{env.get('RUNNER_OS', '')}/{env.get('RUNNER_ARCH', '')}".strip("/"),
+        "runnerName": env.get("RUNNER_NAME", ""),
+        "provenanceStrength": strength,
+    }
+
+
 def build_manifest(
     platform,
     configuration,
@@ -166,6 +238,12 @@ def build_manifest(
     branch="",
     tag="",
     artifact_name="",
+    builder="",
+    builder_kind="",
+    image_reference="",
+    image_digest="",
+    provenance_strength="",
+    runner="",
     env=None,
 ):
     """Assemble the artifact manifest dictionary.
@@ -217,6 +295,16 @@ def build_manifest(
     metadata["artifactName"] = artifact_name or metadata.get("artifact") or ""
     metadata["timestamp"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     metadata["ci"] = ci_context(env)
+    metadata["builderProvenance"] = build_provenance(
+        builder=builder,
+        builder_kind=builder_kind,
+        image_reference=image_reference,
+        image_digest=image_digest,
+        provenance_strength=provenance_strength,
+        runner=runner,
+        unity_version=unity_version,
+        env=env,
+    )
 
     return metadata
 
@@ -244,6 +332,17 @@ def main(argv=None):
     parser.add_argument("--branch", default="")
     parser.add_argument("--tag", default="")
     parser.add_argument("--artifact-name", default="", help="CI artifact (upload) name")
+    # Builder provenance (I-008). All optional: a lane that cannot determine a
+    # field records it empty rather than guessing, and the strength is
+    # downgraded to match what was actually established.
+    parser.add_argument("--builder", default="",
+                        help="builder identity, e.g. the build action and its version")
+    parser.add_argument("--builder-kind", default="", help="docker | native")
+    parser.add_argument("--image-reference", default="", help="e.g. unityci/editor:...")
+    parser.add_argument("--image-digest", default="", help="sha256:… when resolvable")
+    parser.add_argument("--provenance-strength", default="",
+                        help="immutable | auditable | unknown (derived when omitted)")
+    parser.add_argument("--runner", default="", help="runner identity, e.g. Linux/X64")
     parser.add_argument("--output", default="", help=f"Default: <search-root>/{MANIFEST_FILENAME}")
     parser.add_argument(
         "--github-output",
@@ -279,6 +378,12 @@ def main(argv=None):
         branch=args.branch,
         tag=args.tag,
         artifact_name=args.artifact_name,
+        builder=args.builder,
+        builder_kind=args.builder_kind,
+        image_reference=args.image_reference,
+        image_digest=args.image_digest,
+        provenance_strength=args.provenance_strength,
+        runner=args.runner,
     )
 
     output = Path(args.output) if args.output else Path(args.search_root) / MANIFEST_FILENAME
@@ -293,6 +398,10 @@ def main(argv=None):
             fh.write(f"artifact-size-bytes={manifest['artifactSizeBytes']}\n")
             fh.write(f"artifact-sha256={manifest['artifactSha256']}\n")
             fh.write(f"manifest-path={output}\n")
+            fh.write(
+                f"provenance-strength="
+                f"{manifest['builderProvenance']['provenanceStrength']}\n"
+            )
 
     print(json.dumps(manifest, indent=2))
     return 0

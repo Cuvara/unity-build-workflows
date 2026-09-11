@@ -97,10 +97,18 @@ on:
         required: false
         default: Unity
       start-phase:
-        description: Phase to start from (build/internal/external/production)
+        description: Phase to start from (validate/internal/external/production)
         type: string
         required: false
-        default: build
+        default: validate
+      source-run-id:
+        description: >-
+          Run ID of the Build / Release run that produced the artifact. Required
+          because `actions/download-artifact` only sees the current run by
+          default — promotion pulls the binary from another run, which is what
+          makes it the same binary QA approved rather than a rebuild.
+        type: string
+        required: true
       artifact-name:
         description: >-
           Existing IPA artifact to publish when start-phase is
@@ -155,7 +163,7 @@ on:
     outputs:
       artifact-name:
         description: Name of the Xcode project artifact
-        value: ${{ jobs.build-xcode.outputs.artifact-name }}
+        value: ${{ inputs.artifact-name }}
 
   workflow_dispatch:
     inputs:
@@ -190,8 +198,8 @@ on:
         description: Phase to start from
         required: false
         type: choice
-        default: build
-        options: [build, internal, external, production]
+        default: validate
+        options: [validate, internal, external, production]
       phased-release:
         description: Enable 7-day phased release
         required: false
@@ -204,44 +212,14 @@ on:
         default: false
 
 jobs:
-  # ─── BUILD XCODE PROJECT ───────────────────────────────────────────────────
-  build-xcode:
-    name: 03 / iOS / Xcode Project
-    if: inputs.start-phase == 'build'
-    uses: ./.github/workflows/unity-build-ios.yml
-    with:
-      node-label: ${{ inputs.build-version }}
-      project-path: ${{ inputs.project-path || '.' }}
-      unity-version: ${{ inputs.unity-version }}
-      build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
-      build-version: ${{ inputs.build-version }}
-      environment: production
-      clean-build: true
-      build-addressables: ${{ inputs.build-addressables == '' && true || inputs.build-addressables }}
-      upload-artifact: true
-      ios-runner-label: ${{ inputs.ios-runner-label || 'macos-unity-xcode' }}
-      # integration-mode `remote` requires both of these. Falling back to the
-      # toolkit this pipeline was called from means a caller that only wants a
-      # build does not have to know they exist — without it, start-phase:build
-      # failed with "workflow-repository input is required" before Unity ran.
-      workflow-repository: ${{ inputs.workflow-repository || inputs.toolkit-repo }}
-      workflow-ref: ${{ inputs.workflow-ref || inputs.toolkit-ref }}
-      integration-mode: ${{ inputs.integration-mode || 'remote' }}
-      toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
-    secrets: inherit
-
-  # ─── ARCHIVE & EXPORT IPA ──────────────────────────────────────────────────
-  archive-export:
-    name: 03 / iOS / IPA
-    needs: [build-xcode]
-    if: |
-      always() &&
-      (inputs.start-phase == 'build' && needs.build-xcode.result == 'success')
-    runs-on: ${{ inputs.ios-runner-label || 'macos-unity-xcode' }}
-    outputs:
-      ipa-artifact-name: ${{ steps.set-artifact.outputs.ipa-artifact-name }}
-      bundle-id: ${{ steps.archive.outputs.bundle-id }}
-      bundle-version: ${{ steps.archive.outputs.bundle-version }}
+  # ─── 04 — VERIFY RELEASE IDENTITY ───────────────────────────────────────────
+  # A filename establishes nothing. This proves the downloaded bytes are the
+  # ones the named Release Set produced: same run, same commit, same version,
+  # same build number, same SHA-256. It fails closed — a promotion that cannot
+  # prove what it is holding must not publish it.
+  verify-artifact:
+    name: 04 / iOS / Verify Release Identity
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -250,94 +228,40 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      - name: Download Xcode project
+      - name: Download artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-xcode.outputs.artifact-name }}
-          path: xcode-project/
+          name: ${{ inputs.artifact-name }}
+          path: promoted/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
-      - name: Setup signing
-        id: signing
-        uses: ./.toolkit/.github/actions/ios-setup-signing
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          ios-distribution-certificate-base64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
-          ios-distribution-certificate-password: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
-          ios-provisioning-profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-          export-method: ${{ inputs.export-method || 'app-store' }}
+          name: release-manifest
+          path: release-set/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
-      - name: Find Xcode project
-        id: find-project
+      - name: Verify release identity and checksum
         shell: bash
-        run: |
-          XCODEPROJ=$(find xcode-project/ -name '*.xcodeproj' -type d | head -1)
-          if [[ -z "${XCODEPROJ}" ]]; then
-            echo "::error::No .xcodeproj found in artifact"
-            exit 1
-          fi
-          PROJECT_DIR=$(dirname "${XCODEPROJ}")
-          echo "project-dir=${PROJECT_DIR}" >> "${GITHUB_OUTPUT}"
-          echo "[archive] Found: ${XCODEPROJ}"
-
-      - name: Archive and export
-        id: archive
-        uses: ./.toolkit/.github/actions/ios-archive-export
-        with:
-          xcode-project-path: ${{ steps.find-project.outputs.project-dir }}
-          export-options-path: ${{ steps.signing.outputs.export-options-path }}
-          development-team: ${{ steps.signing.outputs.development-team || '' }}
-          archive-path: build-output/${{ inputs.app-name || 'Unity' }}.xcarchive
-          export-path: build-output/ipa
-
-      # A 5000-byte floor was the whole of the old gate. An IPA can be the right
-      # size and still be unsigned, carry an expired profile, or hold the wrong
-      # bundle id — all of which App Store Connect rejects after the upload has
-      # already burned a build number.
-      - name: Validate IPA
-        shell: bash
-        env:
-          EXPECTED_BUNDLE_ID: ${{ inputs.bundle-id }}
-          EXPECTED_VERSION: ${{ inputs.version-string }}
-          REQUIRE_SIGNED: 'true'
         run: |
           set -Eeuo pipefail
-          bash .toolkit/scripts/ios/validate_ipa.sh "${{ steps.archive.outputs.ipa-path }}"
-
-      - name: Upload IPA artifact
-        id: set-artifact
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
-        with:
-          name: ios-ipa-${{ inputs.build-version }}
-          path: |
-            ${{ steps.archive.outputs.ipa-path }}
-            build-output/${{ inputs.app-name || 'Unity' }}.xcarchive/dSYMs/
-          retention-days: 30
-
-      - name: Set output
-        shell: bash
-        run: echo "ipa-artifact-name=ios-ipa-${{ inputs.build-version }}" >> "${GITHUB_OUTPUT}"
-
-      - name: Cleanup signing
-        if: always()
-        uses: ./.toolkit/.github/actions/ios-cleanup-signing
-        with:
-          keychain-name: ${{ steps.signing.outputs.keychain-name || '' }}
-
-      - name: Summary
-        shell: bash
-        run: |
-          echo "### Archive & Export" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Bundle ID:** ${{ steps.archive.outputs.bundle-id }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Bundle Version:** ${{ steps.archive.outputs.bundle-version }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Export Method:** ${{ inputs.export-method || 'app-store' }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **IPA Artifact:** ios-ipa-${{ inputs.build-version }}" >> "${GITHUB_STEP_SUMMARY}"
-
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             iOS \
+            --artifact-path        promoted \
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
   release-notes:
     name: 04 / iOS / Release Notes
-    needs: [build-xcode]
+    needs: [verify-artifact]
     if: |
       always() &&
-      (needs.build-xcode.result == 'success' || needs.build-xcode.result == 'skipped')
+      true
     runs-on: ubuntu-latest
     steps:
       # Release notes come from the CALLER's git history, so the caller repo is
@@ -371,13 +295,10 @@ jobs:
   # ─── PHASE 1: TESTFLIGHT INTERNAL ──────────────────────────────────────────
   internal-testing:
     name: 05 / iOS / Publish — TestFlight Internal
-    needs: [archive-export, release-notes]
+    needs: [verify-artifact, release-notes]
     if: |
       always() && !inputs.dry-run &&
-      (
-        needs.archive-export.result == 'success' ||
-        inputs.start-phase == 'internal'
-      )
+      (inputs.start-phase == 'validate' || inputs.start-phase == 'internal')
     runs-on: macos-latest
     environment: internal-testing
     outputs:
@@ -393,8 +314,10 @@ jobs:
       - name: Download IPA artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.archive-export.outputs.ipa-artifact-name || inputs.artifact-name || format('ios-ipa-{0}', inputs.build-version) }}
+          name: ${{ inputs.artifact-name }}
           path: ipa-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Find IPA
         id: find-ipa
@@ -428,7 +351,7 @@ jobs:
   # ─── PHASE 2: TESTFLIGHT EXTERNAL ──────────────────────────────────────────
   external-testing:
     name: 06 / iOS / Release — TestFlight External
-    needs: [internal-testing]
+    needs: [verify-artifact, internal-testing]
     if: |
       always() && !inputs.dry-run &&
       (
@@ -458,7 +381,7 @@ jobs:
   # ─── PHASE 3: APP STORE PRODUCTION ─────────────────────────────────────────
   production-release:
     name: 06 / iOS / Release — App Store
-    needs: [internal-testing, external-testing, release-notes]
+    needs: [verify-artifact, internal-testing, external-testing, release-notes]
     if: |
       always() && !inputs.dry-run &&
       (
@@ -520,7 +443,7 @@ jobs:
   # to Discord.
   report:
     name: 07 / iOS / Report & Notify
-    needs: [build-xcode, archive-export, release-notes, internal-testing, external-testing, production-release]
+    needs: [verify-artifact, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -543,8 +466,7 @@ jobs:
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
           phases: |
-            03 Build Xcode Project=${{ needs.build-xcode.result }}
-            03 Archive & Export IPA=${{ needs.archive-export.result }}
+            04 Verify Release Identity=${{ needs.verify-artifact.result }}
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — TestFlight Internal=${{ needs.internal-testing.result }}
             06 Release — TestFlight External=${{ needs.external-testing.result }}

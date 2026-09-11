@@ -1,13 +1,18 @@
 name: Pipeline Android Release
 
-# Self-contained Android release pipeline:
-#   Build AAB → Validate → Release Notes → Internal Testing → External Testing → Production
+# Android promotion pipeline — PROMOTE ONLY. This workflow builds nothing.
 #
-# Each release phase is a separate job gated by GitHub Environments.
-# The build step calls unity-build-android.yml with deploy-target=none (no embedded deploy).
-# Store deployment uses dedicated scripts and composite actions.
+#   Verify Identity → Validate AAB → Release Notes → Internal → External → Production
 #
-# Nesting depth: orchestrator → this → unity-build-android = 3 levels (safe).
+# It consumes an artifact that `Build / Release` already produced and signed,
+# pinned by `source-run-id`, and publishes those exact bytes. Every phase is a
+# separate job gated by a GitHub Environment.
+#
+# The absence of a build step is the point (I-005): the bytes QA approved must
+# be the bytes that ship, and a rebuild — however identical the inputs look —
+# produces a different artifact that nobody approved. `check_promotion_never_
+# mutates` in scripts/common/validate_pipeline_invariants.py fails CI if a
+# build, export or signing operation reappears here.
 
 on:
   workflow_call:
@@ -85,10 +90,26 @@ on:
         type: string
         required: true
       start-phase:
-        description: Phase to start from (build/internal/external/production)
+        description: Phase to start from (validate/internal/external/production)
         type: string
         required: false
-        default: build
+        default: validate
+      allow-unverified-build-number:
+        description: >-
+          Proceed when the store's existing versionCodes cannot be read. Only
+          for a first upload to a package that does not exist in the console
+          yet — it disables the guard against reusing a build number.
+        type: boolean
+        required: false
+        default: false
+      source-run-id:
+        description: >-
+          Run ID of the Build / Release run that produced the artifact. Required
+          because `actions/download-artifact` only sees the current run by
+          default — promotion pulls the binary from another run, which is what
+          makes it the same binary QA approved rather than a rebuild.
+        type: string
+        required: true
       artifact-name:
         description: >-
           Existing build artifact to publish when start-phase is
@@ -147,7 +168,7 @@ on:
     outputs:
       artifact-name:
         description: Name of the build artifact
-        value: ${{ jobs.build-aab.outputs.artifact-name }}
+        value: ${{ inputs.artifact-name }}
 
   workflow_dispatch:
     inputs:
@@ -167,8 +188,8 @@ on:
         description: Phase to start from
         required: false
         type: choice
-        default: build
-        options: [build, internal, external, production]
+        default: validate
+        options: [validate, internal, external, production]
       artifact-name:
         description: Existing artifact to publish (required unless start-phase is build)
         required: false
@@ -191,53 +212,89 @@ on:
         default: false
 
 jobs:
-  # ─── BUILD AAB ──────────────────────────────────────────────────────────────
-  build-aab:
-    name: 03 / Android / AAB
-    if: inputs.start-phase == 'build'
-    uses: ./.github/workflows/unity-build-android.yml
-    with:
-      node-label: ${{ inputs.build-version }}
-      project-path: ${{ inputs.project-path || '.' }}
-      unity-version: ${{ inputs.unity-version }}
-      build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
-      build-version: ${{ inputs.build-version }}
-      environment: production
-      release-mode: true
-      deploy-target: none
-      clean-build: true
-      build-addressables: ${{ inputs.build-addressables == '' && true || inputs.build-addressables }}
-      upload-artifact: true
-      image-registry: ${{ inputs.image-registry || 'ghcr.io' }}
-      image-namespace: ${{ inputs.image-namespace || '' }}
-      image-name: ${{ inputs.image-name || '' }}
-      image-digest: ${{ inputs.image-digest || '' }}
-      # integration-mode `remote` requires both of these. Falling back to the
-      # toolkit this pipeline was called from means a caller that only wants a
-      # build does not have to know they exist — without it, start-phase:build
-      # failed with "workflow-repository input is required" before Unity ran.
-      workflow-repository: ${{ inputs.workflow-repository || inputs.toolkit-repo }}
-      workflow-ref: ${{ inputs.workflow-ref || inputs.toolkit-ref }}
-      integration-mode: ${{ inputs.integration-mode || 'remote' }}
-      toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
-    secrets: inherit
+  # ─── 04 — VERIFY RELEASE IDENTITY ───────────────────────────────────────────
+  # A filename establishes nothing. This proves the downloaded bytes are the
+  # ones the named Release Set produced: same run, same commit, same version,
+  # same build number, same SHA-256. It fails closed — a promotion that cannot
+  # prove what it is holding must not publish it.
+  verify-artifact:
+    name: 04 / Android / Verify Release Identity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
 
+      - name: Download artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: promoted/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             Android \
+            --artifact-path        promoted \
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
+
+      # Play rejects a duplicate versionCode, but only after the upload has
+      # started — a late, misleading failure. A code merely LOWER than the
+      # current one uploads fine and then cannot be promoted, which surfaces
+      # days later mid-rollout. Ask the store first.
+      #
+      # Skipped on a dry run: there is nothing to collide with, and a dry run
+      # must not require store credentials.
+      - name: Check the build number against the store
+        if: ${{ !inputs.dry-run }}
+        shell: bash
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -Eeuo pipefail
+          pip install --quiet google-api-python-client google-auth
+          BUILD_NUMBER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["releaseSet"]["buildNumber"])' \
+            release-set/release-manifest.json)
+          python3 .toolkit/scripts/android/check_build_number.py \
+            --package-name  "${{ inputs.package-name }}" \
+            --build-number  "${BUILD_NUMBER}" \
+            ${{ inputs.allow-unverified-build-number && '--allow-unverified' || '' }}
   # ─── VALIDATE AAB ───────────────────────────────────────────────────────────
   validate-aab:
     name: 04 / Android / Validate AAB
-    needs: [build-aab]
+    needs: [verify-artifact]
     if: |
       always() &&
-      (inputs.start-phase == 'build' && needs.build-aab.result == 'success')
+      inputs.start-phase == 'validate'
     runs-on: ubuntu-latest
     outputs:
-      artifact-name: ${{ needs.build-aab.outputs.artifact-name }}
+      artifact-name: ${{ inputs.artifact-name }}
     steps:
       - name: Download artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-aab.outputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}
           path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       # A >1000-byte file was the whole of the old gate, so an unsigned AAB, an
       # APK where an AAB was expected, or a bundle with the wrong package id all
@@ -274,10 +331,10 @@ jobs:
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
   release-notes:
     name: 04 / Android / Release Notes
-    needs: [build-aab]
+    needs: [verify-artifact]
     if: |
       always() &&
-      (needs.build-aab.result == 'success' || needs.build-aab.result == 'skipped')
+      true
     runs-on: ubuntu-latest
     steps:
       # Release notes come from the CALLER's git history, so the caller repo is
@@ -311,11 +368,11 @@ jobs:
   # ─── PHASE 1: INTERNAL TESTING ──────────────────────────────────────────────
   internal-testing:
     name: 05 / Android / Publish — Internal Testing
-    needs: [build-aab, validate-aab, release-notes]
+    needs: [verify-artifact, validate-aab, release-notes]
     if: |
       always() && !inputs.dry-run &&
       (
-        (inputs.start-phase == 'build' && needs.validate-aab.result == 'success') ||
+        (inputs.start-phase == 'validate' && needs.validate-aab.result == 'success') ||
         inputs.start-phase == 'internal'
       )
     runs-on: ubuntu-latest
@@ -331,8 +388,10 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-aab.outputs.artifact-name || inputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}
           path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Download release notes
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -369,7 +428,7 @@ jobs:
   # ─── PHASE 2: EXTERNAL TESTING ─────────────────────────────────────────────
   external-testing:
     name: 06 / Android / Release — External Testing
-    needs: [internal-testing]
+    needs: [verify-artifact, internal-testing]
     if: |
       always() && !inputs.dry-run && !inputs.skip-external &&
       (
@@ -402,7 +461,7 @@ jobs:
   # ─── PHASE 3: PRODUCTION ───────────────────────────────────────────────────
   production-release:
     name: 06 / Android / Release — Production
-    needs: [internal-testing, external-testing, release-notes]
+    needs: [verify-artifact, internal-testing, external-testing, release-notes]
     if: |
       always() && !inputs.dry-run &&
       (
@@ -469,7 +528,7 @@ jobs:
   # to Discord.
   report:
     name: 07 / Android / Report & Notify
-    needs: [build-aab, validate-aab, release-notes, internal-testing, external-testing, production-release]
+    needs: [verify-artifact, validate-aab, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -492,7 +551,7 @@ jobs:
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
           phases: |
-            03 Build AAB=${{ needs.build-aab.result }}
+            04 Verify Release Identity=${{ needs.verify-artifact.result }}
             04 Validate AAB=${{ needs.validate-aab.result }}
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — Internal Testing=${{ needs.internal-testing.result }}

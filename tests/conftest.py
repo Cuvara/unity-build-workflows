@@ -162,7 +162,8 @@ def resolve_matrix():
     script = _matrix_step_script()
 
     def run(platforms, environment="production", android_export="aab",
-            build_type="", platform_input="All"):
+            build_type="", platform_input="All", run_number=42,
+            build_number_offset=0):
         env = dict(os.environ)
         env["ENVIRONMENT"] = environment
         env["ANDROID_TYPE"] = android_export
@@ -170,6 +171,9 @@ def resolve_matrix():
         env["IN_BUILD_TYPE"] = build_type
         # `None` is the CI lane: validate and test, build nothing.
         env["IN_PLATFORM"] = platform_input
+        # The store-facing build number, resolved once in stage 01.
+        env["RUN_NUMBER"] = str(run_number)
+        env["BUILD_NUMBER_OFFSET"] = str(build_number_offset)
         for platform, key in PLATFORM_ENV.items():
             env[key] = "true" if platform in platforms else "false"
 

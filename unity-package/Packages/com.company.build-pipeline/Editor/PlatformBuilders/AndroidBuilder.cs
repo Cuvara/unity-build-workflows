@@ -63,9 +63,24 @@ namespace Company.BuildPipeline.Editor
                     PlayerSettings.Android.keyaliasPass = Environment.GetEnvironmentVariable(signing.KeyAliasPasswordEnvVar) ?? string.Empty;
             }
 
-            // Build number from bundle version (strip non-numeric segments).
-            if (int.TryParse(cfg.BundleVersion.Split('.')[0], out int major))
-                PlayerSettings.Android.bundleVersionCode = major;
+            // bundleVersionCode is the store-facing counter Google Play uses to
+            // order uploads, and it rejects one it has already seen. Deriving it
+            // from the MAJOR version meant every 1.x.y release shipped
+            // versionCode 1, so the second upload of any 1.x line was refused.
+            //
+            // Same environment chain IOSBuilder uses for CFBundleVersion, so the
+            // two platforms of one release carry the same number:
+            //   BUILD_NUMBER > GITHUB_RUN_NUMBER > 1
+            var buildNumberRaw = Environment.GetEnvironmentVariable("BUILD_NUMBER")
+                                 ?? Environment.GetEnvironmentVariable("GITHUB_RUN_NUMBER")
+                                 ?? "1";
+
+            if (!int.TryParse(buildNumberRaw, out int bundleVersionCode) || bundleVersionCode <= 0)
+                throw new InvalidOperationException(
+                    $"Invalid Android bundleVersionCode '{buildNumberRaw}'. Expected a " +
+                    "positive integer from BUILD_NUMBER or GITHUB_RUN_NUMBER.");
+
+            PlayerSettings.Android.bundleVersionCode = bundleVersionCode;
         }
 
         public BuildExecutionResult Build(BuildContext context)
