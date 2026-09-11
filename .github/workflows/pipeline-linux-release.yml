@@ -198,7 +198,6 @@ jobs:
     if: |
       !cancelled() &&
       needs.verify-artifact.result == 'success' &&
-      !inputs.dry-run &&
       (
         (inputs.start-phase == 'validate' && needs.validate-artifact.result == 'success') ||
         inputs.start-phase == 'internal'
@@ -227,10 +226,15 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          # A dry run stages and validates configuration without publishing, so
+          # it needs the ids but not an account to log in with.
+          CREDENTIALS=""
+          [ "${{ inputs.dry-run }}" = "true" ] || CREDENTIALS="--require-credentials"
+          # shellcheck disable=SC2086 — deliberately unquoted: empty means "no flag"
           python3 .toolkit/scripts/steam/resolve_steam_config.py \
+            ${CREDENTIALS} \
             --platform Linux64 \
-            --phase internal \
-            --require-credentials
+            --phase internal
 
       - name: Download the verified artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -264,7 +268,9 @@ jobs:
             --expect-artifact-name "${{ inputs.artifact-name }}" \
             --expect-version       "${{ inputs.build-version }}"
 
+      # Nothing uploads on a dry run, so there is nothing to install.
       - name: Install SteamCMD
+        if: ${{ !inputs.dry-run }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -280,6 +286,7 @@ jobs:
           STEAM_BRANCH:      ${{ steps.steam.outputs.branch }}
           STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
           STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+          DRY_RUN:           ${{ inputs.dry-run }}
           BUILD_DESCRIPTION: ${{ inputs.build-description != '' && inputs.build-description || format('{0} {1} ({2})', 'Linux', inputs.build-version, inputs.source-run-id) }}
         shell: bash
         run: bash .toolkit/scripts/steam/deploy_steam.sh
@@ -293,7 +300,6 @@ jobs:
     if: |
       !cancelled() &&
       needs.verify-artifact.result == 'success' &&
-      !inputs.dry-run &&
       !inputs.skip-external &&
       (
         needs.steam-internal.result == 'success' ||
@@ -323,10 +329,15 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          # A dry run stages and validates configuration without publishing, so
+          # it needs the ids but not an account to log in with.
+          CREDENTIALS=""
+          [ "${{ inputs.dry-run }}" = "true" ] || CREDENTIALS="--require-credentials"
+          # shellcheck disable=SC2086 — deliberately unquoted: empty means "no flag"
           python3 .toolkit/scripts/steam/resolve_steam_config.py \
+            ${CREDENTIALS} \
             --platform Linux64 \
-            --phase external \
-            --require-credentials
+            --phase external
 
       - name: Download the verified artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -360,7 +371,9 @@ jobs:
             --expect-artifact-name "${{ inputs.artifact-name }}" \
             --expect-version       "${{ inputs.build-version }}"
 
+      # Nothing uploads on a dry run, so there is nothing to install.
       - name: Install SteamCMD
+        if: ${{ !inputs.dry-run }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -376,6 +389,7 @@ jobs:
           STEAM_BRANCH:      ${{ steps.steam.outputs.branch }}
           STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
           STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+          DRY_RUN:           ${{ inputs.dry-run }}
           BUILD_DESCRIPTION: ${{ inputs.build-description != '' && inputs.build-description || format('{0} {1} ({2})', 'Linux', inputs.build-version, inputs.source-run-id) }}
         shell: bash
         run: bash .toolkit/scripts/steam/deploy_steam.sh
@@ -390,7 +404,6 @@ jobs:
     if: |
       !cancelled() &&
       needs.verify-artifact.result == 'success' &&
-      !inputs.dry-run &&
       (
         needs.steam-external.result == 'success' ||
         (inputs.skip-external && needs.steam-internal.result == 'success') ||
@@ -420,10 +433,15 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          # A dry run stages and validates configuration without publishing, so
+          # it needs the ids but not an account to log in with.
+          CREDENTIALS=""
+          [ "${{ inputs.dry-run }}" = "true" ] || CREDENTIALS="--require-credentials"
+          # shellcheck disable=SC2086 — deliberately unquoted: empty means "no flag"
           python3 .toolkit/scripts/steam/resolve_steam_config.py \
+            ${CREDENTIALS} \
             --platform Linux64 \
-            --phase production \
-            --require-credentials
+            --phase production
 
       - name: Download the verified artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -457,7 +475,9 @@ jobs:
             --expect-artifact-name "${{ inputs.artifact-name }}" \
             --expect-version       "${{ inputs.build-version }}"
 
+      # Nothing uploads on a dry run, so there is nothing to install.
       - name: Install SteamCMD
+        if: ${{ !inputs.dry-run }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -473,6 +493,7 @@ jobs:
           STEAM_BRANCH:      ${{ steps.steam.outputs.branch }}
           STEAM_USERNAME:    ${{ secrets.STEAM_USERNAME }}
           STEAM_CONFIG_VDF:  ${{ secrets.STEAM_CONFIG_VDF }}
+          DRY_RUN:           ${{ inputs.dry-run }}
           BUILD_DESCRIPTION: ${{ inputs.build-description != '' && inputs.build-description || format('{0} {1} ({2})', 'Linux', inputs.build-version, inputs.source-run-id) }}
         shell: bash
         run: bash .toolkit/scripts/steam/deploy_steam.sh
