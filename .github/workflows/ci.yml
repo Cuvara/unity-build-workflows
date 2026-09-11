@@ -62,9 +62,31 @@ jobs:
           done < <(find scripts docker -name '*.sh' -type f -print0 2>/dev/null)
           exit $fail
 
+  # A workflow YAML that parses but is INVALID (an undeclared `inputs.x`, a
+  # duplicated key, a missing required secret on a workflow_call) is accepted by
+  # pytest's yaml.safe_load and rejected by GitHub at dispatch time — as a run
+  # with no jobs, no logs and a bare "failure". That is unreadable, and it is
+  # how a broken release pipeline stayed broken. actionlint catches it here.
+  actionlint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: |
+          set -Eeuo pipefail
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+
+      - name: Lint workflows
+        # shellcheck/pyflakes are advisory here — `bash -n` is the shell gate and
+        # runs in its own job. This job exists for the workflow-schema errors.
+        run: ./actionlint -color -shellcheck= -pyflakes=
+
   ci-report:
     name: CI Report
-    needs: [tests, shellcheck]
+    needs: [tests, shellcheck, actionlint]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -74,12 +96,15 @@ jobs:
             echo "## Toolkit CI"
             echo "- Tests:      ${{ needs.tests.result }}"
             echo "- Shellcheck: ${{ needs.shellcheck.result }}"
+            echo "- Workflow lint: ${{ needs.actionlint.result }}"
           } >> "$GITHUB_STEP_SUMMARY"
-          [ "${{ needs.tests.result }}" = "success" ] && [ "${{ needs.shellcheck.result }}" = "success" ]
+          [ "${{ needs.tests.result }}" = "success" ] \
+            && [ "${{ needs.shellcheck.result }}" = "success" ] \
+            && [ "${{ needs.actionlint.result }}" = "success" ]
 
   auto-merge:
     name: Auto-merge develop → main
-    needs: [tests, shellcheck]
+    needs: [tests, shellcheck, actionlint]
     if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
     uses: ./.github/workflows/auto-merge.yml
     with:

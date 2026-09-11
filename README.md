@@ -50,7 +50,8 @@ unity-build-workflows
   Artifacts, logs, reports → bind-mounted host directories
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete layer diagram.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete layer diagram, and
+[docs/PIPELINE_ARCHITECTURE.md](docs/PIPELINE_ARCHITECTURE.md) for the pipeline stage graph.
 
 ---
 
@@ -281,6 +282,7 @@ Current version: **2.2.5** — see [CHANGELOG.md](CHANGELOG.md).
 | Document | Contents |
 |---|---|
 | **[docs/NEW\_PROJECT\_END\_TO\_END.md](docs/NEW_PROJECT_END_TO_END.md)** | **Start here — one pass from an empty Unity repo to a green build, then to building on your own runner. Picks between the two consumption paths and says which images each needs** |
+| **[docs/PIPELINE\_ARCHITECTURE.md](docs/PIPELINE_ARCHITECTURE.md)** | **Pipeline stages 01–08, node naming, quality gate, artifact flow, publish/release separation, retry, approval, adding a platform** |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layer diagram, executor lanes (docker-unity + macos-unity-xcode), extension points |
 | [docs/PLATFORM_MATRIX.md](docs/PLATFORM_MATRIX.md) | **Canonical platform support matrix** — authoritative source for all platform/executor/status combinations |
 | [docs/DOCKER_BUILD.md](docs/DOCKER_BUILD.md) | Container flow, mounts, caches, licensing, debugging |

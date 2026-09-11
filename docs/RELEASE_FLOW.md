@@ -2,6 +2,11 @@
 
 This document describes the tag-based release process for the Docker-mandatory Unity CI/CD platform.
 
+> For the **store** release pipelines — build → validate → publish → production
+> approval, per platform — see
+> [PIPELINE_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md) §4–§8. This document
+> covers branch/tag flow, not the release pipeline graph.
+
 ---
 
 ## Overview
