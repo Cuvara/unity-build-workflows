@@ -260,7 +260,7 @@ jobs:
     name: 04 / iOS / Release Notes
     needs: [verify-artifact]
     if: |
-      always() &&
+      needs.verify-artifact.result == 'success' &&
       true
     runs-on: ubuntu-latest
     steps:
@@ -297,7 +297,8 @@ jobs:
     name: 05 / iOS / Publish — TestFlight Internal
     needs: [verify-artifact, release-notes]
     if: |
-      always() && !inputs.dry-run &&
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
       (inputs.start-phase == 'validate' || inputs.start-phase == 'internal')
     runs-on: macos-latest
     environment: internal-testing
@@ -353,7 +354,8 @@ jobs:
     name: 06 / iOS / Release — TestFlight External
     needs: [verify-artifact, internal-testing]
     if: |
-      always() && !inputs.dry-run &&
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
       (
         needs.internal-testing.result == 'success' ||
         inputs.start-phase == 'external'
@@ -383,7 +385,8 @@ jobs:
     name: 06 / iOS / Release — App Store
     needs: [verify-artifact, internal-testing, external-testing, release-notes]
     if: |
-      always() && !inputs.dry-run &&
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
       (
         needs.external-testing.result == 'success' ||
         inputs.start-phase == 'production'

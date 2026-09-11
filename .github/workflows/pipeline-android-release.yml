@@ -282,7 +282,7 @@ jobs:
     name: 04 / Android / Validate AAB
     needs: [verify-artifact]
     if: |
-      always() &&
+      needs.verify-artifact.result == 'success' &&
       inputs.start-phase == 'validate'
     runs-on: ubuntu-latest
     outputs:
@@ -333,7 +333,7 @@ jobs:
     name: 04 / Android / Release Notes
     needs: [verify-artifact]
     if: |
-      always() &&
+      needs.verify-artifact.result == 'success' &&
       true
     runs-on: ubuntu-latest
     steps:
@@ -370,7 +370,8 @@ jobs:
     name: 05 / Android / Publish — Internal Testing
     needs: [verify-artifact, validate-aab, release-notes]
     if: |
-      always() && !inputs.dry-run &&
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
       (
         (inputs.start-phase == 'validate' && needs.validate-aab.result == 'success') ||
         inputs.start-phase == 'internal'
@@ -430,7 +431,8 @@ jobs:
     name: 06 / Android / Release — External Testing
     needs: [verify-artifact, internal-testing]
     if: |
-      always() && !inputs.dry-run && !inputs.skip-external &&
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run && !inputs.skip-external &&
       (
         needs.internal-testing.result == 'success' ||
         inputs.start-phase == 'external'
@@ -463,7 +465,8 @@ jobs:
     name: 06 / Android / Release — Production
     needs: [verify-artifact, internal-testing, external-testing, release-notes]
     if: |
-      always() && !inputs.dry-run &&
+      needs.verify-artifact.result == 'success' &&
+      !inputs.dry-run &&
       (
         inputs.start-phase == 'production' ||
         needs.external-testing.result == 'success' ||
