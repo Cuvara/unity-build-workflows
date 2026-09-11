@@ -316,7 +316,11 @@ def test_build_platform_writes_an_artifact_manifest():
         "stage 03 must write an artifact manifest so stages 04/05 do not have to "
         "rediscover the artifact"
     )
-    assert "build-manifest-${{ inputs.platform }}" in body
+    assert "-manifest" in body, "the manifest is not uploaded as its own artifact"
+    assert "artifact-name" in body, (
+        "the manifest artifact must follow the build-type-scoped artifact name, "
+        "so a development manifest cannot be mistaken for a release one"
+    )
 
 
 def test_build_platform_node_label_is_overridable():

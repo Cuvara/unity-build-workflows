@@ -26,23 +26,31 @@ TEMPLATES = REPO_ROOT / "templates"
 
 ENGINE = "unity-pipeline.yml"
 
-ENTRY_POINTS = {
-    "android": TEMPLATES / "consumer-build-android.yml",
-    "ios": TEMPLATES / "consumer-build-ios.yml",
-    "webgl": TEMPLATES / "consumer-build-webgl.yml",
-    "all": TEMPLATES / "consumer-build-all.yml",
+# Three build-layer entry points, one question each:
+#   CI          is this code safe to merge?
+#   Development give me something to test with
+#   Release     give me something we could ship
+BUILD_ENTRY_POINTS = {
+    "ci": TEMPLATES / "consumer-01-ci.yml",
+    "development": TEMPLATES / "consumer-10-build-development.yml",
+    "release": TEMPLATES / "consumer-11-build-release.yml",
 }
 
-EXPECTED_PLATFORM = {
-    "android": "Android",
-    "ios": "iOS",
-    "webgl": "WebGL",
-    "all": "All",
+# Manual build entry points (CI is automatic and has no form).
+ENTRY_POINTS = {k: v for k, v in BUILD_ENTRY_POINTS.items() if k != "ci"}
+
+# Per-platform release entry points. Separate workflows because the release
+# lifecycles differ in shape, not just in credentials.
+RELEASE_ENTRY_POINTS = {
+    "android": TEMPLATES / "consumer-20-release-android.yml",
+    "ios": TEMPLATES / "consumer-21-release-ios.yml",
+    "webgl": TEMPLATES / "consumer-22-release-webgl.yml",
 }
+
+EXPECTED_BUILD_TYPE = {"development": "development", "release": "release"}
 
 # Inputs every entry point must offer — the developer-facing set.
 COMMON_INPUTS = {
-    "environment",
     "run-tests",
     "test-mode",
     "build-addressables",
@@ -57,7 +65,7 @@ VALID_GROUPS = {"GENERAL", "QUALITY", "CONTENT", "UNITY", "ADVANCED",
                 "ANDROID", "IOS", "WEBGL"}
 
 # Inputs that belong to exactly one platform and must not leak into the others.
-PLATFORM_ONLY_INPUTS = {"android-export": "android"}
+PLATFORM_ONLY_INPUTS = {"android-export": "release"}
 
 
 def load(path):
@@ -129,38 +137,6 @@ def test_every_input_declares_a_group(entry):
         )
 
 
-@pytest.mark.parametrize("input_name,owner", sorted(PLATFORM_ONLY_INPUTS.items()))
-def test_platform_specific_input_appears_only_in_its_own_entry_point(input_name, owner):
-    """`android-export` on a multi-platform form is the original defect."""
-    for key, path in ENTRY_POINTS.items():
-        present = input_name in dispatch_inputs(load(path))
-        if key == owner:
-            assert present, f"{key}: {input_name} must be offered here"
-        else:
-            assert not present, (
-                f"{key}: {input_name} is {owner}-only and must not appear on this form"
-            )
-
-
-def test_build_all_has_no_per_platform_output_format():
-    """An output format for one platform does not belong on a multi-platform form."""
-    inputs = dispatch_inputs(load(ENTRY_POINTS["all"]))
-    leaked = [n for n in inputs if n.startswith(("android-", "ios-", "webgl-"))]
-    assert not leaked, f"Build All exposes platform-specific inputs: {leaked}"
-
-
-def test_ios_entry_point_exposes_no_android_or_webgl_options():
-    inputs = dispatch_inputs(load(ENTRY_POINTS["ios"]))
-    leaked = [n for n in inputs if n.startswith(("android-", "webgl-"))]
-    assert not leaked, f"Build iOS exposes foreign platform inputs: {leaked}"
-
-
-def test_webgl_entry_point_exposes_no_android_or_ios_options():
-    inputs = dispatch_inputs(load(ENTRY_POINTS["webgl"]))
-    leaked = [n for n in inputs if n.startswith(("android-", "ios-"))]
-    assert not leaked, f"Build WebGL exposes foreign platform inputs: {leaked}"
-
-
 def test_infrastructure_inputs_are_marked_advanced(entry):
     """A normal developer should not have to reason about runners or licences."""
     key, workflow = entry
@@ -209,21 +185,6 @@ def test_entry_point_contains_no_build_logic(entry):
         f"{key}: entry point declares steps — build logic must stay in the engine"
     )
     assert "runs-on" not in job
-
-
-def test_entry_point_pins_its_platform(entry):
-    key, workflow = entry
-    job = next(iter(workflow["jobs"].values()))
-    assert job["with"]["platform"] == EXPECTED_PLATFORM[key]
-
-
-def test_only_android_passes_an_android_export(entry):
-    key, workflow = entry
-    job = next(iter(workflow["jobs"].values()))
-    has_export = "android-export" in job["with"]
-    assert has_export == (key == "android"), (
-        f"{key}: android-export should be passed only by the Android entry point"
-    )
 
 
 def _eval_ternary(expression, value):
@@ -325,3 +286,106 @@ def test_entry_points_have_distinct_concurrency_groups():
     assert len(set(groups.values())) == len(groups), (
         f"entry points share a concurrency group and would cancel each other: {groups}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Build layer: CI / Development / Release are three different questions
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("input_name,owner", sorted(PLATFORM_ONLY_INPUTS.items()))
+def test_platform_specific_input_appears_only_where_it_applies(input_name, owner):
+    """`android-export` belongs to Build / Release, where APK-vs-AAB is a real
+    decision. Development always ships an APK, so offering the choice there
+    would invite someone to produce an AAB labelled `development-`."""
+    for key, path in ENTRY_POINTS.items():
+        present = input_name in dispatch_inputs(load(path))
+        assert present == (key == owner), (
+            f"{key}: {input_name} should be offered only by the {owner} entry point"
+        )
+
+
+def test_development_always_produces_an_apk():
+    """Not configurable: an AAB is a store artifact with no place in a dev build."""
+    job = next(iter(load(ENTRY_POINTS["development"])["jobs"].values()))
+    assert job["with"]["android-export"] == "apk"
+    assert "android-export" not in dispatch_inputs(load(ENTRY_POINTS["development"]))
+
+
+def test_release_defaults_to_aab():
+    """Google Play requires an App Bundle for new apps."""
+    assert dispatch_inputs(load(ENTRY_POINTS["release"]))["android-export"]["default"] == "aab"
+
+
+def test_release_is_not_development_with_another_environment():
+    """The two must differ in build-type, not only in environment."""
+    dev = next(iter(load(ENTRY_POINTS["development"])["jobs"].values()))["with"]
+    rel = next(iter(load(ENTRY_POINTS["release"])["jobs"].values()))["with"]
+    assert dev["build-type"] == "development" and rel["build-type"] == "release"
+    assert dev["android-export"] != rel["android-export"]
+
+
+def test_development_cannot_target_production():
+    """A production build comes from Build / Release, or the artifact naming
+    stops meaning anything."""
+    envs = dispatch_inputs(load(ENTRY_POINTS["development"]))["environment"]["options"]
+    assert "production" not in envs, envs
+
+
+def test_every_build_entry_point_declares_its_build_type():
+    for key in ("development", "release"):
+        job = next(iter(load(ENTRY_POINTS[key])["jobs"].values()))
+        assert job["with"]["build-type"] == EXPECTED_BUILD_TYPE[key]
+
+
+def test_ci_builds_nothing():
+    """CI answers "is this safe to merge?" — it must not pay for player builds."""
+    workflow = load(BUILD_ENTRY_POINTS["ci"])
+    job = next(iter(workflow["jobs"].values()))
+    assert job["with"]["platform"] == "None", "CI would build players on every push"
+    assert sorted(triggers(workflow)) == ["pull_request", "push"]
+    assert "workflow_dispatch" not in triggers(workflow)
+
+
+def test_ci_skips_docs_only_changes():
+    on = triggers(load(BUILD_ENTRY_POINTS["ci"]))
+    for event in ("push", "pull_request"):
+        assert "**.md" in on[event]["paths-ignore"]
+
+
+# ---------------------------------------------------------------------------
+# Release layer: one workflow per platform, promoting immutable artifacts
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("key,path", sorted(RELEASE_ENTRY_POINTS.items()))
+def test_release_entry_point_promotes_a_stored_artifact(key, path):
+    """Release must never rebuild: the binary QA approved is the binary that ships."""
+    inputs = dispatch_inputs(load(path))
+    assert "artifact-name" in inputs, f"{key}: cannot name the artifact to promote"
+    assert inputs["artifact-name"]["default"].startswith("release-"), (
+        f"{key}: defaults to something other than a Build / Release artifact"
+    )
+    assert "start-phase" in inputs
+    assert inputs["start-phase"]["default"] != "build", (
+        f"{key}: defaults to rebuilding rather than promoting"
+    )
+
+
+@pytest.mark.parametrize("key,path", sorted(RELEASE_ENTRY_POINTS.items()))
+def test_release_entry_point_delegates_to_its_own_pipeline(key, path):
+    """One workflow per platform, because the lifecycles differ in shape."""
+    job = next(iter(load(path)["jobs"].values()))
+    assert f"pipeline-{key}-release.yml" in str(job["uses"])
+    assert "steps" not in job
+
+
+@pytest.mark.parametrize("key,path", sorted(RELEASE_ENTRY_POINTS.items()))
+def test_release_entry_point_can_dry_run(key, path):
+    assert "dry-run" in dispatch_inputs(load(path))
+
+
+def test_no_release_workflow_for_platforms_without_a_distribution_target():
+    """Windows and Linux produce standalone artifacts. Inventing a store for
+    them would be fiction."""
+    for absent in ("windows", "linux"):
+        assert absent not in RELEASE_ENTRY_POINTS
+        assert not list(TEMPLATES.glob(f"consumer-*release-{absent}.yml"))

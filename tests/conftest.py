@@ -161,10 +161,15 @@ def resolve_matrix():
 
     script = _matrix_step_script()
 
-    def run(platforms, environment="production", android_export="aab"):
+    def run(platforms, environment="production", android_export="aab",
+            build_type="", platform_input="All"):
         env = dict(os.environ)
         env["ENVIRONMENT"] = environment
         env["ANDROID_TYPE"] = android_export
+        # build-type is its own axis; empty derives it from the environment.
+        env["IN_BUILD_TYPE"] = build_type
+        # `None` is the CI lane: validate and test, build nothing.
+        env["IN_PLATFORM"] = platform_input
         for platform, key in PLATFORM_ENV.items():
             env[key] = "true" if platform in platforms else "false"
 
@@ -190,6 +195,7 @@ def resolve_matrix():
         raw["validate"] = json.loads(raw["validate-matrix"])
         raw["build_platforms"] = [r["platform"] for r in raw["build"]]
         raw["validate_platforms"] = [r["platform"] for r in raw["validate"]]
+        raw["artifact_names"] = [r["artifact-name"] for r in raw["build"]]
         return raw
 
     return run
