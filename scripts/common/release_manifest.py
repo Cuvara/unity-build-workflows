@@ -73,8 +73,22 @@ def size_of(path):
     return 0
 
 
+class AmbiguousReleaseSet(Exception):
+    """Two shippable artifacts claim the same platform."""
+
+
 def collect_artifact_manifests(search_root):
-    """Read every per-platform artifact-manifest.json under search_root."""
+    """Read every per-platform artifact-manifest.json under search_root.
+
+    Intermediates are skipped. iOS produces two artifacts in a release run —
+    the Xcode project Unity emits and the signed IPA stage 03b exports from it
+    — and both carry a manifest saying `"platform": "iOS"`. Taking whichever
+    turned up last is how a Release Set ends up promising to promote an Xcode
+    project, which nobody can install.
+
+    Two *shippable* artifacts for one platform is not a preference to resolve,
+    it is a broken build: raise rather than pick.
+    """
     root = Path(search_root)
     found = {}
     if not root.is_dir():
@@ -85,8 +99,18 @@ def collect_artifact_manifests(search_root):
         except (OSError, json.JSONDecodeError):
             continue
         platform = data.get("platform")
-        if platform:
-            found[platform] = data
+        if not platform:
+            continue
+        if data.get("intermediate"):
+            continue
+        if platform in found:
+            raise AmbiguousReleaseSet(
+                f"{platform} has two shippable artifacts — "
+                f"{found[platform].get('artifactName')} "
+                f"({found[platform].get('artifactType')}) and "
+                f"{data.get('artifactName')} ({data.get('artifactType')})"
+            )
+        found[platform] = data
     return found
 
 
@@ -140,7 +164,12 @@ def build_manifest(args, artifacts):
 
 
 def cmd_generate(args):
-    per_platform = collect_artifact_manifests(args.search_root)
+    try:
+        per_platform = collect_artifact_manifests(args.search_root)
+    except AmbiguousReleaseSet as exc:
+        print(f"::error::Release Set is ambiguous — {exc}. A promotion could not "
+              "tell which artifact it is meant to publish.", file=sys.stderr)
+        return 1
 
     artifacts = []
     for platform, data in sorted(per_platform.items()):
@@ -287,6 +316,44 @@ def cmd_verify(args):
     expect("build number", rs.get("buildNumber"), args.expect_build_number)
     expect("commit", rs.get("commit"), args.expect_commit)
     expect("artifact name", entry.get("artifactName"), args.expect_artifact_name)
+
+    # The seven fields that make up an artifact's identity must all be PRESENT,
+    # not merely unchallenged. `expect()` only compares when the caller supplied
+    # an expectation, so a manifest field that is empty passed every check —
+    # which is exactly how a Release Set with no version verified cleanly.
+    for label, value in (
+        ("source run id", rs.get("runId")),
+        ("commit", rs.get("commit")),
+        ("version", rs.get("version")),
+        ("build number", rs.get("buildNumber")),
+        ("platform", entry.get("platform")),
+        ("artifact name", entry.get("artifactName")),
+    ):
+        if not str(value or "").strip():
+            failures.append(f"the manifest records no {label} for this artifact")
+
+    # And they must agree with each other. One Release Set is one commit, one
+    # version, one build number (I-009); an artifact carrying different ones
+    # came from a different build and is not part of this set, whatever the
+    # filename says.
+    for label, artifact_value, set_value in (
+        ("commit", entry.get("commit"), rs.get("commit")),
+        ("version", entry.get("version"), rs.get("version")),
+        ("build number", entry.get("buildNumber"), rs.get("buildNumber")),
+    ):
+        if artifact_value and set_value and str(artifact_value) != str(set_value):
+            failures.append(
+                f"artifact {label} {artifact_value!r} does not match the Release "
+                f"Set's {set_value!r} — this artifact is not part of this set"
+            )
+
+    # An intermediate is a step on the way to a shippable artifact. Promoting
+    # one would ship something nobody can install.
+    if entry.get("intermediate"):
+        failures.append(
+            f"{entry.get('artifactName')} is an intermediate "
+            f"({entry.get('artifactType')}), not a shippable artifact"
+        )
 
     # The check a filename cannot give you: are these the same bytes?
     declared = entry.get("sha256") or ""

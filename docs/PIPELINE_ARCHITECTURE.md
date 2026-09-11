@@ -96,7 +96,7 @@ They differ on their own axis, `build-type`, which is what names the artifacts:
 | Platform | Development | Release |
 |---|---|---|
 | Android | `development-android-apk` | `release-android-aab` |
-| iOS | `development-ios-xcodeproj` | `release-ios-xcodeproj` |
+| iOS | `development-ios-xcodeproj` | `release-ios-ipa` (the Xcode project is uploaded too, marked as an intermediate) |
 | WebGL | `development-webgl` | `release-webgl` |
 | Windows | `development-windows` | `release-windows` |
 | Linux | `development-linux` | `release-linux` |
@@ -189,11 +189,25 @@ Both are first-class Unity build targets (`StandaloneWindows64`,
 `StandaloneLinux64`, and `+Server` for the dedicated-server subtarget) and
 appear in both build matrices.
 
-Neither has a release workflow. They produce standalone artifacts and this
-project has no distribution target for them; inventing one would be fiction.
-When a real target appears — Steam, itch, direct download — it becomes
-`23-release-windows.yml` alongside the others, with no change to the build
-layer.
+Both have a release workflow now that a real distribution target exists:
+`23-release-windows.yml` and `24-release-linux.yml` promote to Steam. They
+arrived with no change to the build layer, which is what the split was for.
+
+Platform and distribution provider stay separate (I-015). Windows and Linux are
+PLATFORMS: `Build / Release` never mentions Steam, so no Steam variable or
+secret can prevent a desktop build, and a test fails if one appears there.
+Steam is a DISTRIBUTION PROVIDER: its configuration gates publishing, and it
+fails loudly when absent rather than skipping quietly. See
+`docs/STEAM_DISTRIBUTION.md`.
+
+Both artifacts go through stage 04 like everyone else, using the shared
+`desktop` validator (`scripts/desktop/validate_desktop_artifact.py`): the
+executable exists and is the right kind, its `<Product>_Data` directory is
+beside it with an engine payload and game code inside, the Unity runtime
+library is present, and on Linux the executable bit survived the artifact
+round-trip. A player missing any of those starts to nothing on a user's
+machine and looks perfectly fine in an artifact listing, which is why desktop
+having no validator at all was a hole rather than an omission.
 
 ---
 
@@ -344,7 +358,29 @@ Downstream stages **read these**; they never re-scan `build/` guessing which
 file is the artifact. A failed build still gets a manifest, so the report can
 say what was being built when it broke.
 
-### 5a. Builder provenance (I-008)
+### 5a. iOS: the shippable artifact is not what Unity emits
+
+Every other platform's build produces the thing that ships. iOS produces an
+Xcode project, and what ships is a signed IPA exported from it — so a release
+run uploads two iOS artifacts:
+
+| Artifact | Role |
+|---|---|
+| `release-ios-xcodeproj` | Stage 03b's input. Marked `"intermediate": true`. |
+| `release-ios-ipa` | The signed, validated binary. This is what a Release Set contains and what a promotion publishes. |
+
+Both carry a manifest saying `"platform": "iOS"`. The Release Set skips
+intermediates, so it takes the IPA; if two *shippable* artifacts ever claim one
+platform it raises rather than picking, because picking silently is how a
+Release Set ended up promising to promote an Xcode project.
+
+Signing happens in `Build / Release` (stage 03b), before the immutable
+boundary, and stage 04 validates the IPA rather than the project. That ordering
+is I-004 and it is not negotiable: if the IPA were exported during promotion,
+the binary QA validated (a project) would not be the binary that ships, and the
+promotion would be building — which I-005 forbids outright.
+
+### 5b. Builder provenance (I-008)
 
 Every artifact manifest carries a `builderProvenance` block answering "exactly
 what produced this binary?":

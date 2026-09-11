@@ -287,11 +287,20 @@ def check_production_is_gated(workflows_dir, report):
             continue
         for job_id in production:
             job = workflow["jobs"][job_id]
-            if job.get("environment") != "production":
+            # The rule is "a production deployment is protected by a GitHub
+            # Environment", not "the Environment is called exactly
+            # production". A Steam release goes to `steam-production`, which
+            # is a distinct approval boundary from the app stores' and should
+            # be a distinct Environment; requiring one shared name would push
+            # two providers behind one set of reviewers.
+            environment = job.get("environment")
+            if isinstance(environment, dict):
+                environment = environment.get("name")
+            if not environment or "production" not in str(environment):
                 report.fail(
                     "I-011",
-                    f"{path.name}:{job_id} publishes to production without the "
-                    "`production` Environment, so nothing enforces approval",
+                    f"{path.name}:{job_id} publishes to production without a "
+                    "production Environment, so nothing enforces approval",
                 )
             else:
                 report.ok("I-011", f"{path.name}:{job_id} is Environment-protected")

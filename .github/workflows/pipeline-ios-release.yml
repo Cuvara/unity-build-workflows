@@ -162,7 +162,7 @@ on:
 
     outputs:
       artifact-name:
-        description: Name of the Xcode project artifact
+        description: Name of the signed IPA artifact this run promoted
         value: ${{ inputs.artifact-name }}
 
   workflow_dispatch:
