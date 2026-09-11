@@ -64,6 +64,96 @@ pipelines. That separation is the point: see §4.
 
 ---
 
+## 1a. Entry workflows — the user-facing layer
+
+Stages 01–08 describe the *engine*. What a person actually clicks is a separate
+concern, and it is solved with separate files rather than a bigger form.
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `unity-build.yml` | push / pull_request | **Automatic** CI. No form at all — every setting is resolved per branch by `resolve_build_flow.sh` from the repository variables. |
+| `build-android.yml` | manual | Android only. The **only** place the APK/AAB choice appears. |
+| `build-ios.yml` | manual | iOS only. Exposes the macOS runner labels the lane needs. |
+| `build-webgl.yml` | manual | WebGL only. |
+| `build-all.yml` | manual | Every platform in the environment's `*_BUILD_PLATFORMS` variable. |
+
+All five call the same `unity-pipeline.yml` engine. None of them contains build
+logic — each is a single delegating job with a `with:` block. Templates live in
+`templates/consumer-build-*.yml`; `tests/test_entry_workflows.py` pins the
+contract.
+
+### Why separate files instead of one form
+
+`workflow_dispatch` has **no conditional input visibility**. A single
+multi-platform form therefore has to show every platform's options to everyone:
+choosing `Target platform: iOS` still left `Android output: APK/AAB` on screen,
+and the form had grown to fourteen fields, most irrelevant to any given run.
+
+GitHub offers no way to hide an input based on another input's value, and
+faking one (a `platform` input that silently ignores the fields that do not
+apply) trades a visible problem for an invisible one. Splitting the **entry
+point** is the only mechanism that produces a form containing just the
+applicable options — and it costs nothing structurally, because the
+implementation is shared underneath:
+
+```
+build-android.yml ──┐
+build-ios.yml     ──┤
+build-webgl.yml   ──┼──→ unity-pipeline.yml ──→ reusable-build-platform.yml
+build-all.yml     ──┤        (stages 01–08)          (the one build executor)
+unity-build.yml   ──┘
+```
+
+Nesting: entry → pipeline → platform executor = **3 of GitHub's 4** levels.
+
+### Input groups
+
+The dispatch form cannot group fields, so each input's description carries its
+group as a prefix and the declaration order is the display order:
+
+| Group | Inputs | Who changes them |
+|---|---|---|
+| `GENERAL` | environment | everyone |
+| `ANDROID` / `IOS` / `WEBGL` | platform-specific (e.g. output format) | everyone, on that platform |
+| `QUALITY` | run-tests, test-mode | everyone |
+| `CONTENT` | build-addressables | everyone |
+| `UNITY` | unity-version, clean-build, define-symbols | occasionally |
+| `ADVANCED` | runner-type, build-engine, activation-strategy, runner-labels | rarely — infrastructure |
+
+A normal developer needs `GENERAL` and the platform group. Everything under
+`ADVANCED` defaults to `auto`, meaning "use the repository variable"; the engine
+spells that as an empty string, and the entry point translates.
+
+### What is deliberately *not* on these forms
+
+- **`android-export` on `build-all.yml`.** An output format for one platform
+  does not belong on a multi-platform form. Build All takes the format from the
+  environment (release → AAB, otherwise APK). Use `build-android.yml` to
+  override.
+- **A platform picker on `build-all.yml`.** The platform set is the
+  environment's `*_BUILD_PLATFORMS` variable, so a dropdown could only drift
+  from it. Build one platform with its own workflow.
+- **WebGL compression.** `compress_webgl.sh` runs in `unity-build-webgl.yml`,
+  the deployment lane used by `pipeline-webgl-release.yml` — *not* in the
+  `reusable-build-platform.yml` lane these entry points drive. A knob the
+  engine does not read would be a lie in the form. On this lane compression is
+  whatever the Unity project's WebGL settings emit, and stage 04 validates that
+  it is at least *consistent*.
+- **iOS signing/export.** Certificates live in the release pipeline. Stage 03
+  for iOS emits the Unity-exported Xcode project; the IPA is produced,
+  signed and validated by `pipeline-ios-release.yml`.
+- **`runner-mode`.** Superseded by `runner-type` + `build-engine`. The engine
+  still accepts it for backward compatibility; new forms do not offer it.
+
+### Adding a new entry workflow
+
+Copy the nearest `templates/consumer-build-*.yml`, change `platform:`, the job
+`name:`, and the concurrency group, then add the platform's own inputs under
+their own group. Add the key to `ENTRY_POINTS` in
+`tests/test_entry_workflows.py` and the shared contract is enforced for it.
+
+---
+
 ## 2. Node naming convention
 
 A node name must answer *platform, configuration, artifact type* without the

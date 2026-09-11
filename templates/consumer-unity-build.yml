@@ -25,96 +25,21 @@
 
 name: Unity Build
 
+# Manual builds live in the per-platform entry workflows, NOT here:
+#
+#   Build Android  → build-android.yml   (exposes the APK/AAB choice)
+#   Build iOS      → build-ios.yml       (exposes the macOS runner labels)
+#   Build WebGL    → build-webgl.yml
+#   Build All      → build-all.yml       (platforms from *_BUILD_PLATFORMS)
+#
+# This file is the AUTOMATIC lane only: push and pull_request. Platform set,
+# environment, tests and Addressables are resolved per branch by
+# resolve_build_flow.sh from the repository variables, so there is nothing here
+# for a human to fill in — which is why the workflow_dispatch form was removed.
+# A 14-field form that showed Android's output format to somebody building iOS
+# was the reason the entry points were split.
+
 on:
-  workflow_dispatch:
-    inputs:
-      platform:
-        description: "Platform(s) to build"
-        required: false
-        default: All
-        type: choice
-        options: [All, Android, WebGL, Linux64, LinuxServer, Windows64, iOS]
-
-      environment:
-        description: "Build environment"
-        required: false
-        default: production
-        type: choice
-        options: [development, staging, production]
-
-      run-tests:
-        description: "Run EditMode/PlayMode tests before building"
-        required: false
-        default: false
-        type: boolean
-
-      test-mode:
-        description: "Test suite (only when run-tests=true)"
-        required: false
-        default: All
-        type: choice
-        options: [EditMode, PlayMode, All]
-
-      build-addressables:
-        description: "Run Addressable build pipeline before platform builds"
-        required: false
-        default: false
-        type: boolean
-
-      activation-strategy:
-        description: "Unity license activation strategy (docker lane only)"
-        required: false
-        default: auto
-        type: choice
-        options: [auto, manual-license, account, serial, preactivated, none]
-
-      runner-mode:
-        description: "Legacy single-axis lane selector (prefer runner-type + build-engine below)"
-        required: false
-        default: docker
-        type: choice
-        options: [docker, self-hosted-windows, self-hosted-macos, auto]
-
-      runner-type:
-        description: "WHERE the job runs (blank = repo/org variable RUNNER_TYPE, else github-hosted)"
-        required: false
-        default: ''
-        type: choice
-        options: ['', github-hosted, self-hosted]
-
-      build-engine:
-        description: "HOW Unity builds (blank = repo/org variable BUILD_ENGINE, else docker)"
-        required: false
-        default: ''
-        type: choice
-        options: ['', docker, local]
-
-      runner-labels:
-        description: "Comma-separated runs-on labels for a self-hosted runner, e.g. self-hosted,windows"
-        required: false
-        default: ''
-        type: string
-
-      unity-version:
-        description: "Override Unity version (leave blank to read from ProjectVersion.txt)"
-        required: false
-        default: ''
-        type: string
-
-      clean-build:
-        description: "Clean Library cache before building. auto = use the BUILD_CLEAN repo variable"
-        required: false
-        default: auto
-        type: choice
-        options: [auto, 'true', 'false']
-
-      android-export:
-        description: "Android output: apk (installable) or aab (Play Store bundle)"
-        required: false
-        default: apk
-        type: choice
-        options: [apk, aab]
-
   push:
     branches:
       - develop
@@ -130,8 +55,12 @@ on:
 # Cancel in-progress runs on the same branch when a new commit is pushed.
 # workflow_dispatch runs are not cancelled (each manual trigger is intentional).
 concurrency:
-  group: unity-build-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  # No lane in the key any more: this workflow only serves push/pull_request,
+  # which carry no inputs, so every run of a given ref used the same 'auto'
+  # placeholders. Manual lane overrides now live in the per-platform entry
+  # workflows, each with its own concurrency group.
+  group: unity-build-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
 
 jobs:
   pipeline:
@@ -143,21 +72,9 @@ jobs:
     uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2
     secrets: inherit
     with:
-      # ── Dispatch inputs (fall back to sensible defaults for push/PR events) ──
-      platform:             ${{ inputs.platform            || 'All' }}
-      environment:          ${{ inputs.environment         || 'production' }}
-      run-tests:            ${{ inputs.run-tests           || false }}
-      test-mode:            ${{ inputs.test-mode           || 'All' }}
-      build-addressables:   ${{ inputs.build-addressables  || false }}
-      activation-strategy:  ${{ inputs.activation-strategy || 'auto' }}
-      runner-mode:          ${{ inputs.runner-mode         || 'docker' }}
-      runner-type:          ${{ inputs.runner-type         || '' }}
-      build-engine:         ${{ inputs.build-engine        || '' }}
-      runner-labels:        ${{ inputs.runner-labels       || '' }}
-      unity-version:        ${{ inputs.unity-version       || '' }}
-      clean-build:          ${{ inputs.clean-build         || 'auto' }}
-      android-export:       ${{ inputs.android-export      || 'apk' }}
-
-      # ── Fixed per-project values ───────────────────────────────────────────
-      project-path: '.'
-      toolkit-ref:  'v2'   # MUST match the @ref above (use 'v2.2.5' for exact pin; 'main' for dev)
+      # Everything else is resolved per branch by resolve_build_flow.sh from the
+      # repository variables — platform set, environment, tests, Addressables,
+      # define symbols, runner lane and Android output format. Passing empty
+      # overrides from a form that no longer exists would only mask that.
+      project-path:        '.'
+      toolkit-ref:         'main'

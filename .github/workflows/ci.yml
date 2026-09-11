@@ -84,6 +84,30 @@ jobs:
         # runs in its own job. This job exists for the workflow-schema errors.
         run: ./actionlint -color -shellcheck= -pyflakes=
 
+      # templates/ is copied verbatim into consumer repositories, so a broken
+      # template ships breakage to every project that adopts it — but it lives
+      # outside .github/workflows/ and so is invisible to the scan above.
+      # Stage the templates into a throwaway workflows directory and lint them
+      # as what they are.
+      - name: Lint consumer templates
+        run: |
+          set -Eeuo pipefail
+          shopt -s nullglob
+          TEMPLATES=(templates/consumer-*.yml)
+          if [ ${#TEMPLATES[@]} -eq 0 ]; then
+            echo "No consumer templates to lint."
+            exit 0
+          fi
+          WORK=$(mktemp -d)
+          mkdir -p "$WORK/.github/workflows"
+          for f in "${TEMPLATES[@]}"; do
+            cp "$f" "$WORK/.github/workflows/$(basename "$f")"
+          done
+          cp .github/actionlint.yaml "$WORK/.github/" 2>/dev/null || true
+          git -C "$WORK" init -q .
+          "$PWD/actionlint" -color -shellcheck= -pyflakes= \
+            $(printf "%s\n" "$WORK/.github/workflows/"*.yml)
+
   ci-report:
     name: CI Report
     needs: [tests, shellcheck, actionlint]
