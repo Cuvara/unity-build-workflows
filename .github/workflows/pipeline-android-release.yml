@@ -1,13 +1,18 @@
 name: Pipeline Android Release
 
-# Self-contained Android release pipeline:
-#   Build AAB → Validate → Release Notes → Internal Testing → External Testing → Production
+# Android promotion pipeline — PROMOTE ONLY. This workflow builds nothing.
 #
-# Each release phase is a separate job gated by GitHub Environments.
-# The build step calls unity-build-android.yml with deploy-target=none (no embedded deploy).
-# Store deployment uses dedicated scripts and composite actions.
+#   Verify Identity → Validate AAB → Release Notes → Internal → External → Production
 #
-# Nesting depth: orchestrator → this → unity-build-android = 3 levels (safe).
+# It consumes an artifact that `Build / Release` already produced and signed,
+# pinned by `source-run-id`, and publishes those exact bytes. Every phase is a
+# separate job gated by a GitHub Environment.
+#
+# The absence of a build step is the point (I-005): the bytes QA approved must
+# be the bytes that ship, and a rebuild — however identical the inputs look —
+# produces a different artifact that nobody approved. `check_promotion_never_
+# mutates` in scripts/common/validate_pipeline_invariants.py fails CI if a
+# build, export or signing operation reappears here.
 
 on:
   workflow_call:
