@@ -55,6 +55,11 @@ ALLOWED_PATHS = frozenset({
     # License generation runs unity-editor -batchmode inside Docker to
     # produce a .ulf activation file. Not a project build invocation.
     ".github/workflows/unity-generate-license.yml",
+    # The invariant checker DENIES these operations in promotion workflows, so
+    # it necessarily contains their names as a denylist. Matching on the string
+    # here is a false positive: this file forbids Unity invocations, it does
+    # not perform one.
+    "scripts/common/validate_pipeline_invariants.py",
     # Explicit-platform-jobs reusable workflows: docker lane uses game-ci
     # (approved Personal/free path); self-hosted lanes invoke the local Unity
     # editor in batchmode by design.

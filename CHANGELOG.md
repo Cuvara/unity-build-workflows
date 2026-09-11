@@ -12,6 +12,118 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **Builder provenance (I-008).** Every artifact manifest now carries a
+  `builderProvenance` block — builder, kind (`docker`/`native`), image
+  reference and digest when resolvable, Unity version and runner — so "exactly
+  what produced this binary?" is answerable months later. `provenanceStrength`
+  is derived rather than asserted: `immutable` requires a content digest,
+  `auditable` covers a tag or a runner's own Unity install, and a caller
+  claiming `immutable` without a digest is downgraded, not believed. A Release
+  Set reports the weakest strength among its artifacts and
+  `release_manifest.py generate` fails closed on one recorded as `unknown`.
+
+### Changed
+
+- **I-008 redefined** from "release uses immutable Unity image references" to
+  "release builds have immutable **or** auditable builder provenance,
+  recorded". The old rule could only be satisfied by Docker with a pinned
+  digest, which for `game-ci/unity-builder` means forking it or shipping a
+  custom image, and which a native macOS iOS build could never satisfy at all
+  — the invariant was deciding the architecture. Docker is not required and no
+  custom image is introduced. The three CI checks now verify that every lane
+  writing an artifact manifest records provenance, that `immutable` is gated on
+  a digest, and that an untraceable artifact cannot enter a Release Set. The
+  builder itself is unchanged; limitations are stated in
+  `docs/PIPELINE_ARCHITECTURE.md` §5a rather than hidden.
+
+- **Platform capabilities.** A project declares which targets it can build via
+  the `PLATFORMS` variable (`Android,WebGL`). That is a different question from
+  `*_BUILD_PLATFORMS`, which says which of them a branch builds — capability
+  wins, so asking for a platform the project does not support produces no job
+  at all. Enforced at `set_platforms_from_list`, the one chokepoint every path
+  (branch flow and manual dispatch) already went through, so there is no second
+  configuration system. Unset means all platforms, leaving existing projects
+  unaffected. Windows and Linux go through the identical gate — no separate
+  code path, no distribution provider required to produce an artifact.
+- **Release Set manifest** (`scripts/common/release_manifest.py`). One
+  `Build / Release` run is one Release Set: a commit, a version, a build
+  number, a Unity version and the artifacts built from them. Stage 05 collects
+  the per-platform manifests, hashes the real bytes, refuses a set whose
+  artifacts disagree on commit or version, and uploads `release-manifest` with
+  90-day retention.
+- **Artifact identity verification.** Each promotion now begins with
+  `04 / <Platform> / Verify Release Identity`, which downloads the manifest
+  from the source run and checks run id, version, build number, commit,
+  artifact name and SHA-256 before anything else runs. It fails closed: a
+  promotion that cannot prove what it is holding does not publish it. A
+  filename establishes nothing.
+- **Pipeline invariant policy and checker** —
+  `.github/pipeline-policy/invariants.md` and
+  `scripts/common/validate_pipeline_invariants.py`, wired into CI as a required
+  gate. 25 static checks covering the immutable-artifact boundary, promotion
+  purity, release-set consistency, capability filtering, build-number
+  resolution and production Environment protection. These are properties that
+  do not fail a build when broken — they produce a pipeline that looks healthy
+  and ships the wrong bytes.
+
+### Changed
+
+- **BREAKING — iOS production signing moved into `Build / Release` (stage 03b).**
+  Signing used to run during promotion, which broke the invariant the whole
+  design rests on: the artifact QA validated was an Xcode *project*, and the
+  artifact that shipped was an IPA built from it afterwards. Those are not the
+  same binary. `Build / Release` now emits a signed `release-ios-ipa`, stage 04
+  validates *that* with `REQUIRE_SIGNED` against the resolved version and build
+  number, and `Release / iOS` only downloads, verifies and publishes. The
+  distribution secrets moved with the work.
+
+  The boundary is machine-checked, not reviewed:
+  `test_promotion_cannot_modify_the_binary` scans every promotion job's `uses`
+  and `run` for anything that builds, archives, signs, re-exports or
+  recompresses, and fails the suite if one appears.
+- **BREAKING — Android's store counter no longer comes from the major version.**
+  `bundleVersionCode` was `cfg.BundleVersion.Split('.')[0]`, so every `1.x.y`
+  release uploaded versionCode `1` and Google Play refused the second one.
+  `game-ci/unity-builder` was also invoked with no version at all, falling back
+  to Semantic versioning from git tags and generating its own counter — two
+  runs of the same commit could disagree, and nothing guaranteed the number
+  increased.
+
+  Stage 01 now resolves the build number once and every platform receives the
+  same value, reusing the convention `IOSBuilder` already applied for
+  `CFBundleVersion` (`BUILD_NUMBER` → `GITHUB_RUN_NUMBER`) rather than
+  inventing a second scheme, plus a `BUILD_NUMBER_OFFSET` repository variable
+  for projects whose store history predates this pipeline. It reaches the
+  builder three ways because three consumers need it: `androidVersionCode`,
+  `version`, and the `BUILD_NUMBER` environment variable.
+- **BREAKING — the release pipelines are promote-only.** They can no longer
+  build. `start-phase: build` is gone, the Unity build job is removed from
+  each, and `release-orchestrator.yml` — which built and released in one run —
+  is retired. "The binary QA approved is the binary that ships" stops being a
+  convention and becomes structural: there is no code path in the release layer
+  that can produce a binary.
+
+  A release is now always two steps:
+
+      Build / Release   →  release-android-aab  (immutable)
+      Release / Android →  validate → publish → release
+
+  iOS keeps its IPA export, because turning an Xcode project into a signed IPA
+  needs the distribution certificate — that is a release concern, not a build
+  one.
+
+  Migration: `Release / *` gains a **required** `source-run-id` input naming
+  the `Build / Release` run that produced the artifact.
+  `actions/download-artifact` only sees the current run by default, so without
+  it a promotion cannot physically find the binary. The `Build / Release`
+  report prints the exact command, run id included.
+
+  `start-phase` options are now `validate | internal | external | production`
+  (`validate | staging | production` for WebGL), defaulting to the first
+  publish phase.
+
+### Added
+
 - **Stage 07 — Report & Notify in the release pipelines.** They ended at stage
   06, so a release run produced no report at all: the only way to see how far
   a promotion got was to read the graph. Each pipeline now ends with
