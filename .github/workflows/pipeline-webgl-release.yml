@@ -200,6 +200,17 @@ on:
         type: boolean
         default: false
 
+# The pipeline's stages, declared once. Every job renders this same
+# ladder with itself marked, so the run summary grows into a progress
+# view while the run is still going — GitHub draws no progress on a
+# workflow node, and the graph shows shape without distance.
+env:
+  PIPELINE_STAGES: |
+    04 Verify Release Identity
+    04 Validate
+    05 Deploy — Staging
+    06 Deploy — Production
+
 jobs:
   # ─── 04 — VERIFY RELEASE IDENTITY ───────────────────────────────────────────
   # A filename establishes nothing. This proves the downloaded bytes are the
@@ -244,7 +255,18 @@ jobs:
             --expect-run-id        "${{ inputs.source-run-id }}" \
             --expect-artifact-name "${{ inputs.artifact-name }}" \
             --expect-version       "${{ inputs.build-version }}"
+
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / WebGL
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Verify Release Identity
   # ─── 04 — ARTIFACT VALIDATION ───────────────────────────────────────────────
+
   validate-webgl:
     name: 04 / WebGL / Validate
     needs: [verify-artifact]
@@ -296,9 +318,20 @@ jobs:
           path: validation-webgl.json
           retention-days: 30
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / WebGL
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Validate
+
   # ─── 05 — PUBLISH: STAGING ──────────────────────────────────────────────────
   # Staging is the automated half — it deploys the validated artifact as soon
   # as stage 04 is green. It downloads the stored artifact; it never rebuilds.
+
   deploy-staging:
     name: 05 / WebGL / Deploy — Staging
     needs: [verify-artifact, validate-webgl]
@@ -368,10 +401,21 @@ jobs:
             echo "- **URL:** ${{ steps.deploy.outputs.url || 'n/a' }}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / WebGL
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 05 Deploy — Staging
+
   # ─── 06 — RELEASE: PRODUCTION ───────────────────────────────────────────────
   # Gated by the `production` GitHub Environment. Add required reviewers there
   # and this node waits for a human before anything reaches the live site — a
   # successful build is never sufficient reason to publish production.
+
   deploy-production:
     name: 06 / WebGL / Deploy — Production
     needs: [verify-artifact, deploy-staging]
@@ -426,11 +470,22 @@ jobs:
             echo "- **URL:** ${{ steps.deploy.outputs.url || 'n/a' }}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / WebGL
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 06 Deploy — Production
+
   # ─── 07 — REPORT & NOTIFY ───────────────────────────────────────────────────
   # The pipeline used to end at stage 06, so a release run produced no report:
   # the only way to see how far a promotion got was to read the graph. This
   # says which phase it reached, or which one stopped it, and posts the same
   # to Discord.
+
   report:
     name: 07 / WebGL / Report & Notify
     needs: [verify-artifact, validate-webgl, deploy-staging, deploy-production]

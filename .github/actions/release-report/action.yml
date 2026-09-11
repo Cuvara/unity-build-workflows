@@ -45,6 +45,10 @@ inputs:
     description: Discord webhook. Empty disables the notification.
     required: false
     default: ''
+  toolkit-path:
+    description: Where the toolkit is checked out, for the shared progress renderer.
+    required: false
+    default: .toolkit
 
 runs:
   using: composite
@@ -61,10 +65,12 @@ runs:
         DRY_RUN: ${{ inputs.dry-run }}
         PHASES: ${{ inputs.phases }}
         RUN_URL: ${{ inputs.run-url }}
+        TOOLKIT_PATH: ${{ inputs.toolkit-path }}
       run: |
         set -Eeuo pipefail
         python3 - <<'PY'
         import os
+        import sys
 
         env = os.environ
         rows = []
@@ -87,10 +93,6 @@ runs:
         failed = next(((l, r) for l, r in rows if not passed(r)), None)
         overall = "failure" if failed else "success"
 
-        done = sum(1 for _, r in rows if passed(r))
-        width = 24
-        filled = round(width * done / len(rows)) if rows else 0
-
         out = []
         w = out.append
         w(f"## Release / {env['PLATFORM']} — Report")
@@ -104,9 +106,31 @@ runs:
             headline += f" — reached **{reached}**"
         w(headline)
         w("")
-        w("```text")
-        w(f"{'progress':<16} {'█' * filled}{'░' * (width - filled)}  {done}/{len(rows)} phases")
-        w("```")
+
+        # The same ladder the live markers drew during the run, so what you
+        # watched and what you read afterwards are the same picture. One
+        # aggregate bar told you a fraction and not which phase it stopped at.
+        sys.path.insert(0, os.path.join(env.get("TOOLKIT_PATH", ".toolkit"),
+                                        "scripts", "common"))
+        try:
+            from pipeline_progress import render
+            note = ""
+            if failed:
+                note = f"Stopped at {failed[0]} ({failed[1]})."
+            elif env.get("DRY_RUN") == "true":
+                note = "Dry run — nothing was published."
+            w("```text")
+            w(render(f"Release / {env['PLATFORM']}", rows, note))
+            w("```")
+        except ImportError:
+            # A progress ladder must never be the reason a release report fails.
+            done = sum(1 for _, r in rows if passed(r))
+            width = 24
+            filled = round(width * done / len(rows)) if rows else 0
+            w("```text")
+            w(f"{'progress':<16} {'█' * filled}{'░' * (width - filled)}  "
+              f"{done}/{len(rows)} phases")
+            w("```")
         w("")
         w("| Field | Value |")
         w("|---|---|")

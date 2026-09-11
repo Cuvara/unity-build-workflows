@@ -1,0 +1,68 @@
+name: Pipeline Progress
+description: >-
+  Draw where the run has got to, into the job summary.
+
+  GitHub renders no progress indicator on a workflow node: the graph shows
+  shape and colour but not distance. A job calls this as it finishes, and
+  because job summaries accumulate on the run page, the ladder grows while the
+  run is still going — so "how far did this get?" is answerable without
+  reading the graph and reconstructing the order by eye.
+
+  A composite action rather than a reusable workflow because the release
+  pipelines already spend 3 of GitHub's 4 workflow_call levels.
+
+inputs:
+  title:
+    description: Heading for the ladder, e.g. "Release / Android".
+    required: true
+  stages:
+    description: >-
+      Newline-separated stage labels in pipeline order, optionally
+      `label=result`. Declare this once as a workflow-level `env` and pass it
+      from every job, so the ladder cannot disagree with itself.
+    required: true
+  current:
+    description: >-
+      The stage this job is. Everything before it renders as done, everything
+      after as pending. Omit to render the results in `stages` as they are.
+    required: false
+    default: ''
+  note:
+    description: One line under the ladder, e.g. why it stopped.
+    required: false
+    default: ''
+  heading:
+    description: Markdown heading above the block.
+    required: false
+    default: ''
+  toolkit-path:
+    description: Where the toolkit is checked out in this job.
+    required: false
+    default: .toolkit
+
+runs:
+  using: composite
+  steps:
+    - name: Render progress
+      shell: bash
+      env:
+        TITLE: ${{ inputs.title }}
+        STAGES: ${{ inputs.stages }}
+        CURRENT: ${{ inputs.current }}
+        NOTE: ${{ inputs.note }}
+        HEADING: ${{ inputs.heading }}
+        TOOLKIT: ${{ inputs.toolkit-path }}
+      run: |
+        set -Eeuo pipefail
+        SCRIPT="${TOOLKIT}/scripts/common/pipeline_progress.py"
+        if [ ! -f "${SCRIPT}" ]; then
+          # A progress indicator must never be the reason a release fails.
+          echo "::warning::${SCRIPT} not found — skipping the progress ladder"
+          exit 0
+        fi
+        python3 "${SCRIPT}" \
+          --title   "${TITLE}" \
+          --stages  "${STAGES}" \
+          --current "${CURRENT}" \
+          --note    "${NOTE}" \
+          --heading "${HEADING}"

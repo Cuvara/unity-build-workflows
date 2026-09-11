@@ -262,6 +262,51 @@ of the same `tr`.
 
 ---
 
+### 2a. The progress ladder
+
+GitHub renders no progress indicator on a workflow node. The graph shows shape
+and colour but not distance: with eleven nodes, three of them matrix legs and
+four legitimately skipped, "how far did this get?" is a question the graph
+cannot answer and a reader has to reconstruct by eye.
+
+So each pipeline draws its own. Every stage job calls
+`.github/actions/pipeline-progress` as it finishes, and because job summaries
+accumulate on the run page, the ladder grows while the run is still going:
+
+```text
+Release / Android
+                                     ████████████░░░░░░░░░░░░  3/6 stages
+
+  [x] 04 Verify Release Identity     ████████ done
+  [x] 04 Validate AAB                ████████ done
+  [x] 04 Release Notes               ████████ done
+  [>] 05 Publish — Internal Testing  ████░░░░ running
+      06 Release — External Testing  ░░░░░░░░ pending
+      06 Release — Production        ░░░░░░░░ pending
+```
+
+The stage list is declared **once**, as a workflow-level `PIPELINE_STAGES`
+env, and every job renders that same list with itself marked. Per-job lists
+would drift, and a ladder that disagrees with itself between two jobs of one
+run is worse than no ladder.
+
+The final report (`.github/actions/release-report`) renders the same ladder
+from the actual results, so what you watched during the run and what you read
+afterwards are the same picture.
+
+**The arithmetic is the part worth knowing.** A phase skipped *on purpose* —
+a dry run, a later `start-phase`, a platform this project does not ship —
+counts as distance covered, because it is not a stall and drawing it as one
+would make every normal run look stuck. A phase skipped *because something
+earlier failed* does not count, and renders as `not reached`: otherwise a
+failed run counts its own wreckage as progress, and "4/5 stages" beside a red
+cross reads as nearly finished when nothing after the failure was attempted.
+
+The ladder is `continue-on-error` everywhere. A progress indicator is not worth
+failing a release over.
+
+---
+
 ## 3. The quality gate
 
 `02 / Quality Gate` is a cheap ubuntu job that every stage-03 build depends on.

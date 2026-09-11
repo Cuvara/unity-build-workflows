@@ -211,6 +211,19 @@ on:
         type: boolean
         default: false
 
+# The pipeline's stages, declared once. Every job renders this same
+# ladder with itself marked, so the run summary grows into a progress
+# view while the run is still going — GitHub draws no progress on a
+# workflow node, and the graph shows shape without distance.
+env:
+  PIPELINE_STAGES: |
+    04 Verify Release Identity
+    04 Validate AAB
+    04 Release Notes
+    05 Publish — Internal Testing
+    06 Release — External Testing
+    06 Release — Production
+
 jobs:
   # ─── 04 — VERIFY RELEASE IDENTITY ───────────────────────────────────────────
   # A filename establishes nothing. This proves the downloaded bytes are the
@@ -277,7 +290,18 @@ jobs:
             --package-name  "${{ inputs.package-name }}" \
             --build-number  "${BUILD_NUMBER}" \
             ${{ inputs.allow-unverified-build-number && '--allow-unverified' || '' }}
+
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / Android
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Verify Release Identity
   # ─── VALIDATE AAB ───────────────────────────────────────────────────────────
+
   validate-aab:
     name: 04 / Android / Validate AAB
     needs: [verify-artifact]
@@ -329,7 +353,18 @@ jobs:
           path: validation-android.json
           retention-days: 30
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / Android
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Validate AAB
+
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
+
   release-notes:
     name: 04 / Android / Release Notes
     needs: [verify-artifact]
@@ -367,7 +402,18 @@ jobs:
           path: release-notes.json
           retention-days: 7
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / Android
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Release Notes
+
   # ─── PHASE 1: INTERNAL TESTING ──────────────────────────────────────────────
+
   internal-testing:
     name: 05 / Android / Publish — Internal Testing
     needs: [verify-artifact, validate-aab, release-notes]
@@ -429,7 +475,18 @@ jobs:
           echo "- **Version:** ${{ inputs.build-version }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Track:** internal" >> "${GITHUB_STEP_SUMMARY}"
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / Android
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 05 Publish — Internal Testing
+
   # ─── PHASE 2: EXTERNAL TESTING ─────────────────────────────────────────────
+
   external-testing:
     name: 06 / Android / Release — External Testing
     needs: [verify-artifact, internal-testing]
@@ -464,7 +521,18 @@ jobs:
           echo "### Phase 2: External Testing" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Promoted:** internal → alpha" >> "${GITHUB_STEP_SUMMARY}"
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / Android
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 06 Release — External Testing
+
   # ─── PHASE 3: PRODUCTION ───────────────────────────────────────────────────
+
   production-release:
     name: 06 / Android / Release — Production
     needs: [verify-artifact, internal-testing, external-testing, release-notes]
@@ -529,11 +597,22 @@ jobs:
             echo "Staged rollout active. Use \`update_rollout.py --rollout-fraction X\` to adjust." >> "${GITHUB_STEP_SUMMARY}"
           fi
 
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / Android
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 06 Release — Production
+
   # ─── 07 — REPORT & NOTIFY ───────────────────────────────────────────────────
   # The pipeline used to end at stage 06, so a release run produced no report:
   # the only way to see how far a promotion got was to read the graph. This
   # says which phase it reached, or which one stopped it, and posts the same
   # to Discord.
+
   report:
     name: 07 / Android / Report & Notify
     needs: [verify-artifact, validate-aab, release-notes, internal-testing, external-testing, production-release]
