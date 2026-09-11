@@ -907,7 +907,7 @@ jobs:
   # failed iOS leg must not cancel a running Android leg.
   # ════════════════════════════════════════════════════════════════════════════
   build:
-    name: 03 / ${{ matrix.platform }} / ${{ matrix.node }}
+    name: 03 / ${{ matrix.platform }}
     needs: [resolve-config, quality-gate, build-addressables]
     if: >-
       !cancelled() &&
