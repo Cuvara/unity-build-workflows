@@ -1202,17 +1202,6 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
 
-      # ── Step 11d: Upload this platform's result for the report stage ──────
-      - name: Upload platform result
-        if: ${{ always() }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-result-build-${{ inputs.platform }}
-          path: pipeline-results/
-          if-no-files-found: ignore
-          retention-days: ${{ inputs.artifact-retention-days }}
-
       # ── Step 12: Upload logs artifact (always — diagnose failures) ─────────
       # Collects Editor.log and any BuildReport files from common locations.
       - name: Upload logs artifact
@@ -1306,3 +1295,18 @@ jobs:
             "${BUILD_DURATION:-0}" \
             "${CONFIGURATION}" \
             > "pipeline-results/build-${{ inputs.platform }}.json"
+
+      # ── Step 14: Upload this platform's result for the report stage ───────
+      # MUST run after `Set job outputs` — that step writes the file. Placed
+      # before it, this uploaded an empty directory on every build, and
+      # `if-no-files-found: ignore` kept that quiet; stage 07 then saw no
+      # result for a platform that had built fine and failed the run.
+      - name: Upload platform result
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-result-build-${{ inputs.platform }}
+          path: pipeline-results/
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}

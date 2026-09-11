@@ -105,6 +105,16 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **The Final Report failed a fully green build.** The build engine uploaded
+  each platform's result artifact *before* the step that writes it, so
+  `pipeline-result-build-<Platform>` was empty on every run and
+  `if-no-files-found: ignore` said nothing. Stage 07 then found no result for
+  platforms that had built and validated fine and failed the run — Android and
+  WebGL both green, report red (NDCUnityTemplate run 34567145749). The upload
+  now runs after the writer and warns on an empty result, and the report
+  distinguishes a *reporting gap* (matrix succeeded, file missing → reported as
+  `unreported`, not fatal) from a *dead leg* (matrix did not succeed → fatal
+  and named).
 - **The WebGL validator failed every brotli build.** It required all four
   player files to share one compression mode, but Unity deliberately leaves
   `.loader.js` uncompressed — the browser fetches and executes it *before* any
