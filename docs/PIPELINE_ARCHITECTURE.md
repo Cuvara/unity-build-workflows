@@ -344,6 +344,54 @@ Downstream stages **read these**; they never re-scan `build/` guessing which
 file is the artifact. A failed build still gets a manifest, so the report can
 say what was being built when it broke.
 
+### 5a. Builder provenance (I-008)
+
+Every artifact manifest carries a `builderProvenance` block answering "exactly
+what produced this binary?":
+
+```json
+"builderProvenance": {
+  "builder": "game-ci/unity-builder@v5",
+  "builderKind": "docker",
+  "imageReference": "unityci/editor:6000.0.26f1-android-3",
+  "imageDigest": "sha256:…",
+  "unityVersion": "6000.0.26f1",
+  "runner": "Linux/X64",
+  "runnerName": "gh-hosted-4",
+  "provenanceStrength": "immutable"
+}
+```
+
+`provenanceStrength` is the honest part. It is derived, not asserted:
+
+| Strength | When | What it guarantees |
+|---|---|---|
+| `immutable` | an image digest was resolved | re-running the same reference gets the same environment |
+| `auditable` | a tag, or a runner's own Unity, with no digest | you can say what built it; you cannot guarantee re-running reproduces it |
+| `unknown` | nothing was recorded | nothing — a Release Set containing one is refused |
+
+A caller that passes `--provenance-strength immutable` without a digest is
+**downgraded to `auditable`**, not believed. An overstated provenance is worse
+than an absent one: it invites trust that is not there.
+
+**What this does not claim.** The default Docker lane uses
+`game-ci/unity-builder`, which selects and pulls its own image. The pipeline
+does not choose that image, so the digest is read back from the local Docker
+daemon *after* the build (`Capture builder provenance` in
+`reusable-build-platform.yml`). That read can legitimately come up empty — a
+warm layer cache, a daemon that reports no `RepoDigests`, a self-hosted lane
+with no Docker at all — and when it does, the manifest says `auditable` rather
+than pretending. Native builds have no image whatsoever; their provenance is
+the Unity version, the runner identity and the commit, which is `auditable` by
+construction and is a legitimate way to satisfy I-008. Docker is **not**
+required, and no custom Unity image is introduced to reach `immutable`.
+
+A Release Set reports the weakest strength among its artifacts
+(`buildEnvironment.provenanceStrength`), and `release_manifest.py generate`
+fails closed if any artifact recorded `unknown`. `--allow-unknown-provenance`
+exists for bringing up a new lane and logs loudly; a real release should never
+use it.
+
 ---
 
 ## 6. Artifact validation

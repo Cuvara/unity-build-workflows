@@ -12,6 +12,30 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **Builder provenance (I-008).** Every artifact manifest now carries a
+  `builderProvenance` block — builder, kind (`docker`/`native`), image
+  reference and digest when resolvable, Unity version and runner — so "exactly
+  what produced this binary?" is answerable months later. `provenanceStrength`
+  is derived rather than asserted: `immutable` requires a content digest,
+  `auditable` covers a tag or a runner's own Unity install, and a caller
+  claiming `immutable` without a digest is downgraded, not believed. A Release
+  Set reports the weakest strength among its artifacts and
+  `release_manifest.py generate` fails closed on one recorded as `unknown`.
+
+### Changed
+
+- **I-008 redefined** from "release uses immutable Unity image references" to
+  "release builds have immutable **or** auditable builder provenance,
+  recorded". The old rule could only be satisfied by Docker with a pinned
+  digest, which for `game-ci/unity-builder` means forking it or shipping a
+  custom image, and which a native macOS iOS build could never satisfy at all
+  — the invariant was deciding the architecture. Docker is not required and no
+  custom image is introduced. The three CI checks now verify that every lane
+  writing an artifact manifest records provenance, that `immutable` is gated on
+  a digest, and that an untraceable artifact cannot enter a Release Set. The
+  builder itself is unchanged; limitations are stated in
+  `docs/PIPELINE_ARCHITECTURE.md` §5a rather than hidden.
+
 - **Platform capabilities.** A project declares which targets it can build via
   the `PLATFORMS` variable (`Android,WebGL`). That is a different question from
   `*_BUILD_PLATFORMS`, which says which of them a branch builds — capability

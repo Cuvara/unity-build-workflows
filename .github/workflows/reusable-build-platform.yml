@@ -1113,6 +1113,60 @@ jobs:
           path: .toolkit
           clean: false
 
+      # ── Builder provenance (I-008) ────────────────────────────────────────
+      # "Exactly what produced this binary?" must be answerable months later.
+      # Two strengths, and we record which one this actually is rather than
+      # implying the stronger:
+      #   immutable — pinned to content (a digest); re-running reproduces it
+      #   auditable — identified but movable (a tag, or a runner's Unity)
+      #
+      # game-ci selects its own image, so the digest is read back from the
+      # local daemon afterwards. That can legitimately come up empty — a cache
+      # hit, or a native lane with no image at all — and an empty digest is
+      # recorded as such, never dressed up as a pin.
+      - name: Capture builder provenance
+        id: provenance
+        if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BUILDER_KIND="${{ inputs.build-engine == 'docker' && 'docker' || 'native' }}"
+          BUILDER="${{ inputs.build-engine == 'docker' && 'game-ci/unity-builder@v5' || 'local-unity-editor' }}"
+          IMAGE_REF=""
+          IMAGE_DIGEST=""
+
+          if [ "${BUILDER_KIND}" = "docker" ] && command -v docker >/dev/null 2>&1; then
+            # game-ci names its image unityci/editor:<unity>-<target>-<n>.
+            IMAGE_REF=$(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+              | grep -m1 '^unityci/editor:' || true)
+            if [ -n "${IMAGE_REF}" ]; then
+              IMAGE_DIGEST=$(docker image inspect "${IMAGE_REF}" \
+                --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' 2>/dev/null || true)
+              IMAGE_DIGEST="${IMAGE_DIGEST#*@}"
+            fi
+          fi
+
+          # A digest is a content pin; a tag or a runner's own Unity is not.
+          if [ -n "${IMAGE_DIGEST}" ]; then
+            STRENGTH="immutable"
+          else
+            STRENGTH="auditable"
+          fi
+
+          {
+            echo "builder=${BUILDER}"
+            echo "builder-kind=${BUILDER_KIND}"
+            echo "image-reference=${IMAGE_REF}"
+            echo "image-digest=${IMAGE_DIGEST}"
+            echo "provenance-strength=${STRENGTH}"
+            echo "runner=${RUNNER_OS:-unknown}/${RUNNER_ARCH:-unknown}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "[provenance] ${BUILDER} (${BUILDER_KIND}) — ${STRENGTH}"
+          echo "[provenance] image: ${IMAGE_REF:-none} digest: ${IMAGE_DIGEST:-none}"
+          echo "[provenance] runner: ${RUNNER_OS:-unknown}/${RUNNER_ARCH:-unknown}"
+
       - name: Resolve artifact type
         id: artifact-type
         if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
@@ -1180,6 +1234,12 @@ jobs:
             --commit         "${{ github.sha }}" \
             --branch         "${{ github.ref_name }}" \
             --artifact-name  "${{ steps.artifact-type.outputs.artifact-name }}" \
+            --builder        "${{ steps.provenance.outputs.builder }}" \
+            --builder-kind   "${{ steps.provenance.outputs.builder-kind }}" \
+            --image-reference "${{ steps.provenance.outputs.image-reference }}" \
+            --image-digest   "${{ steps.provenance.outputs.image-digest }}" \
+            --provenance-strength "${{ steps.provenance.outputs.provenance-strength }}" \
+            --runner         "${{ steps.provenance.outputs.runner }}" \
             --github-output \
             > /dev/null
 

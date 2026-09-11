@@ -320,52 +320,128 @@ def check_platform_capabilities(scripts_dir, report):
 
 
 # ---------------------------------------------------------------------------
-# I-008 — immutable build image
+# I-008 — builder provenance: immutable OR auditable, and honest about which
 # ---------------------------------------------------------------------------
+#
+# The old rule was "release uses an immutable Unity image reference". That
+# rule quietly decided the architecture: it can only be satisfied by Docker,
+# and only by pinning a digest, which for `game-ci/unity-builder` means either
+# forking it or shipping a custom image. A native macOS iOS build could never
+# satisfy it at all, so the invariant would have failed a lane that is
+# perfectly legitimate.
+#
+# The rule that actually matters is weaker and more useful: months from now,
+# can you say what produced these bytes? Two strengths qualify —
+#
+#   immutable  the builder is pinned to content (a digest); re-running it
+#              reproduces the environment
+#   auditable  the builder is identified but could move: a tag, or the Unity
+#              a runner happens to have installed
+#
+# A release must reach at least `auditable`, must never record nothing, and
+# must never label a mutable reference `immutable`. The last part is what this
+# check spends most of its effort on, because an overstated provenance is
+# worse than an absent one: it invites trust that is not there.
 
-def _release_mode_enabled(node):
-    """True when any `release-mode` in this tree is switched on.
+# Any one of these means the workflow records who built the artifact. The
+# digest form is not required — that would be the old rule wearing a new name.
+PROVENANCE_MARKERS = (
+    "--builder-kind",
+    "provenance-strength",
+    "builderProvenance",
+    "Capture builder provenance",
+)
 
-    Greping for the key alone flagged `release-mode: false` — a nightly build
-    that is explicitly NOT in release mode. The value is what matters.
+
+def check_release_records_provenance(workflows_dir, report):
+    """Every lane that produces an artifact must record what built it.
+
+    The trigger is the artifact manifest, not `release-mode`. A lane is where
+    provenance is capturable at all — a caller that merely forwards
+    `release-mode` downward has nothing to record — and gating on release-mode
+    would exempt exactly the development builds that later get promoted by
+    mistake. Recording it always costs one step and removes the exemption.
     """
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key == "release-mode":
-                text = str(value).strip().lower()
-                if text in ("true", "yes", "on"):
-                    return True
-                # An expression could evaluate either way at runtime; treat a
-                # literal false as off and anything dynamic as on, so the check
-                # errs toward demanding a pinned image.
-                if text not in ("false", "no", "off", ""):
-                    return True
-            elif _release_mode_enabled(value):
-                return True
-    elif isinstance(node, list):
-        return any(_release_mode_enabled(v) for v in node)
-    return False
-
-
-def check_no_silent_mutable_fallback(workflows_dir, report):
-    """A workflow that builds in release mode must resolve an image reference
-    rather than falling back to a mutable tag."""
+    checked = 0
     for path in sorted(workflows_dir.glob("*.yml")):
-        try:
-            workflow = load_workflow(path)
-        except yaml.YAMLError:
-            continue
-        if not _release_mode_enabled(workflow):
-            continue
         body = path.read_text()
-        if "image-digest" in body or "resolve-unity-image" in body:
-            report.ok("I-008", f"{path.name} resolves an image reference explicitly")
+        if "artifact_manifest.py" not in body:
+            continue
+        checked += 1
+        if any(marker in body for marker in PROVENANCE_MARKERS):
+            report.ok("I-008", f"{path.name} records builder provenance")
         else:
             report.fail(
                 "I-008",
-                f"{path.name} builds in release mode but never resolves an image "
-                "digest, so a mutable tag decides what the release was built with",
+                f"{path.name} writes an artifact manifest but records no builder "
+                "provenance, so nothing says what produced the artifact",
             )
+    if checked == 0:
+        report.fail(
+            "I-008",
+            "no workflow writes an artifact manifest, so no release can carry "
+            "builder provenance at all",
+        )
+
+
+def check_provenance_is_not_overstated(scripts_dir, report):
+    """`immutable` must be earned by a digest, never merely asserted."""
+    source = scripts_dir / "common" / "artifact_manifest.py"
+    if not source.is_file():
+        report.fail("I-008", "artifact_manifest.py is missing — nothing classifies provenance")
+        return
+    body = source.read_text()
+
+    if "def classify_provenance" not in body:
+        report.fail(
+            "I-008",
+            "artifact_manifest.py has no classify_provenance(), so provenance "
+            "strength would be whatever a caller claims it is",
+        )
+        return
+
+    # The classifier must key `immutable` off the digest specifically. A
+    # version that returned `immutable` for a tag would satisfy the invariant
+    # on paper and mislead every reader of the manifest.
+    block = body[body.index("def classify_provenance"):]
+    block = block[:block.index("def build_provenance")]
+    if 'if image_digest' not in block or '"immutable"' not in block:
+        report.fail(
+            "I-008",
+            "classify_provenance() does not gate `immutable` on a content digest",
+        )
+        return
+
+    # And a caller-supplied strength must be re-checked, not trusted.
+    if 'strength == "immutable" and not digest' not in body:
+        report.fail(
+            "I-008",
+            "build_provenance() trusts a caller's `immutable` claim without a "
+            "digest to back it",
+        )
+        return
+
+    report.ok("I-008", "`immutable` requires a digest; a claim without one is downgraded")
+
+
+def check_release_set_refuses_blind_artifacts(scripts_dir, report):
+    """A Release Set containing an untraceable artifact must not be produced."""
+    source = scripts_dir / "common" / "release_manifest.py"
+    if not source.is_file():
+        report.fail("I-008", "release_manifest.py is missing")
+        return
+    body = source.read_text()
+    if "provenanceStrength" not in body:
+        report.fail("I-008", "the Release Set manifest carries no provenance")
+        return
+    if "recorded no builder provenance" not in body:
+        report.fail(
+            "I-008",
+            "release_manifest.py accepts an artifact with unknown provenance — a "
+            "release nobody can trace back to a builder would ship",
+        )
+        return
+    report.ok("I-008", "a Release Set fails closed on an artifact with unknown provenance")
 
 
 CHECKS = [
@@ -379,7 +455,9 @@ CHECKS = [
     ("production is gated", lambda ctx, r: check_production_is_gated(ctx["workflows"], r)),
     ("build number resolved", lambda ctx, r: check_build_number_is_resolved(ctx["workflows"], r)),
     ("platform capabilities", lambda ctx, r: check_platform_capabilities(ctx["scripts"], r)),
-    ("no silent mutable image", lambda ctx, r: check_no_silent_mutable_fallback(ctx["workflows"], r)),
+    ("release records provenance", lambda ctx, r: check_release_records_provenance(ctx["workflows"], r)),
+    ("provenance not overstated", lambda ctx, r: check_provenance_is_not_overstated(ctx["scripts"], r)),
+    ("release set refuses blind artifacts", lambda ctx, r: check_release_set_refuses_blind_artifacts(ctx["scripts"], r)),
 ]
 
 

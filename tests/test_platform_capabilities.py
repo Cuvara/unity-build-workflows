@@ -96,15 +96,34 @@ def test_capability_accepts_spaces_and_commas():
 # I-006 / I-007 / I-017 — the Release Set manifest
 # ---------------------------------------------------------------------------
 
-def _release_set(tmp_path, commit="abc123def456", version="1.4.2", build_number="1042"):
+# What a Docker lane records when game-ci's image could be inspected. Used as
+# the default so the manifest tests exercise a realistic artifact; the
+# provenance-specific tests below vary it deliberately.
+DOCKER_PROVENANCE = {
+    "builder": "game-ci/unity-builder@v5",
+    "builderKind": "docker",
+    "imageReference": "unityci/editor:6000.0.26f1-android-3",
+    "imageDigest": "sha256:" + "ab" * 32,
+    "unityVersion": "6000.0.26f1",
+    "runner": "Linux/X64",
+    "provenanceStrength": "immutable",
+}
+
+
+def _release_set(tmp_path, commit="abc123def456", version="1.4.2", build_number="1042",
+                 provenance=DOCKER_PROVENANCE, extra_args=()):
     artifacts = tmp_path / "artifacts"
     (artifacts / "release-android-aab").mkdir(parents=True)
     (artifacts / "release-android-aab" / "Android.aab").write_bytes(b"AAB" * 4096)
-    (artifacts / "release-android-aab" / "artifact-manifest.json").write_text(json.dumps({
+    entry = {
         "platform": "Android", "artifactName": "release-android-aab",
         "artifactType": "AAB", "version": version, "buildNumber": build_number,
         "gitCommit": commit,
-    }))
+    }
+    if provenance is not None:
+        entry["builderProvenance"] = provenance
+    (artifacts / "release-android-aab" / "artifact-manifest.json").write_text(
+        json.dumps(entry))
     manifest = tmp_path / "release-manifest.json"
     proc = subprocess.run([
         "python3", str(MANIFEST), "generate",
@@ -112,7 +131,7 @@ def _release_set(tmp_path, commit="abc123def456", version="1.4.2", build_number=
         "--output", str(manifest), "--version", version,
         "--build-number", build_number, "--commit", commit,
         "--run-id", "34579047248", "--unity-version", "6000.0.26f1",
-        "--build-type", "release", "--require-artifacts",
+        "--build-type", "release", "--require-artifacts", *extra_args,
     ], capture_output=True, text=True)
     return proc, manifest, artifacts
 
@@ -248,6 +267,145 @@ def test_invariant_checker_detects_a_promotion_that_builds(tmp_path):
     report = json.loads(proc.stdout)
     assert proc.returncode == 1
     assert any(v["invariant"] == "I-005" for v in report["violations"]), report
+
+
+# ---------------------------------------------------------------------------
+# I-008 — builder provenance: immutable OR auditable, honest about which
+# ---------------------------------------------------------------------------
+# The rule is not "every release must use a digest". It is "a release must be
+# able to say what produced it, and must not overstate how firmly". These
+# tests exist mostly to pin the second half: an overstated provenance is worse
+# than an absent one, because it invites trust that is not there.
+
+import sys  # noqa: E402
+
+sys.path.insert(0, str(REPO_ROOT / "scripts" / "common"))
+from artifact_manifest import build_provenance, classify_provenance  # noqa: E402
+
+
+@pytest.mark.parametrize("kwargs,expected", [
+    # A digest pins content — re-running reproduces the environment.
+    ({"image_digest": "sha256:" + "ab" * 32}, "immutable"),
+    # A tag can move under you; you can still say which tag it was.
+    ({"image_reference": "unityci/editor:6000.0.26f1-android-3"}, "auditable"),
+    # A native lane has no image at all, but the Unity version is real
+    # provenance — this is the case the old digest-only rule could never pass.
+    ({"unity_version": "6000.0.26f1"}, "auditable"),
+    # Nothing recorded is not "fine", and must not read as fine.
+    ({}, "unknown"),
+])
+def test_provenance_strength_matches_what_was_actually_established(kwargs, expected):
+    assert classify_provenance(**kwargs) == expected
+
+
+def test_immutable_cannot_be_claimed_without_a_digest():
+    """A caller asserting `immutable` over a tag gets downgraded, not believed."""
+    prov = build_provenance(
+        builder_kind="docker",
+        image_reference="unityci/editor:6000.0.26f1-android-3",
+        provenance_strength="immutable",
+    )
+    assert prov["provenanceStrength"] == "auditable"
+
+
+def test_a_native_build_records_auditable_provenance():
+    """No Docker anywhere, and the invariant is still satisfiable."""
+    prov = build_provenance(
+        builder="local-unity-editor", builder_kind="native",
+        unity_version="6000.0.26f1", runner="macOS/ARM64",
+    )
+    assert prov["provenanceStrength"] == "auditable"
+    assert prov["imageDigest"] == ""
+    assert prov["unityVersion"] == "6000.0.26f1"
+
+
+def test_a_repo_qualified_digest_is_normalised():
+    prov = build_provenance(image_digest="unityci/editor@sha256:" + "cd" * 32)
+    assert prov["imageDigest"] == "sha256:" + "cd" * 32
+    assert prov["provenanceStrength"] == "immutable"
+
+
+def test_release_set_carries_per_artifact_provenance(tmp_path):
+    proc, manifest, _ = _release_set(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    data = json.loads(manifest.read_text())
+    prov = data["artifacts"][0]["builderProvenance"]
+    assert prov["builder"] == "game-ci/unity-builder@v5"
+    assert prov["provenanceStrength"] == "immutable"
+    assert data["buildEnvironment"]["provenanceStrength"] == "immutable"
+
+
+def test_release_set_reports_the_weakest_artifact(tmp_path):
+    """A digest-pinned Android build does not make an unpinned set immutable."""
+    auditable = dict(DOCKER_PROVENANCE, imageDigest="", provenanceStrength="auditable")
+    _, manifest, _ = _release_set(tmp_path, provenance=auditable)
+    data = json.loads(manifest.read_text())
+    assert data["buildEnvironment"]["provenanceStrength"] == "auditable"
+
+
+def test_release_set_fails_closed_on_an_untraceable_artifact(tmp_path):
+    proc, _, _ = _release_set(tmp_path, provenance=None)
+    assert proc.returncode == 1
+    assert "no builder provenance" in proc.stderr
+
+
+def test_untraceable_artifact_can_be_allowed_explicitly(tmp_path):
+    """The escape hatch exists for a lane being brought up — and is loud."""
+    proc, manifest, _ = _release_set(
+        tmp_path, provenance=None, extra_args=("--allow-unknown-provenance",))
+    assert proc.returncode == 0, proc.stderr
+    data = json.loads(manifest.read_text())
+    assert data["buildEnvironment"]["provenanceStrength"] == "unknown"
+
+
+def test_promotion_refuses_an_artifact_with_unknown_provenance(tmp_path):
+    _, manifest, artifacts = _release_set(
+        tmp_path, provenance=None, extra_args=("--allow-unknown-provenance",))
+    proc = _verify(manifest, artifacts / "release-android-aab", run_id="34579047248")
+    assert proc.returncode == 1
+    assert "no builder provenance" in proc.stderr
+
+
+def test_invariant_checker_detects_a_lane_that_records_no_provenance(tmp_path):
+    """I-008 must bite on a build lane that writes a manifest and nothing else."""
+    fake = tmp_path / ".github" / "workflows"
+    fake.mkdir(parents=True)
+    (tmp_path / "templates").mkdir()
+    scripts = tmp_path / "scripts" / "common"
+    scripts.mkdir(parents=True)
+    for name in ("artifact_manifest.py", "release_manifest.py"):
+        shutil.copy(REPO_ROOT / "scripts" / "common" / name, scripts / name)
+    (fake / "build.yml").write_text(
+        "name: build\non:\n  workflow_call:\njobs:\n  build:\n"
+        "    runs-on: ubuntu-latest\n    steps:\n"
+        "      - run: python3 scripts/common/artifact_manifest.py --platform Android\n"
+    )
+    proc = subprocess.run(["python3", str(INVARIANTS), "--repo-root", str(tmp_path),
+                           "--json"], capture_output=True, text=True)
+    report = json.loads(proc.stdout)
+    assert proc.returncode == 1
+    assert any(v["invariant"] == "I-008" for v in report["violations"]), report
+
+
+def test_invariant_checker_detects_provenance_that_overstates_itself(tmp_path):
+    """Rewrite the classifier to always say `immutable`; the gate must notice."""
+    fake = tmp_path / ".github" / "workflows"
+    fake.mkdir(parents=True)
+    (tmp_path / "templates").mkdir()
+    scripts = tmp_path / "scripts" / "common"
+    scripts.mkdir(parents=True)
+    shutil.copy(REPO_ROOT / "scripts" / "common" / "release_manifest.py",
+                scripts / "release_manifest.py")
+    (scripts / "artifact_manifest.py").write_text(
+        "def classify_provenance(image_digest='', image_reference='', unity_version=''):\n"
+        "    return \"immutable\"\n\n\n"
+        "def build_provenance(**kwargs):\n"
+        "    return {}\n"
+    )
+    proc = subprocess.run(["python3", str(INVARIANTS), "--repo-root", str(tmp_path),
+                           "--json"], capture_output=True, text=True)
+    report = json.loads(proc.stdout)
+    assert any(v["invariant"] == "I-008" for v in report["violations"]), report
 
 
 # ---------------------------------------------------------------------------

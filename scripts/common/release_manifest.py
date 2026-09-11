@@ -30,7 +30,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MANIFEST_FILENAME = "release-manifest.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# I-008: a release must be able to answer "what produced these bytes?".
+# Strongest first — the Release Set reports the *weakest* of its artifacts,
+# because a set is only as auditable as its least auditable member.
+PROVENANCE_ORDER = ("immutable", "auditable", "unknown")
 
 
 def sha256_of(path, chunk_size=1024 * 1024):
@@ -85,6 +90,22 @@ def collect_artifact_manifests(search_root):
     return found
 
 
+def weakest_provenance(artifacts):
+    """The strength the whole Release Set can honestly claim.
+
+    One artifact built from a digest-pinned image does not make the set
+    immutable if the artifact next to it came off a runner's own Unity.
+    """
+    worst = "immutable"
+    for a in artifacts:
+        strength = (a.get("builderProvenance") or {}).get("provenanceStrength") or "unknown"
+        if strength not in PROVENANCE_ORDER:
+            strength = "unknown"
+        if PROVENANCE_ORDER.index(strength) > PROVENANCE_ORDER.index(worst):
+            worst = strength
+    return worst
+
+
 def build_manifest(args, artifacts):
     env = os.environ
     return {
@@ -105,6 +126,10 @@ def build_manifest(args, artifacts):
             # provenance is honest about what is and is not reproducible.
             "imageReference": args.image_reference,
             "imageDigest": args.image_digest,
+            # Set-level strength (I-008): the weakest of the artifacts below.
+            # `immutable` only when every artifact was built from a pinned
+            # digest; `auditable` when the builder is named but could move.
+            "provenanceStrength": weakest_provenance(artifacts),
             "buildType": args.build_type,
             "configuration": args.configuration,
             "environment": args.environment,
@@ -136,6 +161,10 @@ def cmd_generate(args):
             "version": data.get("version", ""),
             "buildNumber": str(data.get("buildNumber", "")),
             "commit": data.get("gitCommit", ""),
+            # Carried through per artifact, not merged: two platforms can
+            # legitimately build on different lanes (Android in Docker, iOS on
+            # a macOS runner) and flattening that would erase the difference.
+            "builderProvenance": data.get("builderProvenance") or {},
         })
 
     manifest = build_manifest(args, artifacts)
@@ -159,6 +188,19 @@ def cmd_generate(args):
             print(f"::error::Release Set is inconsistent — {line}", file=sys.stderr)
         return 1
 
+    # I-008. Not "every release must use a digest"; a release must be able to
+    # say what built it. `unknown` means the build recorded nothing, and a
+    # release nobody can trace back to a builder is not releasable.
+    if artifacts and not args.allow_unknown_provenance:
+        blind = [a["platform"] for a in artifacts
+                 if ((a.get("builderProvenance") or {}).get("provenanceStrength")
+                     or "unknown") == "unknown"]
+        if blind:
+            for platform in blind:
+                print(f"::error::{platform} recorded no builder provenance. A release "
+                      "must be traceable to what produced it (I-008).", file=sys.stderr)
+            return 1
+
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(manifest, indent=2))
@@ -177,14 +219,25 @@ def cmd_generate(args):
             f"| Ref | `{rs['ref'] or '—'}` |",
             f"| Unity | `{be['unityVersion'] or 'unknown'}` |",
             f"| Image | `{be['imageDigest'] or be['imageReference'] or 'not pinned'}` |",
+            f"| Provenance | `{be['provenanceStrength']}` |",
             "",
-            "| Platform | Artifact | Type | SHA-256 |", "|---|---|---|---|",
+            "| Platform | Artifact | Type | SHA-256 | Builder | Provenance |",
+            "|---|---|---|---|---|---|",
         ]
         for a in artifacts:
+            prov = a.get("builderProvenance") or {}
+            strength = prov.get("provenanceStrength") or "unknown"
+            icon = {"immutable": "🔒", "auditable": "🔎"}.get(strength, "⚠️")
             lines.append(
                 f"| {a['platform']} | `{a['artifactName']}` | `{a['artifactType']}` | "
-                f"`{(a['sha256'] or '—')[:16]}…` |"
+                f"`{(a['sha256'] or '—')[:16]}…` | "
+                f"`{prov.get('builder') or prov.get('builderKind') or '—'}` | "
+                f"{icon} `{strength}` |"
             )
+        if be["provenanceStrength"] != "immutable":
+            lines += ["", "> Provenance is `auditable`, not `immutable`: the builder is "
+                      "recorded but is not pinned to a content digest, so re-running is "
+                      "not guaranteed to reproduce the same environment."]
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
             fh.write("\n".join(lines) + "\n")
     return 0
@@ -243,6 +296,19 @@ def cmd_verify(args):
     print(f"[verify] artifact  : {entry.get('artifactName')}")
     print(f"[verify] declared  : {declared[:32] or '—'}")
 
+    prov = entry.get("builderProvenance") or {}
+    strength = prov.get("provenanceStrength") or "unknown"
+    print(f"[verify] builder   : {prov.get('builder') or prov.get('builderKind') or '—'} "
+          f"({strength})")
+    if prov.get("imageDigest"):
+        print(f"[verify] image     : {prov.get('imageReference') or '—'} "
+              f"@ {prov['imageDigest']}")
+    if strength == "unknown" and not args.allow_unknown_provenance:
+        failures.append(
+            "the Release Set records no builder provenance for this artifact — "
+            "what produced these bytes cannot be established (I-008)"
+        )
+
     if failures:
         for line in failures:
             print(f"::error::Artifact identity verification failed — {line}", file=sys.stderr)
@@ -257,6 +323,10 @@ def cmd_verify(args):
                 f"`{rs.get('runId')}` — version `{rs.get('version')}`, build "
                 f"`{rs.get('buildNumber')}`, commit `{(rs.get('commit') or '')[:12]}`.\n\n"
                 f"SHA-256 `{declared}` matches the downloaded bytes.\n\n"
+                f"Builder: `{prov.get('builder') or prov.get('builderKind') or 'unrecorded'}` "
+                f"— provenance `{strength}`"
+                + (f", image `{prov['imageDigest']}`.\n\n" if prov.get("imageDigest")
+                   else " (not pinned to a digest).\n\n")
             )
     return 0
 
@@ -284,6 +354,10 @@ def main(argv=None):
     gen.add_argument("--environment", default="")
     gen.add_argument("--define-symbols", default="")
     gen.add_argument("--require-artifacts", action="store_true")
+    gen.add_argument("--allow-unknown-provenance", action="store_true",
+                     help="Permit an artifact that recorded no builder provenance. "
+                          "Escape hatch for a lane still being brought up; a real "
+                          "release should never need it.")
     gen.set_defaults(func=cmd_generate)
 
     ver = sub.add_parser("verify", help="verify an artifact against its Release Set")
@@ -295,6 +369,8 @@ def main(argv=None):
     ver.add_argument("--expect-build-number", default="")
     ver.add_argument("--expect-commit", default="")
     ver.add_argument("--expect-artifact-name", default="")
+    ver.add_argument("--allow-unknown-provenance", action="store_true",
+                     help="Promote an artifact whose builder was never recorded")
     ver.set_defaults(func=cmd_verify)
 
     args = parser.parse_args(argv)
