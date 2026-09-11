@@ -215,6 +215,40 @@ inputs:
     required: false
     default: skipped
 
+  # ── Stage 04 artifact-validation results ──────────────────────────────────
+  # A platform that built but failed artifact validation is NOT a green
+  # platform: it is a platform whose artifact must not be published. Rendered
+  # as a per-platform validation mark rather than folded into the build result,
+  # so the reader can tell "the build broke" from "the artifact is bad".
+  result-validation-android:
+    description: 04 / Android / Validate result
+    required: false
+    default: skipped
+
+  result-validation-webgl:
+    description: 04 / WebGL / Validate result
+    required: false
+    default: skipped
+
+  result-validation-ios:
+    description: 04 / iOS / Validate result
+    required: false
+    default: skipped
+
+  # ── Stage context ─────────────────────────────────────────────────────────
+  failed-stage:
+    description: |
+      Stage/node the pipeline stopped at, e.g. "02 QUALITY GATE / Unity Tests".
+      Empty on success. Replaces the "pipeline failed" message with the actual
+      place it failed.
+    required: false
+    default: ''
+
+  configuration:
+    description: Build configuration (Development | Staging | Production).
+    required: false
+    default: ''
+
   # ── Thread routing ─────────────────────────────────────────────────────────────
   thread-id:
     description: |
@@ -296,6 +330,11 @@ runs:
         INPUT_RESULT_IOS:            ${{ inputs.result-ios }}
         INPUT_RESULT_ADDRESSABLES:   ${{ inputs.result-addressables }}
         INPUT_RESULT_TESTS:          ${{ inputs.result-tests }}
+        INPUT_VALIDATION_ANDROID:    ${{ inputs.result-validation-android }}
+        INPUT_VALIDATION_WEBGL:      ${{ inputs.result-validation-webgl }}
+        INPUT_VALIDATION_IOS:        ${{ inputs.result-validation-ios }}
+        INPUT_FAILED_STAGE:          ${{ inputs.failed-stage }}
+        INPUT_CONFIGURATION:         ${{ inputs.configuration }}
         INPUT_THREAD_ID:             ${{ inputs.thread-id }}
         INPUT_THREAD_NAME:           ${{ inputs.thread-name }}
         INPUT_ARTIFACT_DIR:          ${{ inputs.artifact-dir }}
@@ -459,6 +498,22 @@ runs:
             fi
           fi
 
+          # ── Stage 04 validation mark ──────────────────────────────────────
+          # Only platforms with a stage-04 node carry one; the rest stay silent
+          # rather than showing a misleading "not validated".
+          case "${PLAT}" in
+            Android) VALIDATION="${INPUT_VALIDATION_ANDROID:-skipped}" ;;
+            WebGL)   VALIDATION="${INPUT_VALIDATION_WEBGL:-skipped}" ;;
+            iOS)     VALIDATION="${INPUT_VALIDATION_IOS:-skipped}" ;;
+            *)       VALIDATION="" ;;
+          esac
+          VALIDATION_SUFFIX=""
+          case "${VALIDATION}" in
+            success) VALIDATION_SUFFIX=" · 🔎 validated" ;;
+            failure) VALIDATION_SUFFIX=" · 🔎 **validation failed**" ;;
+          esac
+          DIAG_SUFFIX="${DIAG_SUFFIX}${VALIDATION_SUFFIX}"
+
           # ── Assemble row ──────────────────────────────────────────────────
           if [ -n "${DELIVERY}" ]; then
             PLATFORM_ROWS="${PLATFORM_ROWS}${RE} **${PLAT}**: \`${RESULT}\` — ${DELIVERY}${DIAG_SUFFIX}"$'\n'
@@ -518,6 +573,8 @@ runs:
         thread_id        = os.environ.get('INPUT_THREAD_ID', '')
         thread_name      = os.environ.get('INPUT_THREAD_NAME', '')
         tests_result     = os.environ.get('INPUT_RESULT_TESTS', 'skipped')
+        failed_stage     = os.environ.get('INPUT_FAILED_STAGE', '').strip()
+        configuration    = os.environ.get('INPUT_CONFIGURATION', '').strip()
         platform_rows    = os.environ.get('PLATFORM_ROWS', '')
         embed_timestamp  = os.environ.get('EMBED_TIMESTAMP', '')
         n_attach         = int(os.environ.get('N_ATTACHMENTS', '0'))
@@ -577,6 +634,8 @@ runs:
             b = branch[:50] + ('...' if len(branch) > 50 else '')
             fields.append({'name': 'Branch',       'value': b,            'inline': True})
         fields.append(    {'name': 'Flow',          'value': flow_type,    'inline': True})
+        if configuration:
+            fields.append({'name': 'Configuration', 'value': configuration, 'inline': True})
         if run_number:
             fields.append({'name': 'Run',           'value': '#{}'.format(run_number), 'inline': True})
 
@@ -598,6 +657,14 @@ runs:
             diag_val = '❌ {} errors · ⚠️ {} warnings'.format(
                 total_errors or '0', total_warnings or '0')
             fields.append({'name': 'Diagnostics',   'value': diag_val,     'inline': True})
+
+        # ── Failed stage ──────────────────────────────────────────────────────
+        # "pipeline failed" sent people to open the run and read seven job logs.
+        # Name the stage and node that actually stopped it.
+        if failed_stage:
+            fields.append({'name': '🚦 Failed at',
+                           'value': failed_stage[:1024],
+                           'inline': False})
 
         # ── 🏗️ Build Info block field ──────────────────────────────────────────
         # Omit the entire field when none of the 7 build-metadata inputs are set.

@@ -1,0 +1,389 @@
+name: Pipeline WebGL Release
+
+# Self-contained WebGL release pipeline, the third peer of
+# pipeline-android-release.yml and pipeline-ios-release.yml:
+#
+#   03 Build WebGL → 04 Validate artifact → 05 Deploy staging → 06 Deploy production
+#
+# The two store pipelines already separated build from publish; WebGL did not
+# have a pipeline at all, so "release the web build" meant a hand-run of
+# scripts/webgl/deploy_cloudflare_pages.sh against whatever was on someone's
+# disk. This gives it the same shape, the same approval boundary and the same
+# retry semantics as the store platforms.
+#
+# Build and deploy are separate concepts here too:
+#   * dry-run: true            → 03 + 04 only (Build Only)
+#   * start-phase: staging     → deploy a stored artifact without rebuilding
+#   * start-phase: production  → promote to production without rebuilding
+#
+# The production node is gated by the `production` GitHub Environment, so a
+# green build never publishes to production on its own.
+#
+# Nesting depth: orchestrator → this → unity-build-webgl = 3 levels (safe).
+
+on:
+  workflow_call:
+    inputs:
+      toolkit-repo:
+        description: >-
+          Toolkit repository checked out to .toolkit/ for this workflow's own
+          scripts. A step-level `uses: ./…` in a reusable workflow resolves
+          against the runner WORKSPACE, which is the caller's repository.
+        type: string
+        required: false
+        default: Cuvara/unity-build-workflows
+      toolkit-ref:
+        description: Git ref of the toolkit repository to check out.
+        type: string
+        required: false
+        default: main
+
+      # ── Build inputs ──
+      project-path:
+        type: string
+        required: false
+        default: '.'
+      unity-version:
+        type: string
+        required: true
+      build-config-path:
+        type: string
+        required: false
+        default: BuildConfig
+      build-version:
+        type: string
+        required: true
+      build-addressables:
+        type: boolean
+        required: false
+        default: true
+      image-registry:
+        type: string
+        required: false
+        default: ghcr.io
+      image-namespace:
+        type: string
+        required: false
+        default: ''
+      image-name:
+        type: string
+        required: false
+        default: ''
+      image-digest:
+        type: string
+        required: false
+        default: ''
+      workflow-repository:
+        type: string
+        required: false
+        default: ''
+      workflow-ref:
+        type: string
+        required: false
+        default: ''
+      integration-mode:
+        type: string
+        required: false
+        default: remote
+      toolkit-path:
+        type: string
+        required: false
+        default: tools/unity-build-workflows
+
+      # ── Validation inputs ──
+      expected-compression:
+        description: >-
+          Compression the build is configured to emit (gzip | brotli | none).
+          Empty accepts whatever the artifact contains. A mismatch between the
+          artifact and the hosting configuration renders as a blank canvas in
+          the browser, which is why it is a gate and not a warning.
+        type: string
+        required: false
+        default: ''
+      max-size-mb:
+        description: Fail the artifact above this total size in MB (0 disables).
+        type: number
+        required: false
+        default: 0
+
+      # ── Release inputs ──
+      start-phase:
+        description: Phase to start from (build | staging | production)
+        type: string
+        required: false
+        default: build
+      artifact-name:
+        description: >-
+          Existing artifact to deploy when start-phase is staging/production —
+          this is what makes "retry the deploy" not rebuild the player.
+        type: string
+        required: false
+        default: ''
+      cloudflare-pages-project:
+        description: Cloudflare Pages project name.
+        type: string
+        required: false
+        default: ''
+      dry-run:
+        description: Build and validate only — no deployment.
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      UNITY_LICENSE:
+        required: false
+      UNITY_EMAIL:
+        required: false
+      UNITY_PASSWORD:
+        required: false
+      # Deploy credentials are checked where they are used. Declaring them
+      # required here would make a Build Only run unresolvable in a repository
+      # that has no Cloudflare account.
+      CLOUDFLARE_API_TOKEN:
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
+        required: false
+
+    outputs:
+      artifact-name:
+        description: Name of the validated WebGL build artifact.
+        value: ${{ jobs.build-webgl.outputs.artifact-name }}
+      staging-url:
+        description: URL of the staging deployment, when one ran.
+        value: ${{ jobs.deploy-staging.outputs.url }}
+      production-url:
+        description: URL of the production deployment, when one ran.
+        value: ${{ jobs.deploy-production.outputs.url }}
+
+  workflow_dispatch:
+    inputs:
+      unity-version:
+        description: Unity editor version
+        required: true
+        type: string
+      build-version:
+        description: Build version string
+        required: true
+        type: string
+      start-phase:
+        description: Phase to start from
+        required: false
+        type: choice
+        default: build
+        options: [build, staging, production]
+      artifact-name:
+        description: Existing artifact to deploy (required unless start-phase is build)
+        required: false
+        type: string
+        default: ''
+      expected-compression:
+        description: Expected WebGL compression
+        required: false
+        type: choice
+        default: ''
+        options: ['', gzip, brotli, none]
+      dry-run:
+        description: Build and validate only — no deployment
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # ─── 03 — BUILD ARTIFACTS ───────────────────────────────────────────────────
+  build-webgl:
+    name: 03 / WebGL / Release
+    if: inputs.start-phase == 'build'
+    uses: ./.github/workflows/unity-build-webgl.yml
+    with:
+      project-path: ${{ inputs.project-path || '.' }}
+      unity-version: ${{ inputs.unity-version }}
+      build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
+      build-version: ${{ inputs.build-version }}
+      environment: production
+      release-mode: true
+      # Building is not deploying: the build job never talks to the host.
+      deploy-target: none
+      clean-build: true
+      build-addressables: ${{ inputs.build-addressables }}
+      upload-artifact: true
+      image-registry: ${{ inputs.image-registry || 'ghcr.io' }}
+      image-namespace: ${{ inputs.image-namespace || '' }}
+      image-name: ${{ inputs.image-name || '' }}
+      image-digest: ${{ inputs.image-digest || '' }}
+      workflow-repository: ${{ inputs.workflow-repository || '' }}
+      workflow-ref: ${{ inputs.workflow-ref || '' }}
+      integration-mode: ${{ inputs.integration-mode || 'remote' }}
+      toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
+    secrets: inherit
+
+  # ─── 04 — ARTIFACT VALIDATION ───────────────────────────────────────────────
+  validate-webgl:
+    name: 04 / WebGL / Validate
+    needs: [build-webgl]
+    if: |
+      always() &&
+      (inputs.start-phase == 'build' && needs.build-webgl.result == 'success')
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ needs.build-webgl.outputs.artifact-name }}
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Download build artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ needs.build-webgl.outputs.artifact-name }}
+          path: build-artifact/
+
+      - name: Validate artifact
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ARGS=(
+            --search-root build-artifact
+            --report      validation-webgl.json
+          )
+          if [[ -n "${{ inputs.expected-compression }}" ]]; then
+            ARGS+=(--expected-compression "${{ inputs.expected-compression }}")
+          fi
+          if [[ "${{ inputs.max-size-mb }}" != "0" ]]; then
+            ARGS+=(--max-size-mb "${{ inputs.max-size-mb }}")
+          fi
+          python3 .toolkit/scripts/webgl/validate_webgl_artifact.py "${ARGS[@]}"
+
+      - name: Upload validation report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: validation-report-WebGL
+          path: validation-webgl.json
+          retention-days: 30
+
+  # ─── 05 — PUBLISH: STAGING ──────────────────────────────────────────────────
+  # Staging is the automated half — it deploys the validated artifact as soon
+  # as stage 04 is green. It downloads the stored artifact; it never rebuilds.
+  deploy-staging:
+    name: 05 / WebGL / Deploy — Staging
+    needs: [build-webgl, validate-webgl]
+    if: |
+      always() && !inputs.dry-run &&
+      (
+        (inputs.start-phase == 'build' && needs.validate-webgl.result == 'success') ||
+        inputs.start-phase == 'staging'
+      )
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Require deploy credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          MISSING=""
+          [[ -z "${CLOUDFLARE_API_TOKEN}" ]]  && MISSING="${MISSING} CLOUDFLARE_API_TOKEN"
+          [[ -z "${CLOUDFLARE_ACCOUNT_ID}" ]] && MISSING="${MISSING} CLOUDFLARE_ACCOUNT_ID"
+          if [[ -n "${MISSING}" ]]; then
+            echo "::error title=Missing deploy credentials::Stage 05 needs:${MISSING}. Build and validation (stages 03/04) completed — re-run this job once the secrets exist; the artifact will not be rebuilt."
+            exit 1
+          fi
+
+      - name: Download validated artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}
+          path: build-artifact/
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ inputs.cloudflare-pages-project }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          WEB_ROOT=$(dirname "$(find build-artifact -name index.html -print | head -1)")
+          bash .toolkit/scripts/webgl/deploy_cloudflare_pages.sh \
+            "${WEB_ROOT}" staging "${{ inputs.build-version }}"
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### 05 — WebGL Deploy (staging)"
+            echo "- **Version:** ${{ inputs.build-version }}"
+            echo "- **Artifact:** ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}"
+            echo "- **URL:** ${{ steps.deploy.outputs.url || 'n/a' }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ─── 06 — RELEASE: PRODUCTION ───────────────────────────────────────────────
+  # Gated by the `production` GitHub Environment. Add required reviewers there
+  # and this node waits for a human before anything reaches the live site — a
+  # successful build is never sufficient reason to publish production.
+  deploy-production:
+    name: 06 / WebGL / Deploy — Production
+    needs: [build-webgl, deploy-staging]
+    if: |
+      always() && !inputs.dry-run &&
+      (
+        needs.deploy-staging.result == 'success' ||
+        inputs.start-phase == 'production'
+      )
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Download validated artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}
+          path: build-artifact/
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ inputs.cloudflare-pages-project }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          WEB_ROOT=$(dirname "$(find build-artifact -name index.html -print | head -1)")
+          bash .toolkit/scripts/webgl/deploy_cloudflare_pages.sh \
+            "${WEB_ROOT}" production "${{ inputs.build-version }}"
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### 06 — WebGL Deploy (production)"
+            echo "- **Version:** ${{ inputs.build-version }}"
+            echo "- **Artifact:** ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}"
+            echo "- **URL:** ${{ steps.deploy.outputs.url || 'n/a' }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
