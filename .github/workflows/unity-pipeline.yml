@@ -278,8 +278,15 @@ jobs:
           # bare 'ProjectSettings/...' pattern checked out nothing for a project in a
           # subdirectory and the resolve step failed. A leading '**/' matches the file
           # at any depth, the repo root included, which covers every project-path.
+          # ProjectSettings.asset is here for the metadata step below, which
+          # reads bundleVersion. Without it the extractor took its
+          # "file not found" path, emitted an empty app-version, and the
+          # Release Set was written with no version at all — so a promotion's
+          # --expect-version had nothing to compare against and passed
+          # vacuously. Identity fields must be present, not merely checked.
           sparse-checkout: |
             **/ProjectSettings/ProjectVersion.txt
+            **/ProjectSettings/ProjectSettings.asset
           sparse-checkout-cone-mode: false
 
       - name: Resolve Unity version

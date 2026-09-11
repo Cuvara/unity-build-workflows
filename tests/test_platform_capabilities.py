@@ -597,3 +597,48 @@ def test_the_pipeline_actually_passes_the_capability_variable():
             "capability gate cannot see the project's declaration"
         )
         assert "vars.PLATFORMS" in str(env["PLATFORMS"]), env["PLATFORMS"]
+
+
+def test_release_set_refuses_a_missing_version(tmp_path):
+    """Found on a real run: the pipeline's shallow checkout omitted
+    ProjectSettings.asset, so app-version resolved empty and the Release Set
+    was written with `"version": ""`. `verify --expect-version ''` then
+    compared nothing and passed — the identity check silently lost a field.
+    """
+    proc, _, _ = _release_set(tmp_path, version="")
+    assert proc.returncode == 1
+    assert "no version" in proc.stderr
+
+
+def test_development_sets_may_have_no_version(tmp_path):
+    """The rule is a release rule. A development set is disposable (I-002)."""
+    artifacts = tmp_path / "artifacts"
+    (artifacts / "development-android-apk").mkdir(parents=True)
+    (artifacts / "development-android-apk" / "app.apk").write_bytes(b"APK")
+    (artifacts / "development-android-apk" / "artifact-manifest.json").write_text(
+        json.dumps({"platform": "Android", "artifactName": "development-android-apk",
+                    "artifactType": "APK", "gitCommit": "abc123def456",
+                    "builderProvenance": DOCKER_PROVENANCE}))
+    proc = subprocess.run([
+        "python3", str(MANIFEST), "generate", "--search-root", str(artifacts),
+        "--artifacts-root", str(artifacts), "--output", str(tmp_path / "m.json"),
+        "--commit", "abc123def456", "--build-type", "development",
+        "--require-artifacts",
+    ], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_the_pipeline_checks_out_the_file_version_comes_from():
+    """The other half: the manifest can only carry a version the job can read."""
+    import yaml
+
+    pipeline = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text())
+    sparse = [step.get("with", {}).get("sparse-checkout", "")
+              for job in pipeline["jobs"].values()
+              for step in job.get("steps", [])
+              if "checkout" in str(step.get("uses", ""))]
+    assert any("ProjectSettings.asset" in str(p) for p in sparse), (
+        "no checkout brings in ProjectSettings.asset, so bundleVersion cannot "
+        "be read and the Release Set will have an empty version"
+    )
