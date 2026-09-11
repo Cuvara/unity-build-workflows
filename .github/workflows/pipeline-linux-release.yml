@@ -193,6 +193,28 @@ jobs:
           run-id: ${{ inputs.source-run-id }}
           github-token: ${{ github.token }}
 
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${ inputs.source-run-id }
+          github-token: ${ github.token }
+
+      # This job fetched the artifact itself, so it checks the bytes it holds
+      # rather than trusting that an earlier job checked a different download.
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             Linux64 \
+            --artifact-path        build-artifact \
+            --expect-run-id        "${ inputs.source-run-id }" \
+            --expect-artifact-name "${ inputs.artifact-name }" \
+            --expect-version       "${ inputs.build-version }"
+
       - name: Validate Linux artifact
         shell: bash
         run: |

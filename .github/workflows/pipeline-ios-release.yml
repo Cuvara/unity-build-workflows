@@ -29,46 +29,9 @@ on:
         required: false
         default: main
       # ── Build inputs ──
-      project-path:
-        type: string
-        required: false
-        default: '.'
-      unity-version:
-        type: string
-        required: true
-      build-config-path:
-        type: string
-        required: false
-        default: BuildConfig
       build-version:
         type: string
         required: true
-      build-addressables:
-        type: boolean
-        required: false
-        default: true
-      ios-runner-label:
-        description: macOS runner label for Unity + Xcode
-        type: string
-        required: false
-        default: macos-unity-xcode
-      workflow-repository:
-        type: string
-        required: false
-        default: ''
-      workflow-ref:
-        type: string
-        required: false
-        default: ''
-      integration-mode:
-        type: string
-        required: false
-        default: remote
-      toolkit-path:
-        type: string
-        required: false
-        default: tools/unity-build-workflows
-
       # ── Release inputs ──
       app-id:
         description: App Store Connect app ID
@@ -78,24 +41,6 @@ on:
         description: App Store version string (e.g., 1.2.3)
         type: string
         required: true
-      export-method:
-        description: IPA export method
-        type: string
-        required: false
-        default: app-store
-      bundle-id:
-        description: >-
-          Expected CFBundleIdentifier. When set, stage 04 fails the IPA whose
-          Info.plist does not match, instead of letting App Store Connect
-          reject the upload afterwards. Empty skips the check.
-        type: string
-        required: false
-        default: ''
-      app-name:
-        description: Application name for archive/IPA naming
-        type: string
-        required: false
-        default: Unity
       start-phase:
         description: Phase to start from (validate/internal/external/production)
         type: string
@@ -134,23 +79,11 @@ on:
         default: false
 
     secrets:
-      UNITY_LICENSE:
-        required: false
-      UNITY_EMAIL:
-        required: false
-      UNITY_PASSWORD:
-        required: false
       # Optional at the call boundary, checked where they are used: a
       # `required: true` secret is validated when the workflow call is
       # RESOLVED, so declaring these required made Build Only impossible in a
       # repository that has no store credentials. Signing fails in stage 03 and
       # publishing fails in stage 05 if they are genuinely missing.
-      IOS_DISTRIBUTION_CERTIFICATE_BASE64:
-        required: false
-      IOS_DISTRIBUTION_CERTIFICATE_PASSWORD:
-        required: false
-      IOS_PROVISIONING_PROFILE_BASE64:
-        required: false
       APP_STORE_CONNECT_KEY_ID:
         required: false
       APP_STORE_CONNECT_ISSUER_ID:
@@ -165,51 +98,12 @@ on:
         description: Name of the signed IPA artifact this run promoted
         value: ${{ inputs.artifact-name }}
 
-  workflow_dispatch:
-    inputs:
-      unity-version:
-        description: Unity editor version
-        required: true
-        type: string
-      build-version:
-        description: Build version string (CFBundleVersion)
-        required: true
-        type: string
-      version-string:
-        description: App Store version string (e.g., 1.2.3)
-        required: true
-        type: string
-      app-id:
-        description: App Store Connect app ID
-        required: true
-        type: string
-      export-method:
-        description: IPA export method
-        required: false
-        type: choice
-        default: app-store
-        options: [app-store, ad-hoc, enterprise, development]
-      app-name:
-        description: Application name
-        required: false
-        type: string
-        default: Unity
-      start-phase:
-        description: Phase to start from
-        required: false
-        type: choice
-        default: validate
-        options: [validate, internal, external, production]
-      phased-release:
-        description: Enable 7-day phased release
-        required: false
-        type: boolean
-        default: true
-      dry-run:
-        description: Build without submitting
-        required: false
-        type: boolean
-        default: false
+# No workflow_dispatch here. These are reusable workflows; the dispatch
+# surface is the consumer's numbered entry point (20/21/22-release-*.yml),
+# which is where a human picks a Release Set to promote. The form that used
+# to sit here predated promote-only and never asked for `source-run-id`, so
+# running it could only ever fail — a second, divergent form for the same
+# pipeline is worse than none.
 
 # The pipeline's stages, declared once. Every job renders this same
 # ladder with itself marked, so the run summary grows into a progress
@@ -218,6 +112,7 @@ on:
 env:
   PIPELINE_STAGES: |
     04 Verify Release Identity
+    04 Validate IPA
     04 Release Notes
     05 Publish — TestFlight Internal
     06 Release — TestFlight External
@@ -277,6 +172,83 @@ jobs:
           title: Release / iOS
           stages: ${{ env.PIPELINE_STAGES }}
           current: 04 Verify Release Identity
+  # ─── 04 — ARTIFACT VALIDATION ───────────────────────────────────────────────
+  # Every other platform validated the artifact it downloaded; iOS did not, so
+  # the IPA was checked once at build time and never again. Running it here
+  # answers a different question: stage 04 of Build / Release proved the build
+  # was sound, this proves the download is — and it is the last point before
+  # App Store Connect, which rejects a bad binary only after consuming a build
+  # number.
+  validate-ipa:
+    name: 04 / iOS / Validate IPA
+    needs: [verify-artifact]
+    if: |
+      !cancelled() &&
+      needs.verify-artifact.result == 'success' &&
+      inputs.start-phase == 'validate'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Download artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             iOS \
+            --artifact-path        build-artifact \
+            --expect-run-id        "${{ inputs.source-run-id }}" \
+            --expect-artifact-name "${{ inputs.artifact-name }}" \
+            --expect-version       "${{ inputs.build-version }}"
+
+      # The IPA must be signed: an unsigned one cannot be distributed, and App
+      # Store Connect discovers that after the upload rather than before it.
+      - name: Validate IPA
+        shell: bash
+        env:
+          REQUIRE_SIGNED: 'true'
+          EXPECTED_VERSION: ${{ inputs.version-string }}
+        run: |
+          set -Eeuo pipefail
+          IPA=$(find build-artifact -name '*.ipa' -type f | head -1)
+          if [ -z "${IPA}" ]; then
+            echo "::error::No .ipa in ${{ inputs.artifact-name }}. A promotion cannot build one — stage 03b of Build / Release is where it is produced."
+            exit 1
+          fi
+          bash .toolkit/scripts/ios/validate_ipa.sh "${IPA}"
+
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / iOS
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Validate IPA
+
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
 
   release-notes:
@@ -330,10 +302,11 @@ jobs:
 
   internal-testing:
     name: 05 / iOS / Publish — TestFlight Internal
-    needs: [verify-artifact, release-notes]
+    needs: [verify-artifact, validate-ipa, release-notes]
     if: |
       !cancelled() &&
       needs.verify-artifact.result == 'success' &&
+      needs.validate-ipa.result != 'failure' &&
       !inputs.dry-run &&
       (inputs.start-phase == 'validate' || inputs.start-phase == 'internal')
     runs-on: macos-latest
@@ -355,6 +328,30 @@ jobs:
           path: ipa-artifact/
           run-id: ${{ inputs.source-run-id }}
           github-token: ${{ github.token }}
+
+      # Re-verified here, not just in stage 04. This job downloads the artifact
+      # again — a separate fetch — and an approval on an earlier phase is not
+      # evidence about the bytes this job is holding. Cheap, and it is the last
+      # point at which publishing the wrong binary is still preventable.
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${ inputs.source-run-id }
+          github-token: ${ github.token }
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             iOS \
+            --artifact-path        ipa-artifact \
+            --expect-run-id        "${ inputs.source-run-id }" \
+            --expect-artifact-name "${ inputs.artifact-name }" \
+            --expect-version       "${ inputs.build-version }"
 
       - name: Find IPA
         id: find-ipa
@@ -484,6 +481,30 @@ jobs:
           path: ./
         continue-on-error: true
 
+      # Re-verified here, not just in stage 04. This job downloads the artifact
+      # again — a separate fetch — and an approval on an earlier phase is not
+      # evidence about the bytes this job is holding. Cheap, and it is the last
+      # point at which publishing the wrong binary is still preventable.
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${ inputs.source-run-id }
+          github-token: ${ github.token }
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             iOS \
+            --artifact-path        . \
+            --expect-run-id        "${ inputs.source-run-id }" \
+            --expect-artifact-name "${ inputs.artifact-name }" \
+            --expect-version       "${ inputs.build-version }"
+
       - name: Submit for App Store review
         uses: ./.toolkit/.github/actions/ios-asc-submit-review
         with:
@@ -522,7 +543,7 @@ jobs:
 
   report:
     name: 07 / iOS / Report & Notify
-    needs: [verify-artifact, release-notes, internal-testing, external-testing, production-release]
+    needs: [verify-artifact, validate-ipa, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -546,6 +567,7 @@ jobs:
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
           phases: |
             04 Verify Release Identity=${{ needs.verify-artifact.result }}
+            04 Validate IPA=${{ needs.validate-ipa.result }}
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — TestFlight Internal=${{ needs.internal-testing.result }}
             06 Release — TestFlight External=${{ needs.external-testing.result }}

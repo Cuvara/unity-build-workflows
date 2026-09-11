@@ -200,7 +200,15 @@ Steam is a DISTRIBUTION PROVIDER: its configuration gates publishing, and it
 fails loudly when absent rather than skipping quietly. See
 `docs/STEAM_DISTRIBUTION.md`.
 
-Both artifacts go through stage 04 like everyone else, using the shared
+The Linux **dedicated server** (`LinuxServer`) builds and validates like the
+others and produces `release-linux-server`, but has no promotion workflow. That
+is deliberate rather than unfinished: a headless server build is deployed to
+infrastructure, not published to a store, and the destination differs per
+project — inventing a Steam depot for it would be the same fiction desktop had
+before Steam existed. When a project has a real target, it becomes
+`25-release-linux-server.yml` with no change to the build layer.
+
+Both desktop artifacts go through stage 04 like everyone else, using the shared
 `desktop` validator (`scripts/desktop/validate_desktop_artifact.py`): the
 executable exists and is the right kind, its `<Product>_Data` directory is
 beside it with an engine payload and game code inside, the Unity runtime
