@@ -410,11 +410,14 @@ def test_r2_r6_single_platform(resolve_matrix, selected_platform):
 
 
 def test_android_artifact_type_follows_the_export_setting(resolve_matrix):
-    """APK/AAB is Android's own row, never a global switch."""
-    aab = resolve_matrix(["Android"], android_export="aab")["build"][0]
-    apk = resolve_matrix(["Android"], android_export="apk")["build"][0]
-    assert aab["artifact-type"] == "AAB" and aab["node"].endswith("/ AAB")
-    assert apk["artifact-type"] == "APK" and apk["node"].endswith("/ APK")
+    """APK/AAB is Android's own row, never a global switch — and it reaches the
+    artifact NAME, so a dev APK and a release AAB can never be confused."""
+    aab = resolve_matrix(["Android"], android_export="aab", build_type="release")["build"][0]
+    apk = resolve_matrix(["Android"], android_export="apk", build_type="development")["build"][0]
+    assert aab["artifact-type"] == "AAB" and aab["node"] == "AAB"
+    assert apk["artifact-type"] == "APK" and apk["node"] == "APK"
+    assert aab["artifact-name"] == "release-android-aab"
+    assert apk["artifact-name"] == "development-android-apk"
 
 
 def test_android_export_does_not_touch_other_platforms(resolve_matrix):
@@ -451,7 +454,59 @@ def test_empty_selection_yields_an_empty_matrix(resolve_matrix):
 def test_configuration_casing(resolve_matrix, environment, expected):
     out = resolve_matrix(["Android"], environment=environment)
     assert out["configuration"] == expected
-    assert out["build"][0]["node"].startswith(expected)
+
+
+@pytest.mark.parametrize("build_type,label", [("development", "Development"),
+                                              ("release", "Release")])
+def test_build_type_is_its_own_axis(resolve_matrix, build_type, label):
+    """Not the same thing as `environment` — it names the artifacts."""
+    out = resolve_matrix(["Android"], build_type=build_type)
+    assert out["build-type"] == build_type
+    assert out["build-type-label"] == label
+    assert out["artifact_names"][0].startswith(f"{build_type}-android-")
+
+
+@pytest.mark.parametrize("environment,expected", [
+    ("production", "release"),
+    ("staging", "development"),
+    ("development", "development"),
+])
+def test_build_type_defaults_from_environment(resolve_matrix, environment, expected):
+    """Back-compat: a caller that predates the build-type axis keeps working."""
+    assert resolve_matrix(["Android"], environment=environment)["build-type"] == expected
+
+
+def test_artifact_names_never_collide_between_build_types(resolve_matrix):
+    """The requirement that development and release artifacts be unmistakable."""
+    dev = set(resolve_matrix(PLATFORM_BUILD_PLATFORMS, environment="development",
+                             android_export="apk", build_type="development")["artifact_names"])
+    rel = set(resolve_matrix(PLATFORM_BUILD_PLATFORMS, environment="production",
+                             android_export="aab", build_type="release")["artifact_names"])
+    assert not dev & rel, f"development and release share artifact names: {sorted(dev & rel)}"
+    assert all(n.startswith("development-") for n in dev)
+    assert all(n.startswith("release-") for n in rel)
+
+
+def test_ci_lane_builds_nothing(resolve_matrix):
+    """`platform: None` is the CI lane: validate and test, build no player.
+
+    It must win over the branch flow, which on a push has already selected
+    platforms from the *_BUILD_PLATFORMS variables.
+    """
+    out = resolve_matrix(PLATFORM_BUILD_PLATFORMS, platform_input="None")
+    assert out["build"] == [] and out["has-builds"] == "false"
+    assert out["validate"] == [] and out["has-validations"] == "false"
+
+
+@pytest.mark.parametrize("platform,slug", [
+    ("Android", "android"), ("iOS", "ios"), ("WebGL", "webgl"),
+    ("Windows64", "windows"), ("Linux64", "linux"), ("LinuxServer", "linux-server"),
+])
+def test_artifact_slug_is_the_human_platform_name(resolve_matrix, platform, slug):
+    """Artifacts are named for the platform a person would say, not the Unity
+    target id — `release-windows`, not `release-windows64-exe`."""
+    out = resolve_matrix([platform], build_type="release")
+    assert out["artifact_names"][0].startswith(f"release-{slug}")
 
 
 # ---------------------------------------------------------------------------

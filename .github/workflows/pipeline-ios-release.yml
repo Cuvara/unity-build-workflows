@@ -101,6 +101,14 @@ on:
         type: string
         required: false
         default: build
+      artifact-name:
+        description: >-
+          Existing IPA artifact to publish when start-phase is
+          internal/external/production. This is what makes the binary QA
+          approved the binary that ships — nothing is rebuilt between them.
+        type: string
+        required: false
+        default: ''
       phased-release:
         description: Enable 7-day phased release on production
         type: boolean
@@ -380,7 +388,7 @@ jobs:
       - name: Download IPA artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.archive-export.outputs.ipa-artifact-name || format('ios-ipa-{0}', inputs.build-version) }}
+          name: ${{ needs.archive-export.outputs.ipa-artifact-name || inputs.artifact-name || format('ios-ipa-{0}', inputs.build-version) }}
           path: ipa-artifact/
 
       - name: Find IPA

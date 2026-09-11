@@ -12,6 +12,29 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **`build-type` is now its own axis** (`development` | `release`), separate
+  from `environment`. It drives the artifact names, so a development APK and a
+  release AAB can never be confused: `development-android-apk` versus
+  `release-android-aab`. Artifact slugs use the platform a person would name
+  (`release-windows`, `release-linux`), not the internal Unity target id.
+  Omitting it derives the old behaviour from `environment`, so existing callers
+  are unaffected.
+- **Three build-layer entry templates**, one question each —
+  `consumer-01-ci.yml` ("is this safe to merge?", builds no player),
+  `consumer-10-build-development.yml` (APK, for QA) and
+  `consumer-11-build-release.yml` (AAB, signed, immutable). Release is not
+  Development with `environment=production`: the two differ in build type,
+  artifact shape and artifact name.
+- **`platform: None`** — the CI lane. It wins over the branch flow, which on a
+  push has already chosen platforms from the `*_BUILD_PLATFORMS` variables, so
+  a merge check no longer pays for six Unity builds.
+- **Three per-platform release entry templates** (`consumer-20-release-android.yml`,
+  `-21-release-ios.yml`, `-22-release-webgl.yml`). Each defaults to promoting a
+  stored `release-*` artifact rather than rebuilding, so the binary QA approved
+  is the binary that ships. No Windows or Linux release workflow: they produce
+  standalone artifacts and this project has no distribution target for them.
+- `pipeline-ios-release.yml` gained an `artifact-name` input, so iOS can
+  promote a stored IPA like Android and WebGL already could.
 - **Stages 03 and 04 are matrix jobs**, replacing six per-platform build jobs
   and three per-platform validation jobs with two jobs driven by a matrix that
   stage 01 computes. The graph now contains exactly the platforms that were
