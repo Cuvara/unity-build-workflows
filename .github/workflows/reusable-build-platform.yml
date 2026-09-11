@@ -60,6 +60,16 @@ on:
         default: ''
         type: string
 
+      artifact-name:
+        description: >-
+          Name of the uploaded build artifact. Callers pass a name that encodes
+          the build type so a development APK and a release AAB can never be
+          confused — `development-android-apk` vs `release-android-aab`.
+          Empty keeps the legacy `unity-build-<Platform>`.
+        required: false
+        default: ''
+        type: string
+
       app-version:
         description: Application version recorded in the artifact manifest.
         required: false
@@ -1107,7 +1117,12 @@ jobs:
           # android-export-type may be blank on a non-Android build.
           [ -z "${TYPE}" ] && TYPE="ZIP"
           echo "artifact-type=${TYPE}" >> "$GITHUB_OUTPUT"
-          echo "[artifact-type] ${{ inputs.platform }} -> ${TYPE}"
+
+          NAME="${{ inputs.artifact-name }}"
+          [ -z "${NAME}" ] && NAME="unity-build-${{ inputs.platform }}"
+          echo "artifact-name=${NAME}" >> "$GITHUB_OUTPUT"
+
+          echo "[artifact-type] ${{ inputs.platform }} -> ${TYPE} (artifact: ${NAME})"
 
       - name: Generate artifact manifest
         id: manifest
@@ -1147,7 +1162,7 @@ jobs:
             --unity-version  "${{ inputs.unity-version }}" \
             --commit         "${{ github.sha }}" \
             --branch         "${{ github.ref_name }}" \
-            --artifact-name  "unity-build-${{ inputs.platform }}" \
+            --artifact-name  "${{ steps.artifact-type.outputs.artifact-name }}" \
             --github-output \
             > /dev/null
 
@@ -1163,7 +1178,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: build-manifest-${{ inputs.platform }}
+          name: ${{ steps.artifact-type.outputs.artifact-name }}-manifest
           path: ${{ steps.manifest.outputs.manifest-path }}
           if-no-files-found: ignore
           retention-days: ${{ inputs.artifact-retention-days }}
@@ -1180,7 +1195,7 @@ jobs:
         continue-on-error: ${{ contains(inputs.runner-labels, 'self-hosted') }}
         uses: actions/upload-artifact@v4
         with:
-          name: unity-build-${{ inputs.platform }}
+          name: ${{ steps.artifact-type.outputs.artifact-name }}
           path: build/
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}
@@ -1211,7 +1226,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: unity-build-${{ inputs.platform }}-logs
+          name: ${{ steps.artifact-type.outputs.artifact-name }}-logs
           path: |
             ${{ inputs.project-path }}/Logs/
             ${{ inputs.project-path }}/Library/Editor.log
@@ -1251,7 +1266,7 @@ jobs:
 
             if [ "$BUILD_OUTCOME" = "success" ]; then
               RESULT="success"
-              ARTIFACT_NAME="unity-build-${{ inputs.platform }}"
+              ARTIFACT_NAME="${{ steps.artifact-type.outputs.artifact-name }}"
             elif [ -z "$BUILD_OUTCOME" ]; then
               # No build step ran (e.g. all were skipped)
               RESULT="skipped"
@@ -1268,7 +1283,7 @@ jobs:
           if [ "$BLOCKED" = "true" ]; then
             MANIFEST_ARTIFACT_NAME=""
           else
-            MANIFEST_ARTIFACT_NAME="build-manifest-${{ inputs.platform }}"
+            MANIFEST_ARTIFACT_NAME="${{ steps.artifact-type.outputs.artifact-name }}-manifest"
           fi
 
           CONFIGURATION="${{ inputs.configuration }}"

@@ -44,6 +44,19 @@ on:
         type: string
 
       # ── Pass-through: mirror of workflow_dispatch inputs ─────────────────
+      build-type:
+        description: >-
+          development | release. This is NOT the same axis as `environment`.
+          It selects the artifact shape and, critically, the artifact NAMES:
+          `development-android-apk` versus `release-android-aab`. A release
+          build is not a development build with environment=production — it
+          produces store-shaped, signed output, and its artifacts must never be
+          mistakable for a dev build's.
+          Empty derives it from `environment` for backward compatibility.
+        required: false
+        default: ''
+        type: string
+
       platform:
         description: "Target platform(s): All | Android | WebGL | Linux64 | LinuxServer | iOS"
         required: false
@@ -219,6 +232,8 @@ jobs:
       define-symbols-count: ${{ steps.meta.outputs.define-symbols-count }}
       # ── Build matrix + node display labels (stages 03/04) ──────────────────
       configuration:          ${{ steps.matrix.outputs.configuration }}
+      build-type:             ${{ steps.matrix.outputs.build-type }}
+      build-type-label:       ${{ steps.matrix.outputs.build-type-label }}
       android-artifact-type:  ${{ steps.matrix.outputs.android-artifact-type }}
       label-addressables:     ${{ steps.matrix.outputs.label-addressables }}
       build-matrix:           ${{ steps.matrix.outputs.build-matrix }}
@@ -381,6 +396,8 @@ jobs:
         env:
           ENVIRONMENT:  ${{ steps.flow.outputs.environment }}
           ANDROID_TYPE: ${{ steps.flow.outputs.android-export-type }}
+          IN_BUILD_TYPE: ${{ inputs.build-type }}
+          IN_PLATFORM:   ${{ inputs.platform }}
           SEL_ANDROID:     ${{ steps.flow.outputs.build-android }}
           SEL_WEBGL:       ${{ steps.flow.outputs.build-webgl }}
           SEL_LINUX64:     ${{ steps.flow.outputs.build-linux64 }}
@@ -399,28 +416,83 @@ jobs:
           esac
           ANDROID_ARTIFACT=$(printf '%s' "${ANDROID_TYPE:-apk}" | tr '[:lower:]' '[:upper:]')
 
+          # Build type is its own axis. A caller that does not state one gets the
+          # historical mapping from environment, so existing consumers keep
+          # working; the Build / Development and Build / Release entry points
+          # state it explicitly.
+          BUILD_TYPE="${IN_BUILD_TYPE}"
+          if [ -z "${BUILD_TYPE}" ]; then
+            case "${ENVIRONMENT}" in
+              production) BUILD_TYPE="release" ;;
+              *)          BUILD_TYPE="development" ;;
+            esac
+          fi
+          case "${BUILD_TYPE}" in
+            development) BUILD_TYPE_LABEL="Development" ;;
+            release)     BUILD_TYPE_LABEL="Release" ;;
+            *)
+              echo "::error::Invalid build-type='${BUILD_TYPE}'. Allowed: development release"
+              exit 1
+              ;;
+          esac
+
           BUILD_ROWS=""
           VALIDATE_ROWS=""
+
+          # `platform: None` means "validate and test, build nothing" — the CI
+          # lane. It has to be honoured here rather than in the resolver,
+          # because on a push the resolver takes the platform set from the
+          # branch's *_BUILD_PLATFORMS variable and never looks at the input.
+          # An empty matrix leaves stages 03 and 04 with no node at all.
+          if [ "${IN_PLATFORM}" = "None" ]; then
+            echo "[matrix] platform=None — validation and tests only, no player build"
+            SEL_ANDROID=false; SEL_WEBGL=false; SEL_LINUX64=false
+            SEL_LINUXSERVER=false; SEL_WINDOWS64=false; SEL_IOS=false
+          fi
 
           # add <selected> <platform> <artifact-type> <node-suffix> <validator>
           # node-suffix is appended after "03 / <platform>" in the graph, so it
           # only carries what the platform name does not already say.
           # validator is empty for platforms with no stage-04 checker.
+          # The artifact name encodes build type, platform and artifact type, so a
+          # development APK and a release AAB can never be confused in the
+          # artifact list: development-android-apk vs release-android-aab.
+          # Slugs are the platform as a person names it, not the internal
+          # Unity target id. The artifact type is appended only where it
+          # distinguishes two real outputs — Android ships APK or AAB, iOS an
+          # Xcode project or an IPA. Appending it everywhere produced
+          # "development-webgl-webgl".
+          slug_of() {
+            case "$1" in
+              Windows64)   echo "windows" ;;
+              Linux64)     echo "linux" ;;
+              LinuxServer) echo "linux-server" ;;
+              *)           printf '%s' "$1" | tr '[:upper:]' '[:lower:]' ;;
+            esac
+          }
+
           add() {
             [ "$1" = "true" ] || return 0
             local platform="$2" artifact="$3" suffix="$4" validator="$5"
-            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"artifact-type\":\"${artifact}\",\"node\":\"${suffix}\"},"
+            local slug lower_artifact name
+            slug=$(slug_of "${platform}")
+            lower_artifact=$(printf '%s' "${artifact}" | tr '[:upper:]' '[:lower:]')
+            case "${platform}" in
+              Android|iOS) name="${BUILD_TYPE}-${slug}-${lower_artifact}" ;;
+              *)           name="${BUILD_TYPE}-${slug}" ;;
+            esac
+            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\"},"
             if [ -n "${validator}" ]; then
-              VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"${platform}\",\"artifact-type\":\"${artifact}\",\"validator\":\"${validator}\",\"node\":\"${suffix}\"},"
+              VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"${platform}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"validator\":\"${validator}\",\"node\":\"${suffix}\"},"
             fi
           }
 
-          add "${SEL_ANDROID}"     Android     "${ANDROID_ARTIFACT}" "${CONFIG} / ${ANDROID_ARTIFACT}" android
-          add "${SEL_IOS}"         iOS         XCODEPROJ             "${CONFIG} / Xcode Project"      ios
-          add "${SEL_WEBGL}"       WebGL       WEBGL                 "${CONFIG}"                      webgl
-          add "${SEL_LINUX64}"     Linux64     LINUX                 "${CONFIG}"                      ""
-          add "${SEL_LINUXSERVER}" LinuxServer LINUX                 "${CONFIG}"                      ""
-          add "${SEL_WINDOWS64}"   Windows64   EXE                   "${CONFIG}"                      ""
+          add "${SEL_ANDROID}"     Android     "${ANDROID_ARTIFACT}" "${ANDROID_ARTIFACT}" android
+          add "${SEL_IOS}"         iOS         XCODEPROJ             "Xcode Project"       ios
+          add "${SEL_WEBGL}"       WebGL       WEBGL                 "WebGL"               webgl
+          add "${SEL_LINUX64}"     Linux64     LINUX                 "Standalone"          ""
+          add "${SEL_LINUXSERVER}" LinuxServer LINUX                 "Dedicated Server"    ""
+          add "${SEL_WINDOWS64}"   Windows64   EXE                   "Standalone"          ""
 
           BUILD_MATRIX="[${BUILD_ROWS%,}]"
           VALIDATE_MATRIX="[${VALIDATE_ROWS%,}]"
@@ -429,6 +501,8 @@ jobs:
           # gated on these being non-empty.
           {
             echo "configuration=${CONFIG}"
+            echo "build-type=${BUILD_TYPE}"
+            echo "build-type-label=${BUILD_TYPE_LABEL}"
             echo "android-artifact-type=${ANDROID_ARTIFACT}"
             echo "label-addressables=${CONFIG}"
             echo "build-matrix=${BUILD_MATRIX}"
@@ -784,6 +858,7 @@ jobs:
     uses: ./.github/workflows/reusable-build-platform.yml
     with:
       platform:            Addressables
+      artifact-name:       ${{ needs.resolve-config.outputs.build-type }}-addressables
       node-label:          ${{ needs.resolve-config.outputs.label-addressables }}
       configuration:       ${{ needs.resolve-config.outputs.configuration }}
       artifact-type:       ADDRESSABLES
@@ -832,7 +907,7 @@ jobs:
   # failed iOS leg must not cancel a running Android leg.
   # ════════════════════════════════════════════════════════════════════════════
   build:
-    name: 03 / ${{ matrix.platform }}
+    name: 03 / ${{ matrix.platform }} / ${{ matrix.node }}
     needs: [resolve-config, quality-gate, build-addressables]
     if: >-
       !cancelled() &&
@@ -848,6 +923,7 @@ jobs:
       platform:            ${{ matrix.platform }}
       node-label:          ${{ matrix.node }}
       artifact-type:       ${{ matrix.artifact-type }}
+      artifact-name:       ${{ matrix.artifact-name }}
       configuration:       ${{ needs.resolve-config.outputs.configuration }}
       app-version:         ${{ needs.resolve-config.outputs.app-version }}
       toolkit-repo:        ${{ inputs.toolkit-repo }}
@@ -924,7 +1000,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: unity-build-${{ matrix.platform }}
+          name: ${{ matrix.artifact-name }}
           path: build-artifact/
 
       # The manifest is its own artifact because the build output directory is
@@ -936,7 +1012,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: build-manifest-${{ matrix.platform }}
+          name: ${{ matrix.artifact-name }}-manifest
           path: build-artifact/
 
       - name: Validate artifact
@@ -1000,7 +1076,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: validation-report-${{ matrix.platform }}
+          name: ${{ matrix.artifact-name }}-validation-report
           path: validation-${{ matrix.validator }}.json
           if-no-files-found: ignore
           retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
@@ -1059,6 +1135,7 @@ jobs:
           FLOW_TYPE:     ${{ needs.resolve-config.outputs.flow-type }}
           ENVIRONMENT:   ${{ needs.resolve-config.outputs.environment }}
           CONFIGURATION: ${{ needs.resolve-config.outputs.configuration }}
+          BUILD_TYPE:    ${{ needs.resolve-config.outputs.build-type }}
           APP_VERSION:   ${{ needs.resolve-config.outputs.app-version }}
           BUILD_NUMBER:  ${{ github.run_number }}
           SIGNING:       ${{ needs.resolve-config.outputs.signing }}
@@ -1162,6 +1239,7 @@ jobs:
           overall = "failure" if failed_stage else "success"
 
           # ── Step summary ─────────────────────────────────────────────────
+          build_type = env.get("BUILD_TYPE") or "development"
           out = []
           w = out.append
           w("## Unity Build — Final Report")
@@ -1202,7 +1280,7 @@ jobs:
               w("|---|---|---|---|---|---|")
               addr = env.get("R_ADDR", "")
               w(f"| Addressables | {emoji(addr)} `{addr or 'no result'}` | — | — | — | "
-                "`unity-build-Addressables` |")
+                f"`{build_type}-addressables` |")
               for platform, row in sorted(builds.items()):
                   result = row.get("result", "")
                   w(f"| {platform} | {emoji(result)} `{result or 'no result'}` | "
@@ -1217,12 +1295,15 @@ jobs:
               w("|---|---|---|")
               for platform, row in sorted(validations.items()):
                   result = row.get("result", "")
+                  artifact = builds.get(platform, {}).get("artifactName", "")
+                  report_name = f"{artifact}-validation-report" if artifact else "—"
                   w(f"| {platform} | {emoji(result)} `{result or 'no result'}` | "
-                    f"`validation-report-{platform}` |")
+                    f"`{report_name}` |")
           else:
               w("_No artifact validation ran._")
           w("")
-          w("> Logs: `unity-build-<Platform>-logs`. Manifests: `build-manifest-<Platform>`.")
+          w(f"> Logs: `{build_type}-<platform>-<artifact>-logs`. "
+            f"Manifests: `{build_type}-<platform>-<artifact>-manifest`.")
           w("> Publishing is a separate pipeline — see `pipeline-android-release.yml`, "
             "`pipeline-ios-release.yml`, `pipeline-webgl-release.yml`.")
 
@@ -1270,7 +1351,7 @@ jobs:
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          pattern: unity-build-*
+          pattern: ${{ needs.resolve-config.outputs.build-type }}-*
           path: ./artifacts
 
       - name: Derive overall status
@@ -1405,6 +1486,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_TYPE: ${{ needs.resolve-config.outputs.build-type }}
         run: |
           set +e
           DIAG=""
@@ -1417,8 +1499,17 @@ jobs:
             -q '.artifacts[]|"\(.name) \(.id)"' 2>/dev/null) || true
 
           # ── Per-platform scan ─────────────────────────────────────────────
+          # Artifacts are named <build-type>-<platform>-<artifact>, so the
+          # platform's own artifact name is discovered from the map rather than
+          # reconstructed — the artifact type is not knowable here.
           for P in Android WebGL Linux64 LinuxServer Windows64 iOS; do
-            LOG=$(find ./artifacts -path "*unity-build-${P}-logs*Editor.log" \
+            SLUG=$(printf '%s' "${P}" | tr '[:upper:]' '[:lower:]')
+            ART=$(printf '%s\n' "${ARTIFACT_MAP}" \
+              | awk '{print $1}' \
+              | grep -E "^${BUILD_TYPE}-${SLUG}-[a-z0-9]+$" | head -1) || ART=""
+            [ -z "${ART}" ] && continue
+
+            LOG=$(find ./artifacts -path "*${ART}-logs*Editor.log" \
               -print 2>/dev/null | head -1) || true
 
             # Skip platforms with no log file — nothing to report
@@ -1429,13 +1520,13 @@ jobs:
             warnings=$(grep -cE '\): warning ' \
               "${LOG}" 2>/dev/null) || warnings=0
 
-            # Look up the logs artifact id from the map
+            # Look up the artifact ids from the map
             logsid=$(printf '%s\n' "${ARTIFACT_MAP}" \
-              | grep "^unity-build-${P}-logs " \
+              | grep "^${ART}-logs " \
               | awk '{print $2}' | head -1) || logsid=""
 
             binid=$(printf '%s\n' "${ARTIFACT_MAP}" \
-              | grep "^unity-build-${P} " \
+              | grep "^${ART} " \
               | awk '{print $2}' | head -1) || binid=""
 
             DIAG="${DIAG}${P}=${errors},${warnings},${logsid},${binid}"$'\n'
