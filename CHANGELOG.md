@@ -10,6 +10,14 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+
+- **`.github/pipeline-policy/validation-status.md`** — what has actually been
+  proven, split into runtime verified (with run IDs), static verified, and
+  blocked by missing hardware or credentials. iOS is listed as blocked: stage
+  03b is written and statically checked but has never run, and no macOS runner
+  exists to run it on.
+
 ### Fixed
 
 - **A missing Play service account read as a corrupt one.** An unset secret
