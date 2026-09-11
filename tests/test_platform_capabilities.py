@@ -504,3 +504,96 @@ def test_capability_does_not_require_a_distribution_provider():
     configured. Requiring one would make desktop second-class."""
     for platform in ("Windows64", "Linux64"):
         assert resolve(platforms=platform, in_platform=platform)
+
+def _resolver_to_matrix(resolve_matrix, declared, requested, build_type="release"):
+    """Run the real chain: capability resolver → the pipeline's matrix step.
+
+    Testing the resolver alone proves a flag is `false`. It does not prove no
+    job is created — that depends on what the matrix step does with the flag,
+    and a matrix that emitted a row anyway would still fan out a job which
+    fails, or worse, builds. This runs both halves the way the pipeline does.
+    """
+    built = resolve(platforms=declared, in_platform=requested)
+    enabled = [p for p in ("Android", "iOS", "WebGL", "Windows64", "Linux64",
+                           "LinuxServer") if p.lower() in built]
+    return resolve_matrix(enabled, build_type=build_type,
+                          platform_input=requested if requested != "All" else "All")
+
+
+@pytest.mark.parametrize("declared,requested", INVALID_COMBINATIONS)
+def test_undeclared_platform_reaches_the_matrix_as_nothing(resolve_matrix, declared,
+                                                           requested):
+    """End to end: a disabled platform creates no job and so no artifact."""
+    out = _resolver_to_matrix(resolve_matrix, declared, requested)
+    assert out["build"] == [], out["build"]
+    assert out["validate"] == [], out["validate"]
+    assert out["artifact_names"] == []
+    assert out["has-builds"] == "false"
+    assert out["has-validations"] == "false"
+
+
+@pytest.mark.parametrize("declared,requested,expected", CAPABILITY_MATRIX)
+def test_declared_platforms_reach_the_matrix_intact(resolve_matrix, declared,
+                                                    requested, expected):
+    """The other half of the same proof: what IS declared does fan out, once."""
+    out = _resolver_to_matrix(resolve_matrix, declared, requested)
+    got = {r["platform"].lower() for r in out["build"]}
+    assert got == expected, f"{declared} asked for {requested}: {sorted(got)}"
+    assert out["has-builds"] == "true"
+    # One row per platform — a duplicate row means two jobs racing to upload
+    # the same artifact name, which fails late and confusingly.
+    assert len(out["build"]) == len(got)
+    assert len(out["artifact_names"]) == len(set(out["artifact_names"]))
+
+
+@pytest.mark.parametrize("platform,artifact", [
+    ("Android", "release-android-aab"),
+    ("WebGL", "release-webgl"),
+    ("Windows64", "release-windows"),
+    ("Linux64", "release-linux"),
+    # The pair most likely to collide: two Linux targets, one artifact type.
+    ("LinuxServer", "release-linux-server"),
+])
+def test_release_artifact_names_are_platform_unique(resolve_matrix, platform, artifact):
+    """Artifact naming is what promotion addresses; a collision between two
+    platforms or two build types would promote the wrong binary."""
+    out = resolve_matrix([platform], build_type="release")
+    assert out["artifact_names"] == [artifact], out["artifact_names"]
+    dev = resolve_matrix([platform], build_type="development")
+    assert dev["artifact_names"] != out["artifact_names"], (
+        "a development and a release build share an artifact name"
+    )
+
+
+def test_linux_desktop_and_server_do_not_share_an_artifact_name(resolve_matrix):
+    """Both are LINUX artifacts from one project; promoting the wrong one would
+    ship a headless server build to desktop players."""
+    out = resolve_matrix(["Linux64", "LinuxServer"], build_type="release")
+    assert len(set(out["artifact_names"])) == 2, out["artifact_names"]
+
+
+def test_the_pipeline_actually_passes_the_capability_variable():
+    """The gate is only real if the workflow hands it to the resolver.
+
+    Found at runtime, not in tests: every capability test set PLATFORMS in the
+    subprocess environment itself, so they all passed while `unity-pipeline.yml`
+    never forwarded `vars.PLATFORMS`. A project declaring Android,WebGL built
+    Windows64 on request. The unit tests were testing a resolver nobody was
+    calling that way.
+    """
+    import yaml
+
+    pipeline = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text())
+    steps = [step
+             for job in pipeline["jobs"].values()
+             for step in job.get("steps", [])
+             if "resolve_build_flow.sh" in str(step.get("run", ""))]
+    assert steps, "no step runs the resolver"
+    for step in steps:
+        env = step.get("env", {})
+        assert "PLATFORMS" in env, (
+            "the resolver step does not receive PLATFORMS, so the platform "
+            "capability gate cannot see the project's declaration"
+        )
+        assert "vars.PLATFORMS" in str(env["PLATFORMS"]), env["PLATFORMS"]

@@ -10,6 +10,16 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+
+- **The platform capability gate was inert.** `unity-pipeline.yml` never passed
+  `vars.PLATFORMS` to `resolve_build_flow.sh`, so a project declaring
+  `Android,WebGL` still built Windows64 when asked — found by running it, not
+  by the tests, every one of which set `PLATFORMS` in the resolver's own
+  environment and so tested a call shape nobody made. The variable is now
+  forwarded (with `BUILD_PLATFORMS_ENABLED` as the grouped name), and a test
+  parses the workflow to assert the resolver step actually receives it.
+
 ### Added
 
 - **Builder provenance (I-008).** Every artifact manifest now carries a
