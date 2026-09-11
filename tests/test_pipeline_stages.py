@@ -32,22 +32,19 @@ IOS_RELEASE = WORKFLOWS / "pipeline-ios-release.yml"
 WEBGL_RELEASE = WORKFLOWS / "pipeline-webgl-release.yml"
 BUILD_PLATFORM = WORKFLOWS / "reusable-build-platform.yml"
 
-# Platform build jobs in unity-pipeline.yml (stage 03).
-PLATFORM_BUILD_JOBS = [
-    "build-android",
-    "build-webgl",
-    "build-linux64",
-    "build-linuxserver",
-    "build-windows64",
-    "build-ios",
-]
+# Stage 03 and 04 are single MATRIX jobs, not one job per platform. Six
+# `if:`-gated build jobs meant GitHub drew a skipped node for every platform
+# that was not selected, so an Android-only run still rendered WebGL, iOS,
+# Linux64, LinuxServer and Windows64 greyed out beside it.
+BUILD_JOB = "build"
+VALIDATE_JOB = "validate-artifact"
 
-# Stage-04 job → the single stage-03 job it validates.
-VALIDATION_JOBS = {
-    "validate-artifact-android": "build-android",
-    "validate-artifact-webgl": "build-webgl",
-    "validate-artifact-ios": "build-ios",
-}
+# The platforms the matrix can carry, and the ones with a stage-04 validator.
+BUILD_PLATFORMS = ["Android", "WebGL", "Linux64", "LinuxServer", "Windows64", "iOS"]
+VALIDATED_PLATFORMS = ["Android", "WebGL", "iOS"]
+
+# Expensive jobs that must sit behind the quality gate.
+GATED_JOBS = [BUILD_JOB, "build-addressables"]
 
 STAGE_PREFIX = re.compile(r"^\d{2} / ")
 
@@ -132,45 +129,49 @@ def test_no_ambiguous_build_node_names(pipeline_jobs):
         )
 
 
-@pytest.mark.parametrize(
-    "job_id,platform",
-    [
-        ("build-android", "Android"),
-        ("build-webgl", "WebGL"),
-        ("build-linux64", "Linux64"),
-        ("build-linuxserver", "LinuxServer"),
-        ("build-windows64", "Windows64"),
-        ("build-ios", "iOS"),
-    ],
-)
-def test_build_node_names_carry_the_platform(pipeline_jobs, job_id, platform):
-    assert platform in str(pipeline_jobs[job_id]["name"]), (
-        f"{job_id} must name its platform so a failure is identifiable at a glance"
+def test_build_node_name_carries_the_platform(pipeline_jobs):
+    """`03 / ${{ matrix.platform }}` renders one node per selected platform."""
+    name = str(pipeline_jobs[BUILD_JOB]["name"])
+    assert "matrix.platform" in name, (
+        f"the build node must name its platform from the matrix, got {name!r}"
     )
+    assert name.startswith("03 / ")
 
 
-@pytest.mark.parametrize("job_id", PLATFORM_BUILD_JOBS + ["build-addressables"])
-def test_build_node_label_carries_configuration_and_artifact_type(pipeline_jobs, job_id):
-    """The second half of the node name (node-label) supplies config + artifact.
-
-    GitHub renders a called workflow as `<caller job name> / <inner job name>`,
-    so `03 / Android` + `Production / AAB` reads `03 / Android / Production / AAB`.
-    """
-    with_block = pipeline_jobs[job_id]["with"]
-    assert "node-label" in with_block, f"{job_id} does not set a node-label"
-    assert "configuration" in with_block, f"{job_id} does not record its configuration"
-    assert "artifact-type" in with_block, f"{job_id} does not declare its artifact type"
+def test_validate_node_name_carries_the_platform(pipeline_jobs):
+    name = str(pipeline_jobs[VALIDATE_JOB]["name"])
+    assert "matrix.platform" in name
+    assert name.startswith("04 / ")
 
 
-def test_resolve_config_exports_node_labels(pipeline_jobs):
-    """Labels resolve once in stage 01, not per build job."""
+def test_build_matrix_supplies_configuration_and_artifact_type(pipeline_jobs):
+    """The second half of the node name (node-label) and the artifact type come
+    from the matrix row, so `03 / Android` + `Production / AAB` renders
+    `03 / Android / Production / AAB`."""
+    with_block = pipeline_jobs[BUILD_JOB]["with"]
+    assert with_block["platform"] == "${{ matrix.platform }}"
+    assert with_block["node-label"] == "${{ matrix.node }}"
+    assert with_block["artifact-type"] == "${{ matrix.artifact-type }}"
+    assert "configuration" in with_block
+
+
+def test_addressables_node_is_named_and_configured(pipeline_jobs):
+    job = pipeline_jobs["build-addressables"]
+    assert str(job["name"]).startswith("03 / ")
+    assert "node-label" in job["with"]
+    assert "configuration" in job["with"]
+
+
+def test_resolve_config_exports_the_build_matrix(pipeline_jobs):
+    """The platform set resolves once, in stage 01, and travels as data."""
     outputs = pipeline_jobs["resolve-config"]["outputs"]
     for key in (
         "configuration",
         "android-artifact-type",
-        "label-android",
-        "label-ios",
-        "label-webgl",
+        "build-matrix",
+        "validate-matrix",
+        "has-builds",
+        "has-validations",
     ):
         assert key in outputs, f"resolve-config does not export {key}"
 
@@ -190,7 +191,7 @@ def test_quality_gate_depends_on_unity_tests(pipeline_jobs):
     )
 
 
-@pytest.mark.parametrize("job_id", PLATFORM_BUILD_JOBS + ["build-addressables"])
+@pytest.mark.parametrize("job_id", GATED_JOBS)
 def test_unity_tests_block_every_expensive_build(pipeline_jobs, job_id):
     """Unity Tests FAIL → no release build starts.
 
@@ -221,57 +222,73 @@ def test_quality_gate_treats_skipped_as_pass(pipeline_jobs):
 # Fan-out — platform builds are independent after the gate
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("job_id", PLATFORM_BUILD_JOBS)
-def test_platform_builds_do_not_depend_on_each_other(pipeline_jobs, job_id):
-    """Quality gate PASS → Android + iOS + WebGL run independently."""
-    others = set(PLATFORM_BUILD_JOBS) - {job_id}
-    depends_on_peers = others & transitive_needs(pipeline_jobs, job_id)
-    assert not depends_on_peers, (
-        f"{job_id} depends on {sorted(depends_on_peers)} — a failure in one platform "
-        "would then invalidate the others"
+def test_platform_builds_fan_out_independently(pipeline_jobs):
+    """Quality gate PASS → Android + iOS + WebGL run independently.
+
+    With a matrix that is `fail-fast: false`: a failed iOS leg must not cancel a
+    running Android leg, and no leg waits on another.
+    """
+    strategy = pipeline_jobs[BUILD_JOB]["strategy"]
+    assert strategy.get("fail-fast") is False, (
+        "fail-fast must be off, or one platform's failure cancels the others"
     )
+    assert "matrix" in strategy
+
+
+def test_build_matrix_comes_from_resolved_config(pipeline_jobs):
+    """The platform set is data from stage 01, not hardcoded jobs — which is
+    what stops unselected platforms rendering as skipped nodes."""
+    include = str(pipeline_jobs[BUILD_JOB]["strategy"]["matrix"]["include"])
+    assert "needs.resolve-config.outputs.build-matrix" in include
+
+
+def test_build_matrix_is_guarded_against_being_empty(pipeline_jobs):
+    """A matrix with no vectors is a workflow error, so the job is gated."""
+    condition = str(pipeline_jobs[BUILD_JOB].get("if", ""))
+    assert "has-builds" in condition
 
 
 # ---------------------------------------------------------------------------
 # Stage 04 — artifact validation is explicit and independent
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("validation_job,build_job", VALIDATION_JOBS.items())
-def test_validation_job_exists_and_is_stage_04(pipeline_jobs, validation_job, build_job):
-    assert validation_job in pipeline_jobs, f"{validation_job} is missing"
-    assert str(pipeline_jobs[validation_job]["name"]).startswith("04 / ")
+def test_validation_job_exists_and_is_stage_04(pipeline_jobs):
+    assert VALIDATE_JOB in pipeline_jobs
+    assert str(pipeline_jobs[VALIDATE_JOB]["name"]).startswith("04 / ")
 
 
-@pytest.mark.parametrize("validation_job,build_job", VALIDATION_JOBS.items())
-def test_validation_depends_only_on_its_own_build(pipeline_jobs, validation_job, build_job):
-    """Android's validation must not wait on — or fail with — iOS."""
-    reachable = transitive_needs(pipeline_jobs, validation_job)
-    assert build_job in reachable
-    foreign = (set(PLATFORM_BUILD_JOBS) - {build_job}) & reachable
-    assert not foreign, (
-        f"{validation_job} also depends on {sorted(foreign)}; a failure there would "
-        "leave this artifact unvalidated for no reason"
-    )
+def test_validation_matrix_comes_from_resolved_config(pipeline_jobs):
+    """Only platforms that HAVE a validator get a node — Linux and Windows
+    contribute none rather than a permanently skipped one."""
+    include = str(pipeline_jobs[VALIDATE_JOB]["strategy"]["matrix"]["include"])
+    assert "needs.resolve-config.outputs.validate-matrix" in include
+    assert "has-validations" in str(pipeline_jobs[VALIDATE_JOB].get("if", ""))
 
 
-@pytest.mark.parametrize("validation_job,build_job", VALIDATION_JOBS.items())
-def test_validation_downloads_rather_than_rebuilds(pipeline_jobs, validation_job, build_job):
+def test_validation_legs_are_independent(pipeline_jobs):
+    """A failed Android validation must not cancel the WebGL one."""
+    assert pipeline_jobs[VALIDATE_JOB]["strategy"].get("fail-fast") is False
+
+
+def test_validation_downloads_rather_than_rebuilds(pipeline_jobs):
     """Validation consumes the stored artifact — it never re-runs Unity."""
-    steps = pipeline_jobs[validation_job]["steps"]
+    steps = pipeline_jobs[VALIDATE_JOB]["steps"]
     uses = [str(s.get("uses", "")) for s in steps]
-    assert any(u.startswith("actions/download-artifact") for u in uses), (
-        f"{validation_job} must download the stored artifact"
-    )
+    assert any(u.startswith("actions/download-artifact") for u in uses)
     assert not any("reusable-build-platform" in u for u in uses)
 
 
-def test_validation_reads_the_artifact_type_from_the_build(pipeline_jobs):
+def test_validation_reads_the_artifact_type_from_the_matrix(pipeline_jobs):
     """Downstream stages are told the artifact type, they do not guess it."""
-    steps = pipeline_jobs["validate-artifact-android"]["steps"]
-    body = yaml.dump(steps)
-    assert "needs.build-android.outputs.artifact-type" in body, (
-        "stage 04 must take the artifact type from the build that produced it"
-    )
+    body = yaml.dump(pipeline_jobs[VALIDATE_JOB]["steps"])
+    assert "matrix.artifact-type" in body
+
+
+def test_every_validated_platform_has_a_validator_branch(pipeline_jobs):
+    """A matrix row whose validator has no branch would fail at runtime only."""
+    body = yaml.dump(pipeline_jobs[VALIDATE_JOB]["steps"])
+    for validator in ("android)", "webgl)", "ios)"):
+        assert validator in body, f"no dispatch branch for validator {validator}"
 
 
 # ---------------------------------------------------------------------------
@@ -493,12 +510,45 @@ def test_orchestrator_covers_all_three_platforms_in_the_report(orchestrator_jobs
 # ---------------------------------------------------------------------------
 
 def test_final_report_names_the_failing_stage(pipeline_jobs):
-    body = yaml.dump(pipeline_jobs["final-report"])
-    for token in ("01/validate-project", "02/unity-tests", "03/android", "04/android-validate"):
-        assert token in body, (
-            f"the final report does not gate on {token}, so that stage could fail "
-            "while the pipeline reports green"
-        )
+    """`Pipeline failed` sent people to read seven job logs. The report names
+    the stage and the platform."""
+    # Read the raw step scripts: yaml.dump re-wraps long lines, which breaks a
+    # literal substring search.
+    body = "\n".join(
+        str(step.get("run", "")) for step in pipeline_jobs["final-report"]["steps"]
+    )
+    for token in (
+        "01 PREPARE / Validate Unity Project",
+        "02 QUALITY GATE / Unity Tests",
+        "03 BUILD ARTIFACTS /",
+        "04 ARTIFACT VALIDATION /",
+        "failed_stage",
+    ):
+        assert token in body, f"the final report never mentions {token!r}"
+
+
+def test_final_report_collects_matrix_leg_results(pipeline_jobs):
+    """A matrix job's legs are not addressable through `needs`, so each leg
+    uploads its own result and this stage aggregates them. Without that, the
+    report can only say the whole matrix failed."""
+    job = pipeline_jobs["final-report"]
+    steps = yaml.dump(job["steps"])
+    assert "pipeline-result-*" in steps, (
+        "final-report does not download the per-leg result artifacts"
+    )
+    assert "download-artifact" in steps
+
+
+def test_build_and_validate_legs_publish_their_results(pipeline_jobs, repo_root):
+    """The other half of that contract."""
+    validate_steps = yaml.dump(pipeline_jobs[VALIDATE_JOB]["steps"])
+    assert "pipeline-result-validate-" in validate_steps
+
+    engine = (repo_root / ".github" / "workflows" / "reusable-build-platform.yml").read_text()
+    assert "pipeline-result-build-" in engine, (
+        "the build engine does not publish a per-platform result, so the report "
+        "cannot tell which platform failed"
+    )
 
 
 def test_discord_receives_stage_and_validation_context(pipeline_jobs):
@@ -525,9 +575,8 @@ def test_discord_action_accepts_the_new_context():
 
 def test_stage_04_jobs_do_not_add_a_nesting_level(pipeline_jobs):
     """caller → unity-pipeline → reusable-build-platform already spends 3."""
-    for job_id in VALIDATION_JOBS:
-        assert "uses" not in pipeline_jobs[job_id], (
-            f"{job_id} is a workflow_call; that would put a consumer at 4 levels and "
-            "leave no room for the reusable build workflow underneath"
-        )
-        assert "runs-on" in pipeline_jobs[job_id]
+    assert "uses" not in pipeline_jobs[VALIDATE_JOB], (
+        f"{VALIDATE_JOB} is a workflow_call; that would put a consumer at 4 levels "
+        "and leave no room for the reusable build workflow underneath"
+    )
+    assert "runs-on" in pipeline_jobs[VALIDATE_JOB]

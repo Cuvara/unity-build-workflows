@@ -27,6 +27,10 @@ Every user-visible node belongs to exactly one stage, and says so in its name.
 | 07 | REPORT | Final report |
 | 08 | NOTIFY | Discord notification |
 
+Stages 03 and 04 are **matrix jobs**: the graph contains exactly the platforms
+that were selected. An Android-only run draws one build node and one validation
+node — not six greyed-out platforms nobody asked for.
+
 ```
 01 PREPARE
    01 / Resolve Build Config
@@ -362,13 +366,17 @@ The artifact is fetched from artifact storage, so re-publishing publishes the
 
 ### Limitations imposed by GitHub Actions
 
-* **A `strategy: matrix` over the platforms would collapse them into one job
-  id.** Per-leg results are not addressable from `needs:`, so the final report
-  and the Discord message could no longer say *which* platform failed, and no
-  downstream job could depend on a single platform. The platform nodes are
-  therefore explicit call sites of the one shared executor
-  (`reusable-build-platform.yml`) — the build logic is not duplicated; only a
-  `with:` block is. Adding a platform is §9.
+* **A matrix job's legs are not addressable from `needs:`.** `needs.build.result`
+  is one aggregate for the whole matrix, so the report cannot ask "how did
+  Android do?" directly. Each leg therefore uploads a small
+  `pipeline-result-<stage>-<platform>` artifact and stage 07 aggregates them.
+  That is the one piece of indirection the matrix costs — and it buys a report
+  that covers whichever platforms actually ran, with real per-platform artifact
+  type, size and duration instead of a hardcoded table.
+* **Stage 04 waits for the whole build matrix.** `needs: [build]` cannot depend
+  on a single leg, so Android's validation starts once every build leg has
+  settled. It costs ordering, never correctness: each leg downloads its own
+  stored artifact, and re-running one validation rebuilds nothing.
 * **Nesting depth is capped at 4** (`caller → unity-pipeline →
   reusable-build-platform` already spends 3). Stage-04 nodes are therefore plain
   `runs-on` jobs, not `workflow_call`s. Asserted by a test.
@@ -402,7 +410,8 @@ its first release run.
 
 ## 9. Adding a new platform
 
-You should not need to read the rest of the pipeline.
+Stages 03 and 04 are **matrix jobs**, so a platform is a row of data, not a new
+job. There is no YAML to copy.
 
 1. **Executor** — confirm `reusable-build-platform.yml` can build it (or add the
    lane there, in one place). Register its artifact type in
@@ -410,18 +419,26 @@ You should not need to read the rest of the pipeline.
    `scripts/common/artifact_manifest.py`.
 2. **Resolver** — add `build-<platform>` to `scripts/common/resolve_build_flow.sh`
    and document it in [BRANCH_FLOW_CONTRACT.md](BRANCH_FLOW_CONTRACT.md).
-3. **Label** — add `label-<platform>` to the `Resolve node display labels` step
-   and to `resolve-config`'s outputs in `unity-pipeline.yml`.
-4. **Stage 03** — copy an existing platform job. Set `name: 03 / <Platform>`,
-   `node-label`, `configuration`, `artifact-type`, and gate it on
-   `needs.quality-gate.outputs.passed == 'true'`.
-5. **Stage 04** — add a validator script and a `validate-artifact-<platform>`
-   job depending only on its own build job.
-6. **Stages 07/08** — add the result to `final-report`'s env, table and
-   `check_result` list, and to `notify-discord`.
-7. **Tests** — add the job id to `PLATFORM_BUILD_JOBS` / `VALIDATION_JOBS` in
-   `tests/test_pipeline_stages.py`. The independence, gating and naming tests
-   then cover it automatically.
+3. **Matrix** — add one `add` line to the `Resolve build matrix` step in
+   `unity-pipeline.yml`:
+
+   ```bash
+   add "${SEL_SWITCH}" Switch NSP "${CONFIG}" switch
+   #    selected?      platform  artifact  node suffix  validator (empty = no stage 04)
+   ```
+
+4. **Stage 04** — if the platform has a validator, add its script and one
+   `case` branch in the validate job's dispatch. Leave the validator field
+   empty to skip stage 04 entirely; the platform then contributes no node
+   rather than a permanently skipped one.
+5. **Stages 07/08** — nothing. The report and the Discord message are built
+   from the matrix legs' own result artifacts, so a new platform appears
+   automatically.
+6. **Tests** — add the platform to `PLATFORM_BUILD_PLATFORMS` in
+   `tests/test_platform_selection.py`. The selection, isolation and gating
+   tests then cover it.
+7. **Entry workflow** — optional; only if the platform deserves its own
+   Run-workflow form (§1a).
 
 ## 10. Adding a build configuration
 

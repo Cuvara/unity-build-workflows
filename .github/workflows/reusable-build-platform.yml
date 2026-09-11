@@ -1125,11 +1125,22 @@ jobs:
             exit 0
           fi
           mkdir -p "${SEARCH_ROOT}"
+
+          # The manifest must NOT be written into the build output. On the
+          # docker lane build/ is created by the Unity container under a
+          # different UID, so the runner user cannot write there:
+          #   PermissionError: [Errno 13] Permission denied: 'build/artifact-manifest.json'
+          # Write it to a directory the runner owns and upload from there; the
+          # search root is still build/, so discovery is unaffected.
+          MANIFEST_DIR="${RUNNER_TEMP}/artifact-manifest"
+          mkdir -p "${MANIFEST_DIR}"
+
           python3 .toolkit/scripts/common/artifact_manifest.py \
             --platform       "${{ inputs.platform }}" \
             --configuration  "${{ inputs.configuration != '' && inputs.configuration || inputs.environment }}" \
             --artifact-type  "${{ steps.artifact-type.outputs.artifact-type }}" \
             --search-root    "${SEARCH_ROOT}" \
+            --output         "${MANIFEST_DIR}/artifact-manifest.json" \
             --project-path   "${{ inputs.project-path }}" \
             --version        "${{ inputs.app-version }}" \
             --build-number   "${{ github.run_number }}" \
@@ -1139,6 +1150,13 @@ jobs:
             --artifact-name  "unity-build-${{ inputs.platform }}" \
             --github-output \
             > /dev/null
+
+          # Best effort: also ship it inside the build artifact, so a consumer
+          # that only has the artifact still has its provenance. Silently
+          # skipped when the container owns build/ — the uploaded
+          # build-manifest-<Platform> artifact is the reliable copy.
+          cp "${MANIFEST_DIR}/artifact-manifest.json" "${SEARCH_ROOT}/" 2>/dev/null \
+            || echo "[artifact-manifest] build output is not writable by the runner; manifest ships as its own artifact only"
 
       - name: Upload artifact manifest
         if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
@@ -1183,6 +1201,17 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
+
+      # ── Step 11d: Upload this platform's result for the report stage ──────
+      - name: Upload platform result
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-result-build-${{ inputs.platform }}
+          path: pipeline-results/
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.artifact-retention-days }}
 
       # ── Step 12: Upload logs artifact (always — diagnose failures) ─────────
       # Collects Editor.log and any BuildReport files from common locations.
@@ -1262,3 +1291,18 @@ jobs:
           echo "build-duration-seconds=${BUILD_DURATION:-0}"    >> "$GITHUB_OUTPUT"
           echo "manifest-artifact-name=${MANIFEST_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
           echo "configuration=${CONFIGURATION}"            >> "$GITHUB_OUTPUT"
+
+          # When this workflow is called from a MATRIX job, the caller cannot
+          # read these outputs per leg — `needs.<job>.outputs` collapses to one
+          # arbitrary leg. Write the result to a file the report stage can
+          # collect instead, so stage 07 can still say which platform failed.
+          mkdir -p pipeline-results
+          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s"}\n' \
+            "${{ inputs.platform }}" \
+            "${RESULT}" \
+            "${{ steps.artifact-type.outputs.artifact-type }}" \
+            "${ARTIFACT_NAME}" \
+            "${{ steps.manifest.outputs.artifact-size-bytes }}" \
+            "${BUILD_DURATION:-0}" \
+            "${CONFIGURATION}" \
+            > "pipeline-results/build-${{ inputs.platform }}.json"
