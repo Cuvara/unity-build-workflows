@@ -1370,6 +1370,18 @@ jobs:
                       artifact = builds[platform].get("artifactName", "")
                       w(f"| {platform} | `{artifact}` | **{lane}** (`{wf}`) | {dest} |")
                   w("")
+                  # The release workflows never build. They pull the artifact
+                  # from THIS run, so the run id is not optional context — it is
+                  # how the promotion finds the binary.
+                  first = shippable[0]
+                  lane, wf, _ = RELEASE_LANES[first]
+                  w("```bash")
+                  w(f"gh workflow run {wf} --ref main \\")
+                  w(f"  -f build-version={env.get('APP_VERSION') or '<version>'} \\")
+                  w(f"  -f artifact-name={builds[first].get('artifactName', '')} \\")
+                  w(f"  -f source-run-id={env.get('RUN_ID', '')}")
+                  w("```")
+                  w("")
           elif build_type == "development":
               w("> This is a development build. It is not signed for release and "
                 "cannot be published — use **Build / Release** for that.")

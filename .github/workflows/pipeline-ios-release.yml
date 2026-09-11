@@ -97,10 +97,18 @@ on:
         required: false
         default: Unity
       start-phase:
-        description: Phase to start from (build/internal/external/production)
+        description: Phase to start from (validate/internal/external/production)
         type: string
         required: false
-        default: build
+        default: validate
+      source-run-id:
+        description: >-
+          Run ID of the Build / Release run that produced the artifact. Required
+          because `actions/download-artifact` only sees the current run by
+          default — promotion pulls the binary from another run, which is what
+          makes it the same binary QA approved rather than a rebuild.
+        type: string
+        required: true
       artifact-name:
         description: >-
           Existing IPA artifact to publish when start-phase is
@@ -155,7 +163,7 @@ on:
     outputs:
       artifact-name:
         description: Name of the Xcode project artifact
-        value: ${{ jobs.build-xcode.outputs.artifact-name }}
+        value: ${{ inputs.artifact-name }}
 
   workflow_dispatch:
     inputs:
@@ -190,8 +198,8 @@ on:
         description: Phase to start from
         required: false
         type: choice
-        default: build
-        options: [build, internal, external, production]
+        default: validate
+        options: [validate, internal, external, production]
       phased-release:
         description: Enable 7-day phased release
         required: false
@@ -204,39 +212,12 @@ on:
         default: false
 
 jobs:
-  # ─── BUILD XCODE PROJECT ───────────────────────────────────────────────────
-  build-xcode:
-    name: 03 / iOS / Xcode Project
-    if: inputs.start-phase == 'build'
-    uses: ./.github/workflows/unity-build-ios.yml
-    with:
-      node-label: ${{ inputs.build-version }}
-      project-path: ${{ inputs.project-path || '.' }}
-      unity-version: ${{ inputs.unity-version }}
-      build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
-      build-version: ${{ inputs.build-version }}
-      environment: production
-      clean-build: true
-      build-addressables: ${{ inputs.build-addressables == '' && true || inputs.build-addressables }}
-      upload-artifact: true
-      ios-runner-label: ${{ inputs.ios-runner-label || 'macos-unity-xcode' }}
-      # integration-mode `remote` requires both of these. Falling back to the
-      # toolkit this pipeline was called from means a caller that only wants a
-      # build does not have to know they exist — without it, start-phase:build
-      # failed with "workflow-repository input is required" before Unity ran.
-      workflow-repository: ${{ inputs.workflow-repository || inputs.toolkit-repo }}
-      workflow-ref: ${{ inputs.workflow-ref || inputs.toolkit-ref }}
-      integration-mode: ${{ inputs.integration-mode || 'remote' }}
-      toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
-    secrets: inherit
-
   # ─── ARCHIVE & EXPORT IPA ──────────────────────────────────────────────────
   archive-export:
     name: 03 / iOS / IPA
-    needs: [build-xcode]
     if: |
       always() &&
-      (inputs.start-phase == 'build' && needs.build-xcode.result == 'success')
+      inputs.start-phase == 'validate'
     runs-on: ${{ inputs.ios-runner-label || 'macos-unity-xcode' }}
     outputs:
       ipa-artifact-name: ${{ steps.set-artifact.outputs.ipa-artifact-name }}
@@ -253,8 +234,10 @@ jobs:
       - name: Download Xcode project
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-xcode.outputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}
           path: xcode-project/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Setup signing
         id: signing
@@ -334,10 +317,9 @@ jobs:
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
   release-notes:
     name: 04 / iOS / Release Notes
-    needs: [build-xcode]
     if: |
       always() &&
-      (needs.build-xcode.result == 'success' || needs.build-xcode.result == 'skipped')
+      true
     runs-on: ubuntu-latest
     steps:
       # Release notes come from the CALLER's git history, so the caller repo is
@@ -395,6 +377,8 @@ jobs:
         with:
           name: ${{ needs.archive-export.outputs.ipa-artifact-name || inputs.artifact-name || format('ios-ipa-{0}', inputs.build-version) }}
           path: ipa-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Find IPA
         id: find-ipa
@@ -520,7 +504,7 @@ jobs:
   # to Discord.
   report:
     name: 07 / iOS / Report & Notify
-    needs: [build-xcode, archive-export, release-notes, internal-testing, external-testing, production-release]
+    needs: [archive-export, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -543,7 +527,6 @@ jobs:
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
           phases: |
-            03 Build Xcode Project=${{ needs.build-xcode.result }}
             03 Archive & Export IPA=${{ needs.archive-export.result }}
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — TestFlight Internal=${{ needs.internal-testing.result }}

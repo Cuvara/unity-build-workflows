@@ -10,6 +10,34 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — the release pipelines are promote-only.** They can no longer
+  build. `start-phase: build` is gone, the Unity build job is removed from
+  each, and `release-orchestrator.yml` — which built and released in one run —
+  is retired. "The binary QA approved is the binary that ships" stops being a
+  convention and becomes structural: there is no code path in the release layer
+  that can produce a binary.
+
+  A release is now always two steps:
+
+      Build / Release   →  release-android-aab  (immutable)
+      Release / Android →  validate → publish → release
+
+  iOS keeps its IPA export, because turning an Xcode project into a signed IPA
+  needs the distribution certificate — that is a release concern, not a build
+  one.
+
+  Migration: `Release / *` gains a **required** `source-run-id` input naming
+  the `Build / Release` run that produced the artifact.
+  `actions/download-artifact` only sees the current run by default, so without
+  it a promotion cannot physically find the binary. The `Build / Release`
+  report prints the exact command, run id included.
+
+  `start-phase` options are now `validate | internal | external | production`
+  (`validate | staging | production` for WebGL), defaulting to the first
+  publish phase.
+
 ### Added
 
 - **Stage 07 — Report & Notify in the release pipelines.** They ended at stage

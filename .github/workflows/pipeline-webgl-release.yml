@@ -108,10 +108,18 @@ on:
 
       # ── Release inputs ──
       start-phase:
-        description: Phase to start from (build | staging | production)
+        description: Phase to start from (validate | staging | production)
         type: string
         required: false
-        default: build
+        default: validate
+      source-run-id:
+        description: >-
+          Run ID of the Build / Release run that produced the artifact. Required
+          because `actions/download-artifact` only sees the current run by
+          default — promotion pulls the binary from another run, which is what
+          makes it the same binary QA approved rather than a rebuild.
+        type: string
+        required: true
       artifact-name:
         description: >-
           Existing artifact to deploy when start-phase is staging/production —
@@ -151,7 +159,7 @@ on:
     outputs:
       artifact-name:
         description: Name of the validated WebGL build artifact.
-        value: ${{ jobs.build-webgl.outputs.artifact-name }}
+        value: ${{ inputs.artifact-name }}
       staging-url:
         description: URL of the staging deployment, when one ran.
         value: ${{ jobs.deploy-staging.outputs.url }}
@@ -173,8 +181,8 @@ on:
         description: Phase to start from
         required: false
         type: choice
-        default: build
-        options: [build, staging, production]
+        default: validate
+        options: [validate, staging, production]
       artifact-name:
         description: Existing artifact to deploy (required unless start-phase is build)
         required: false
@@ -193,48 +201,15 @@ on:
         default: false
 
 jobs:
-  # ─── 03 — BUILD ARTIFACTS ───────────────────────────────────────────────────
-  build-webgl:
-    name: 03 / WebGL
-    if: inputs.start-phase == 'build'
-    uses: ./.github/workflows/unity-build-webgl.yml
-    with:
-      node-label: ${{ inputs.build-version }}
-      project-path: ${{ inputs.project-path || '.' }}
-      unity-version: ${{ inputs.unity-version }}
-      build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
-      build-version: ${{ inputs.build-version }}
-      environment: production
-      release-mode: true
-      # Building is not deploying: the build job never talks to the host.
-      deploy-target: none
-      clean-build: true
-      build-addressables: ${{ inputs.build-addressables }}
-      upload-artifact: true
-      image-registry: ${{ inputs.image-registry || 'ghcr.io' }}
-      image-namespace: ${{ inputs.image-namespace || '' }}
-      image-name: ${{ inputs.image-name || '' }}
-      image-digest: ${{ inputs.image-digest || '' }}
-      # integration-mode `remote` requires both of these. Falling back to the
-      # toolkit this pipeline was called from means a caller that only wants a
-      # build does not have to know they exist — without it, start-phase:build
-      # failed with "workflow-repository input is required" before Unity ran.
-      workflow-repository: ${{ inputs.workflow-repository || inputs.toolkit-repo }}
-      workflow-ref: ${{ inputs.workflow-ref || inputs.toolkit-ref }}
-      integration-mode: ${{ inputs.integration-mode || 'remote' }}
-      toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
-    secrets: inherit
-
   # ─── 04 — ARTIFACT VALIDATION ───────────────────────────────────────────────
   validate-webgl:
     name: 04 / WebGL / Validate
-    needs: [build-webgl]
     if: |
       always() &&
-      (inputs.start-phase == 'build' && needs.build-webgl.result == 'success')
+      inputs.start-phase == 'validate'
     runs-on: ubuntu-latest
     outputs:
-      artifact-name: ${{ needs.build-webgl.outputs.artifact-name }}
+      artifact-name: ${{ inputs.artifact-name }}
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -246,8 +221,10 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-webgl.outputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}
           path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Validate artifact
         shell: bash
@@ -279,11 +256,11 @@ jobs:
   # as stage 04 is green. It downloads the stored artifact; it never rebuilds.
   deploy-staging:
     name: 05 / WebGL / Deploy — Staging
-    needs: [build-webgl, validate-webgl]
+    needs: [validate-webgl]
     if: |
       always() && !inputs.dry-run &&
       (
-        (inputs.start-phase == 'build' && needs.validate-webgl.result == 'success') ||
+        (inputs.start-phase == 'validate' && needs.validate-webgl.result == 'success') ||
         inputs.start-phase == 'staging'
       )
     runs-on: ubuntu-latest
@@ -316,8 +293,10 @@ jobs:
       - name: Download validated artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}
           path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Deploy to Cloudflare Pages
         id: deploy
@@ -338,7 +317,7 @@ jobs:
           {
             echo "### 05 — WebGL Deploy (staging)"
             echo "- **Version:** ${{ inputs.build-version }}"
-            echo "- **Artifact:** ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}"
+            echo "- **Artifact:** ${{ inputs.artifact-name }}"
             echo "- **URL:** ${{ steps.deploy.outputs.url || 'n/a' }}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -348,7 +327,7 @@ jobs:
   # successful build is never sufficient reason to publish production.
   deploy-production:
     name: 06 / WebGL / Deploy — Production
-    needs: [build-webgl, deploy-staging]
+    needs: [deploy-staging]
     if: |
       always() && !inputs.dry-run &&
       (
@@ -370,8 +349,10 @@ jobs:
       - name: Download validated artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}
           path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Deploy to Cloudflare Pages
         id: deploy
@@ -392,7 +373,7 @@ jobs:
           {
             echo "### 06 — WebGL Deploy (production)"
             echo "- **Version:** ${{ inputs.build-version }}"
-            echo "- **Artifact:** ${{ needs.build-webgl.outputs.artifact-name || inputs.artifact-name }}"
+            echo "- **Artifact:** ${{ inputs.artifact-name }}"
             echo "- **URL:** ${{ steps.deploy.outputs.url || 'n/a' }}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -403,7 +384,7 @@ jobs:
   # to Discord.
   report:
     name: 07 / WebGL / Report & Notify
-    needs: [build-webgl, validate-webgl, deploy-staging, deploy-production]
+    needs: [validate-webgl, deploy-staging, deploy-production]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -426,7 +407,6 @@ jobs:
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
           phases: |
-            03 Build WebGL=${{ needs.build-webgl.result }}
             04 Validate=${{ needs.validate-webgl.result }}
             05 Deploy — Staging=${{ needs.deploy-staging.result }}
             06 Deploy — Production=${{ needs.deploy-production.result }}

@@ -85,10 +85,18 @@ on:
         type: string
         required: true
       start-phase:
-        description: Phase to start from (build/internal/external/production)
+        description: Phase to start from (validate/internal/external/production)
         type: string
         required: false
-        default: build
+        default: validate
+      source-run-id:
+        description: >-
+          Run ID of the Build / Release run that produced the artifact. Required
+          because `actions/download-artifact` only sees the current run by
+          default — promotion pulls the binary from another run, which is what
+          makes it the same binary QA approved rather than a rebuild.
+        type: string
+        required: true
       artifact-name:
         description: >-
           Existing build artifact to publish when start-phase is
@@ -147,7 +155,7 @@ on:
     outputs:
       artifact-name:
         description: Name of the build artifact
-        value: ${{ jobs.build-aab.outputs.artifact-name }}
+        value: ${{ inputs.artifact-name }}
 
   workflow_dispatch:
     inputs:
@@ -167,8 +175,8 @@ on:
         description: Phase to start from
         required: false
         type: choice
-        default: build
-        options: [build, internal, external, production]
+        default: validate
+        options: [validate, internal, external, production]
       artifact-name:
         description: Existing artifact to publish (required unless start-phase is build)
         required: false
@@ -191,53 +199,23 @@ on:
         default: false
 
 jobs:
-  # ─── BUILD AAB ──────────────────────────────────────────────────────────────
-  build-aab:
-    name: 03 / Android / AAB
-    if: inputs.start-phase == 'build'
-    uses: ./.github/workflows/unity-build-android.yml
-    with:
-      node-label: ${{ inputs.build-version }}
-      project-path: ${{ inputs.project-path || '.' }}
-      unity-version: ${{ inputs.unity-version }}
-      build-config-path: ${{ inputs.build-config-path || 'BuildConfig' }}
-      build-version: ${{ inputs.build-version }}
-      environment: production
-      release-mode: true
-      deploy-target: none
-      clean-build: true
-      build-addressables: ${{ inputs.build-addressables == '' && true || inputs.build-addressables }}
-      upload-artifact: true
-      image-registry: ${{ inputs.image-registry || 'ghcr.io' }}
-      image-namespace: ${{ inputs.image-namespace || '' }}
-      image-name: ${{ inputs.image-name || '' }}
-      image-digest: ${{ inputs.image-digest || '' }}
-      # integration-mode `remote` requires both of these. Falling back to the
-      # toolkit this pipeline was called from means a caller that only wants a
-      # build does not have to know they exist — without it, start-phase:build
-      # failed with "workflow-repository input is required" before Unity ran.
-      workflow-repository: ${{ inputs.workflow-repository || inputs.toolkit-repo }}
-      workflow-ref: ${{ inputs.workflow-ref || inputs.toolkit-ref }}
-      integration-mode: ${{ inputs.integration-mode || 'remote' }}
-      toolkit-path: ${{ inputs.toolkit-path || 'tools/unity-build-workflows' }}
-    secrets: inherit
-
   # ─── VALIDATE AAB ───────────────────────────────────────────────────────────
   validate-aab:
     name: 04 / Android / Validate AAB
-    needs: [build-aab]
     if: |
       always() &&
-      (inputs.start-phase == 'build' && needs.build-aab.result == 'success')
+      inputs.start-phase == 'validate'
     runs-on: ubuntu-latest
     outputs:
-      artifact-name: ${{ needs.build-aab.outputs.artifact-name }}
+      artifact-name: ${{ inputs.artifact-name }}
     steps:
       - name: Download artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-aab.outputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}
           path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       # A >1000-byte file was the whole of the old gate, so an unsigned AAB, an
       # APK where an AAB was expected, or a bundle with the wrong package id all
@@ -274,10 +252,9 @@ jobs:
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
   release-notes:
     name: 04 / Android / Release Notes
-    needs: [build-aab]
     if: |
       always() &&
-      (needs.build-aab.result == 'success' || needs.build-aab.result == 'skipped')
+      true
     runs-on: ubuntu-latest
     steps:
       # Release notes come from the CALLER's git history, so the caller repo is
@@ -311,11 +288,11 @@ jobs:
   # ─── PHASE 1: INTERNAL TESTING ──────────────────────────────────────────────
   internal-testing:
     name: 05 / Android / Publish — Internal Testing
-    needs: [build-aab, validate-aab, release-notes]
+    needs: [validate-aab, release-notes]
     if: |
       always() && !inputs.dry-run &&
       (
-        (inputs.start-phase == 'build' && needs.validate-aab.result == 'success') ||
+        (inputs.start-phase == 'validate' && needs.validate-aab.result == 'success') ||
         inputs.start-phase == 'internal'
       )
     runs-on: ubuntu-latest
@@ -331,8 +308,10 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.build-aab.outputs.artifact-name || inputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}
           path: build-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       - name: Download release notes
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
@@ -469,7 +448,7 @@ jobs:
   # to Discord.
   report:
     name: 07 / Android / Report & Notify
-    needs: [build-aab, validate-aab, release-notes, internal-testing, external-testing, production-release]
+    needs: [validate-aab, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -492,7 +471,6 @@ jobs:
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
           phases: |
-            03 Build AAB=${{ needs.build-aab.result }}
             04 Validate AAB=${{ needs.validate-aab.result }}
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — Internal Testing=${{ needs.internal-testing.result }}

@@ -26,7 +26,6 @@ REPO_ROOT = Path(__file__).parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 PIPELINE = WORKFLOWS / "unity-pipeline.yml"
-ORCHESTRATOR = WORKFLOWS / "release-orchestrator.yml"
 ANDROID_RELEASE = WORKFLOWS / "pipeline-android-release.yml"
 IOS_RELEASE = WORKFLOWS / "pipeline-ios-release.yml"
 WEBGL_RELEASE = WORKFLOWS / "pipeline-webgl-release.yml"
@@ -381,61 +380,6 @@ def test_publish_depends_on_artifact_validation(path, publish_jobs, validation_j
 
 
 @pytest.mark.parametrize(
-    "path,publish_job",
-    [
-        (ANDROID_RELEASE, "internal-testing"),
-        (IOS_RELEASE, "internal-testing"),
-        (WEBGL_RELEASE, "deploy-staging"),
-        (WEBGL_RELEASE, "deploy-production"),
-    ],
-)
-def test_publish_downloads_instead_of_rebuilding(path, publish_job):
-    """Publishing an already-built artifact must not re-run Unity."""
-    job = load(path)["jobs"][publish_job]
-    uses = [str(s.get("uses", "")) for s in job["steps"]]
-    assert any(u.startswith("actions/download-artifact") for u in uses), (
-        f"{path.name}:{publish_job} does not download the stored artifact"
-    )
-    assert not any("unity-build-" in u for u in uses)
-
-
-@pytest.mark.parametrize("path", [ANDROID_RELEASE, IOS_RELEASE, WEBGL_RELEASE])
-def test_dry_run_supports_build_only(path):
-    """Build Only: dry-run must exist and must gate every publish node."""
-    workflow = load(path)
-    assert "dry-run" in call_inputs(workflow), f"{path.name} has no dry-run input"
-    published = [
-        job_id
-        for job_id, job in workflow["jobs"].items()
-        if job.get("environment") in {"internal-testing", "external-testing", "staging", "production"}
-    ]
-    assert published, f"{path.name} declares no publish nodes"
-    for job_id in published:
-        assert "!inputs.dry-run" in str(workflow["jobs"][job_id].get("if", "")), (
-            f"{path.name}:{job_id} publishes even on a dry run"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Retry — publish a stored artifact without rebuilding
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("path", [ANDROID_RELEASE, IOS_RELEASE, WEBGL_RELEASE])
-def test_start_phase_allows_skipping_the_build(path):
-    workflow = load(path)
-    inputs = call_inputs(workflow)
-    assert "start-phase" in inputs, f"{path.name} cannot resume from a later phase"
-
-    jobs = workflow["jobs"]
-    build_jobs = [j for j in jobs if j.startswith("build-")]
-    assert build_jobs, f"{path.name} has no build job"
-    for job_id in build_jobs:
-        assert "inputs.start-phase == 'build'" in str(jobs[job_id].get("if", "")), (
-            f"{path.name}:{job_id} rebuilds even when resuming from a later phase"
-        )
-
-
-@pytest.mark.parametrize(
     "path,publish_job,phase",
     [
         (ANDROID_RELEASE, "internal-testing", "internal"),
@@ -486,39 +430,6 @@ def test_store_credentials_are_not_required_at_the_call_boundary(path):
     assert not required, (
         f"{path.name} requires {required} to resolve the call, blocking a build-only run"
     )
-
-
-# ---------------------------------------------------------------------------
-# Release orchestrator — gate, fan-out, independence
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="module")
-def orchestrator_jobs():
-    return load(ORCHESTRATOR)["jobs"]
-
-
-def test_orchestrator_has_a_quality_gate(orchestrator_jobs):
-    assert "quality-gate" in orchestrator_jobs
-    assert "unity-tests" in needs_of(orchestrator_jobs["quality-gate"])
-
-
-@pytest.mark.parametrize("job_id", ["android-release", "ios-release", "webgl-release"])
-def test_orchestrator_platforms_wait_for_the_gate(orchestrator_jobs, job_id):
-    assert job_id in orchestrator_jobs, f"{job_id} is missing from the orchestrator"
-    condition = str(orchestrator_jobs[job_id].get("if", ""))
-    assert "needs.quality-gate.outputs.passed == 'true'" in condition
-
-
-@pytest.mark.parametrize("job_id", ["android-release", "ios-release", "webgl-release"])
-def test_orchestrator_platforms_are_mutually_independent(orchestrator_jobs, job_id):
-    peers = {"android-release", "ios-release", "webgl-release"} - {job_id}
-    assert not peers & transitive_needs(orchestrator_jobs, job_id)
-
-
-def test_orchestrator_covers_all_three_platforms_in_the_report(orchestrator_jobs):
-    report_needs = needs_of(orchestrator_jobs["report"])
-    for job_id in ("android-release", "ios-release", "webgl-release", "quality-gate"):
-        assert job_id in report_needs, f"the report cannot see {job_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -702,7 +613,10 @@ def test_release_pipeline_reaches_stage_07(key, spec):
     path, _ = spec
     jobs = load(path)["jobs"]
     stages = {str(j.get("name", ""))[:2] for j in jobs.values()}
-    for stage in ("03", "04", "05", "06", "07"):
+    # No stage 03: a release pipeline never builds. iOS keeps an IPA export
+    # because signing an archive needs the distribution certificate, which
+    # belongs to the release layer, not the build layer.
+    for stage in ("04", "05", "06", "07"):
         assert stage in stages, f"{path.name} has no stage {stage}: {sorted(stages)}"
 
 
@@ -763,28 +677,84 @@ def test_release_report_is_one_shared_implementation(repo_root):
         assert "release-report" in body, f"{path.name} does not use the shared action"
 
 
+
+# ---------------------------------------------------------------------------
+# Promote-only: a release pipeline cannot build
+# ---------------------------------------------------------------------------
+
 @pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
-def test_release_build_supplies_what_remote_integration_needs(key, spec):
-    """`integration-mode: remote` requires workflow-repository and workflow-ref.
-
-    Neither was passed unless the caller set them explicitly, so
-    `start-phase: build` failed before Unity ran:
-
-        ##[error]workflow-repository input is required (integration-mode: remote)
-
-    The pipeline already knows the toolkit it was called from; falling back to
-    that means a caller who only wants a build need not know these exist.
-    """
+def test_release_pipeline_has_no_unity_build(key, spec):
+    """The strongest form of "the binary QA approved is the binary that ships":
+    there is no code path here that can produce one."""
     path, _ = spec
     jobs = load(path)["jobs"]
-    build_job = next(j for jid, j in jobs.items() if jid.startswith("build-"))
-    with_block = build_job["with"]
-    if "remote" not in str(with_block.get("integration-mode", "")):
-        return
-    for field, fallback in (("workflow-repository", "toolkit-repo"),
-                            ("workflow-ref", "toolkit-ref")):
-        value = str(with_block.get(field, ""))
-        assert f"inputs.{fallback}" in value, (
-            f"{path.name}: {field} has no fallback, so start-phase:build fails "
-            f"unless the caller passes it. Got: {value}"
+    for job_id, job in jobs.items():
+        uses = str(job.get("uses", ""))
+        assert "unity-build-" not in uses, (
+            f"{path.name}:{job_id} can run a Unity build ({uses}); promotion "
+            "must publish the artifact it was given, never make a new one"
         )
+        assert "reusable-build-platform" not in uses
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_release_pipeline_cannot_be_asked_to_build(key, spec):
+    path, _ = spec
+    workflow = load(path)
+    for event in ("workflow_call", "workflow_dispatch"):
+        inputs = (triggers(workflow).get(event) or {}).get("inputs") or {}
+        phase = inputs.get("start-phase")
+        if not phase:
+            continue
+        assert phase.get("default") != "build"
+        assert "build" not in (phase.get("options") or [phase.get("default")]), (
+            f"{path.name}: {event} still offers a build phase"
+        )
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_release_pipeline_downloads_across_runs(key, spec):
+    """`actions/download-artifact` only sees the current run by default. The
+    artifact being promoted was produced by a *different* run — without run-id
+    and a token, promotion cannot physically find the binary."""
+    path, _ = spec
+    workflow = load(path)
+    inputs = triggers(workflow)["workflow_call"]["inputs"]
+    assert inputs["source-run-id"]["required"] is True, (
+        f"{path.name}: source-run-id is optional, so a promotion can silently "
+        "look for the artifact in the wrong run"
+    )
+    for job_id, job in workflow["jobs"].items():
+        for step in job.get("steps", []) or []:
+            if not str(step.get("uses", "")).startswith("actions/download-artifact"):
+                continue
+            with_block = step.get("with") or {}
+            name = str(with_block.get("name", ""))
+            if "release-notes" in name:
+                continue  # produced inside this run
+            assert "inputs.source-run-id" in str(with_block.get("run-id", "")), (
+                f"{path.name}:{job_id} downloads {name} from the current run"
+            )
+            assert with_block.get("github-token"), (
+                f"{path.name}:{job_id} has no token for a cross-run download"
+            )
+
+
+def test_build_release_report_emits_a_runnable_promotion(pipeline_jobs):
+    """A promotion needs the artifact name AND the run that produced it. The
+    report is where the operator gets both."""
+    body = "\n".join(str(s.get("run", "")) for s in pipeline_jobs["final-report"]["steps"])
+    assert "source-run-id=" in body, (
+        "the hand-off omits the run id, so the command it prints cannot work"
+    )
+    assert "gh workflow run" in body
+
+
+def test_no_workflow_both_builds_and_releases(repo_root):
+    """release-orchestrator.yml built and published in one run, which
+    promote-only makes impossible: it would have to produce the binary it
+    publishes. Retired rather than left half-working."""
+    assert not (repo_root / ".github" / "workflows" / "release-orchestrator.yml").exists(), (
+        "release-orchestrator.yml builds and releases in one run; under "
+        "promote-only the release layer must never produce a binary"
+    )
