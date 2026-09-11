@@ -1,0 +1,196 @@
+name: Release Report
+description: >-
+  Stage 07 for a platform release pipeline — renders the phase results as a
+  step summary and posts the same information to Discord.
+
+  Release pipelines ended at stage 06, so a release run produced no report at
+  all: the only way to see how far a promotion got was to read the graph. This
+  is the shared implementation behind `07 / <Platform> / Report & Notify` in
+  pipeline-{android,ios,webgl}-release.yml. It is a composite action rather
+  than a reusable workflow because those already spend 3 of GitHub's 4
+  workflow_call levels.
+
+inputs:
+  platform:
+    description: Android | iOS | WebGL
+    required: true
+  destination:
+    description: Where a successful release lands, e.g. "Google Play".
+    required: true
+  build-version:
+    description: Version being released.
+    required: true
+  artifact-name:
+    description: Artifact that was promoted.
+    required: false
+    default: ''
+  start-phase:
+    description: Phase the run started from.
+    required: false
+    default: build
+  dry-run:
+    description: Whether this run was a dry run.
+    required: false
+    default: 'false'
+  phases:
+    description: >-
+      Newline-separated `label=result` pairs, in pipeline order, e.g.
+      "03 Build=success". `result` is a job result or `skipped`.
+    required: true
+  run-url:
+    description: URL of this run.
+    required: false
+    default: ''
+  discord-webhook:
+    description: Discord webhook. Empty disables the notification.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Render release report
+      id: render
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        DESTINATION: ${{ inputs.destination }}
+        BUILD_VERSION: ${{ inputs.build-version }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        START_PHASE: ${{ inputs.start-phase }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        PHASES: ${{ inputs.phases }}
+        RUN_URL: ${{ inputs.run-url }}
+      run: |
+        set -Eeuo pipefail
+        python3 - <<'PY'
+        import os
+
+        env = os.environ
+        rows = []
+        for line in env.get("PHASES", "").strip().split("\n"):
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            label, _, result = line.partition("=")
+            rows.append((label.strip(), (result.strip() or "no result")))
+
+        EMOJI = {"success": "✅", "failure": "❌", "skipped": "⏭️",
+                 "cancelled": "🚫", "no result": "❓"}
+
+        def passed(r):
+            return r in ("success", "skipped")
+
+        # The furthest phase that actually ran tells the reader where the
+        # release got to — "reached TestFlight" is the question being asked.
+        reached = next((l for l, r in reversed(rows) if r == "success"), None)
+        failed = next(((l, r) for l, r in rows if not passed(r)), None)
+        overall = "failure" if failed else "success"
+
+        done = sum(1 for _, r in rows if passed(r))
+        width = 24
+        filled = round(width * done / len(rows)) if rows else 0
+
+        out = []
+        w = out.append
+        w(f"## Release / {env['PLATFORM']} — Report")
+        w("")
+        headline = f"**{EMOJI.get(overall, '❓')} {overall.upper()}**"
+        if failed:
+            headline += f" — stopped at **{failed[0]}** (`{failed[1]}`)"
+        elif env.get("DRY_RUN") == "true":
+            headline += " — dry run, nothing was published"
+        elif reached:
+            headline += f" — reached **{reached}**"
+        w(headline)
+        w("")
+        w("```text")
+        w(f"{'progress':<16} {'█' * filled}{'░' * (width - filled)}  {done}/{len(rows)} phases")
+        w("```")
+        w("")
+        w("| Field | Value |")
+        w("|---|---|")
+        w(f"| Platform | `{env['PLATFORM']}` |")
+        w(f"| Version | `{env['BUILD_VERSION']}` |")
+        w(f"| Artifact | `{env.get('ARTIFACT_NAME') or '—'}` |")
+        w(f"| Started from | `{env.get('START_PHASE') or 'build'}` |")
+        w(f"| Destination | {env['DESTINATION']} |")
+        w(f"| Dry run | `{env.get('DRY_RUN')}` |")
+        w("")
+        w("### Phases")
+        w("| Phase | Result |")
+        w("|---|---|")
+        for label, result in rows:
+            w(f"| {label} | {EMOJI.get(result, '❓')} `{result}` |")
+        w("")
+        if not failed and env.get("DRY_RUN") != "true":
+            w(f"> The promoted artifact is on its way to {env['DESTINATION']}. "
+              "Nothing was rebuilt — this is the binary that was validated.")
+
+        summary = "\n".join(out)
+        with open(env["GITHUB_STEP_SUMMARY"], "a") as fh:
+            fh.write(summary + "\n")
+
+        # Compact single line for the Discord embed.
+        line = " · ".join(f"{EMOJI.get(r, '❓')} {l}" for l, r in rows)
+        with open(env["GITHUB_OUTPUT"], "a") as fh:
+            fh.write(f"overall={overall}\n")
+            fh.write(f"reached={reached or ''}\n")
+            fh.write(f"failed-phase={failed[0] if failed else ''}\n")
+            fh.write(f"phase-line={line}\n")
+        PY
+
+    - name: Notify Discord
+      if: ${{ inputs.discord-webhook != '' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        WEBHOOK: ${{ inputs.discord-webhook }}
+        PLATFORM: ${{ inputs.platform }}
+        DESTINATION: ${{ inputs.destination }}
+        BUILD_VERSION: ${{ inputs.build-version }}
+        OVERALL: ${{ steps.render.outputs.overall }}
+        REACHED: ${{ steps.render.outputs.reached }}
+        FAILED_PHASE: ${{ steps.render.outputs.failed-phase }}
+        PHASE_LINE: ${{ steps.render.outputs.phase-line }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        RUN_URL: ${{ inputs.run-url }}
+      run: |
+        set -Eeuo pipefail
+        python3 - <<'PY'
+        import json, os, urllib.request
+
+        env = os.environ
+        colour = {"success": 0x2ECC71, "failure": 0xE74C3C}.get(env["OVERALL"], 0x95A5A6)
+        title = f"Release / {env['PLATFORM']} — {env['OVERALL'].upper()}"
+        if env.get("DRY_RUN") == "true":
+            title += " (dry run)"
+
+        fields = [
+            {"name": "Version", "value": env["BUILD_VERSION"] or "—", "inline": True},
+            {"name": "Destination", "value": env["DESTINATION"], "inline": True},
+        ]
+        if env.get("FAILED_PHASE"):
+            fields.append({"name": "🚦 Stopped at", "value": env["FAILED_PHASE"], "inline": False})
+        elif env.get("REACHED"):
+            fields.append({"name": "Reached", "value": env["REACHED"], "inline": False})
+        if env.get("PHASE_LINE"):
+            fields.append({"name": "Phases", "value": env["PHASE_LINE"][:1024], "inline": False})
+
+        payload = {"embeds": [{
+            "title": title,
+            "url": env.get("RUN_URL") or None,
+            "color": colour,
+            "fields": fields,
+        }]}
+        request = urllib.request.Request(
+            env["WEBHOOK"],
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            urllib.request.urlopen(request, timeout=20)
+            print("[release-report] Discord notified")
+        except Exception as exc:  # noqa: BLE001 — notification must never fail the release
+            print(f"::warning::Discord notification failed: {exc}")
+        PY
