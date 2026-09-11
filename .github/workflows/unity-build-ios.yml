@@ -8,6 +8,14 @@ name: Unity Build iOS
 on:
   workflow_call:
     inputs:
+      node-label:
+        description: >-
+          Display name for this workflow's job. GitHub appends it to the
+          caller's job name, so the caller owns the stage and platform and this
+          owns what is left. Empty keeps the standalone name.
+        required: false
+        default: ''
+        type: string
       project-path:
         description: Path to the Unity project root relative to the consumer repo root
         type: string
@@ -108,7 +116,7 @@ on:
 
 jobs:
   build:
-    name: Build iOS Xcode Project (${{ inputs.environment }})
+    name: ${{ inputs.node-label != '' && inputs.node-label || format('Build iOS Xcode Project ({0})', inputs.environment) }}
     runs-on: ${{ inputs.ios-runner-label }}
     environment: ${{ inputs.environment }}
     env:
