@@ -12,6 +12,11 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **iOS promotion validates the IPA it is about to publish.** Every other
+  platform validated the artifact it downloaded; iOS checked the IPA once at
+  build time and never again, leaving App Store Connect — which rejects a bad
+  binary only after consuming a build number — as the next line of defence.
+
 - **A progress ladder on every pipeline.** GitHub draws no progress indicator
   on a workflow node, so each stage job now renders one into its summary via
   `.github/actions/pipeline-progress`; because job summaries accumulate, the
@@ -200,6 +205,34 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   AXML reader and all three validators, against synthesised artifacts.
 
 ### Changed
+
+- **Promotion workflows no longer hold credentials they cannot use.**
+  `pipeline-{android,ios,webgl}-release.yml` declared `UNITY_LICENSE`,
+  `UNITY_EMAIL`, `UNITY_PASSWORD`, the Android keystore set and the iOS
+  distribution certificate — every one unread by anything in the file. I-005
+  says a promotion must not sign; holding the keystore anyway left that
+  capability one line of YAML away, which is how signing ended up inside
+  promotion the first time. The rule is now "could not sign", enforced by
+  `check_promotion_holds_no_signing_secrets`.
+- **Every job that downloads the artifact re-verifies it.** The Steam pipelines
+  did this from the day they were written; the store pipelines verified once in
+  a dedicated job and then published from a second, unchecked download. An
+  approval on an earlier phase is not evidence about the bytes a later job is
+  holding. Enforced by `check_every_download_is_verified` (I-017).
+- **BREAKING — promotion inputs pruned.** The three store pipelines each
+  declared 12 build inputs nothing read, `unity-version` among them and marked
+  `required: true` on a workflow that never runs Unity. All removed, along with
+  a `workflow_dispatch` form that predated promote-only and never asked for
+  `source-run-id` — running it could only ever fail. The dispatch surface is
+  the consumer's numbered entry point. Callers passing `unity-version` or
+  `bundle-id` must drop them; the shipped templates already have.
+- **`docs/CONSUMER_SETUP.md` described the previous architecture.** Step 2 told
+  a new project to install `consumer-unity-build.yml`, the single pre-refactor
+  caller, so anyone following the docs got a setup with no release layer, no
+  immutable artifact boundary and no platform capability model. It now installs
+  the numbered `01/10/11/20–24` set, says what each file is for, and walks
+  through a real promotion. The older templates are documented as the previous
+  generation rather than silently shipped alongside.
 
 - **I-008 redefined** from "release uses immutable Unity image references" to
   "release builds have immutable **or** auditable builder provenance,

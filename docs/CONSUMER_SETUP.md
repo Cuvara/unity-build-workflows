@@ -57,26 +57,53 @@ GitHub when needed, or reference this documentation online.
 
 ---
 
-## Step 2: Add the Caller Workflow
+## Step 2: Add the Entry Workflows
 
-Copy the thin caller template into your project:
+The pipeline has three lifecycle layers, and each gets its own workflow file in
+your project. Copy the whole numbered set — they are small, and each one asks a
+different question:
 
 ```bash
 mkdir -p .github/workflows
 
-# If you added the submodule:
-cp unity-build-workflows/templates/consumer-unity-build.yml \
-   .github/workflows/unity-build.yml
-
-# Without the submodule — download directly:
-curl -fsSL \
-  https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/consumer-unity-build.yml \
-  -o .github/workflows/unity-build.yml
+for f in 01-ci 10-build-development 11-build-release \
+         20-release-android 21-release-ios 22-release-webgl \
+         23-release-windows 24-release-linux; do
+  cp "unity-build-workflows/templates/consumer-${f}.yml" ".github/workflows/${f}.yml"
+done
 ```
 
-The file is ready to use as-is. It calls
-`Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2`
-with `secrets: inherit` — no per-secret wiring needed.
+Without the submodule, fetch the same files from
+`https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/consumer-<name>.yml`.
+
+| File | What it is | Trigger |
+|---|---|---|
+| `01-ci.yml` | Validate and test. **Builds nothing** (I-001). | push / pull_request |
+| `10-build-development.yml` | Disposable builds for the team. | manual |
+| `11-build-release.yml` | Produces the immutable Release Set. | manual |
+| `20-release-android.yml` | Promote an Android AAB to Google Play. | manual |
+| `21-release-ios.yml` | Promote a signed IPA to TestFlight / the App Store. | manual |
+| `22-release-webgl.yml` | Promote a WebGL build to hosting. | manual |
+| `23-release-windows.yml` | Promote a Windows build to Steam. | manual |
+| `24-release-linux.yml` | Promote a Linux build to Steam. | manual |
+
+Keep only the release files for platforms you actually ship; the build layer
+needs no editing either way.
+
+**The release files never build.** They take a `source-run-id` — the
+`Build / Release` run that produced the artifact — and publish those exact
+bytes. That is what makes the binary QA approved the binary that ships, and it
+is why "retry the deploy" costs seconds rather than a rebuild.
+`docs/PIPELINE_ARCHITECTURE.md` §1a has the reasoning.
+
+### The older single-file caller
+
+`templates/consumer-unity-build.yml` and the `consumer-build-*.yml` set are the
+previous generation: one workflow covering push, pull_request and manual builds
+together. They still work and existing projects need not migrate, but new
+projects should use the numbered set above — the release layer, the immutable
+artifact boundary and the platform capability model are only reachable through
+it.
 
 **Version pinning (recommended):**
 
@@ -86,18 +113,18 @@ with `secrets: inherit` — no per-secret wiring needed.
 | `@v2.2.5` | locked / reproducible | exact release, never moves |
 | `@main` | development only | bleeding edge; may break |
 
-The template ships pinned to `@v2`. For fully reproducible builds, pin to an
+The numbered templates ship pinned to `@main` while the release layer settles; pin them to a tag once your project is live. For fully reproducible builds, pin to an
 exact tag (e.g. `@v2.2.5`) and bump it deliberately. Available tags:
 `gh release list -R Cuvara/unity-build-workflows` or
 `git ls-remote --tags https://github.com/Cuvara/unity-build-workflows`.
 Set `toolkit-ref:` in the caller to the SAME ref so the toolkit scripts are
 checked out from the matching version.
 
-Commit and push the workflow file:
+Commit and push the workflow files:
 
 ```bash
-git add .github/workflows/unity-build.yml
-git commit -m "ci: add Unity build pipeline caller workflow"
+git add .github/workflows/
+git commit -m "ci: add the Unity build and release entry workflows"
 git push
 ```
 
@@ -136,7 +163,7 @@ Set all three together when your `.ulf` cannot activate offline — a Unity
 Personal licence bound to another machine id fails with `TimeStamp validation
 failed`, and credentials alone fail with `0 entitlements`. That pairing is the
 `personal-combined` strategy, and it is what the toolkit's own container
-entrypoint requires on the `unity-build.yml` path.
+entrypoint requires on the Docker build lane.
 
 See [UNITY\_PERSONAL\_DOCKER\_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md) for
 `.ulf` generation, troubleshooting, and the full explanation.
@@ -361,29 +388,45 @@ Trigger a manual build to verify everything is wired up:
 ```bash
 REPO="YOUR_ORG/YOUR_REPO"
 
-# Single platform, tests enabled
-gh workflow run unity-build.yml \
+# A disposable build, one platform, tests on
+gh workflow run 10-build-development.yml \
   --repo "${REPO}" \
   --ref develop \
   -f platform=Android \
   -f run-tests=true \
-  -f test-mode=EditMode \
-  -f environment=development
+  -f test-mode=EditMode
 
 # Watch progress
-gh run list --repo "${REPO}" --workflow unity-build.yml --limit 5
-gh run watch --repo "${REPO}" $(gh run list --repo "${REPO}" --workflow unity-build.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run list --repo "${REPO}" --workflow 10-build-development.yml --limit 5
+gh run watch --repo "${REPO}" $(gh run list --repo "${REPO}" --workflow 10-build-development.yml --limit 1 --json databaseId --jq '.[0].databaseId')
 ```
 
-Check the GitHub Actions UI: you should see named jobs (`resolve-config`,
-`validate-project`, `Unity Tests (EditMode)`, `Build Android`, `final-report`)
-as separate, independently-coloured nodes.
+In the Actions UI you should see stage-numbered nodes — `01 / Resolve Build
+Config`, `02 / Unity Tests`, `03 / Android`, `04 / Android / Validate APK`,
+`07 / Final Report` — each independently coloured, plus a progress ladder in
+every job's summary showing how far the run has got.
 
 Download the build artifact:
 
 ```bash
-RUN_ID=$(gh run list --repo "${REPO}" --workflow unity-build.yml --limit 1 --json databaseId --jq '.[0].databaseId')
-gh run download "${RUN_ID}" --repo "${REPO}" --name unity-build-Android
+RUN_ID=$(gh run list --repo "${REPO}" --workflow 10-build-development.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run download "${RUN_ID}" --repo "${REPO}" --name development-android-apk
+```
+
+Then the release path, which is the one worth rehearsing before you need it:
+
+```bash
+# 1. Produce an immutable Release Set
+gh workflow run 11-build-release.yml --repo "${REPO}" --ref develop -f platform=Android
+RELEASE_RUN=$(gh run list --repo "${REPO}" --workflow 11-build-release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+
+# 2. Promote it — no rebuild; dry-run publishes nothing
+gh workflow run 20-release-android.yml --repo "${REPO}" --ref develop \
+  -f build-version=1.0.0 \
+  -f source-run-id="${RELEASE_RUN}" \
+  -f package-name=com.yourcompany.yourgame \
+  -f start-phase=validate \
+  -f dry-run=true
 ```
 
 ---

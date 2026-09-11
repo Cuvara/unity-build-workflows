@@ -681,3 +681,115 @@ def test_nothing_downstream_of_a_failed_identity_check_runs(platform):
             f"{platform}:{name} has no status function, so it will be skipped "
             f"whenever an upstream job is skipped — including on purpose"
         )
+
+
+# ---------------------------------------------------------------------------
+# What a promotion is allowed to hold, and what it must re-check
+# ---------------------------------------------------------------------------
+
+PROMOTIONS = ["android", "ios", "webgl", "windows", "linux"]
+
+
+@pytest.mark.parametrize("platform", PROMOTIONS)
+def test_a_promotion_holds_no_build_or_signing_credential(platform):
+    """I-005 says a promotion must not sign. Holding the keystore anyway left
+    the capability one line of YAML away from being used — which is exactly
+    how signing ended up inside promotion the first time."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows"
+         / f"pipeline-{platform}-release.yml").read_text())
+    triggers = workflow.get("on") or workflow[True]
+    declared = set((triggers["workflow_call"].get("secrets") or {}))
+    forbidden = {
+        "UNITY_LICENSE", "UNITY_EMAIL", "UNITY_PASSWORD",
+        "ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASS",
+        "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASS",
+        "IOS_DISTRIBUTION_CERTIFICATE_BASE64",
+        "IOS_DISTRIBUTION_CERTIFICATE_PASSWORD",
+        "IOS_PROVISIONING_PROFILE_BASE64",
+    }
+    assert not (declared & forbidden), sorted(declared & forbidden)
+
+
+@pytest.mark.parametrize("platform", PROMOTIONS)
+def test_every_job_that_downloads_the_artifact_verifies_it(platform):
+    """Verifying once proves something about THAT download. Every later phase
+    fetches again, and an approval on an earlier phase is not evidence about
+    the bytes a later job is holding."""
+    import json as _json
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows"
+         / f"pipeline-{platform}-release.yml").read_text())
+    for job_id, job in workflow["jobs"].items():
+        steps = _json.dumps(job.get("steps") or [])
+        if "download-artifact" not in steps or "inputs.artifact-name" not in steps:
+            continue
+        assert "release_manifest.py verify" in steps, f"{platform}:{job_id}"
+
+
+@pytest.mark.parametrize("platform", PROMOTIONS)
+def test_a_promotion_asks_for_nothing_it_does_not_read(platform):
+    """`unity-version` was required by a workflow that never runs Unity, next
+    to eleven other build inputs nothing read. A form that asks for what it
+    ignores teaches people the answers do not matter."""
+    import re
+    import yaml
+
+    body = (REPO_ROOT / ".github" / "workflows"
+            / f"pipeline-{platform}-release.yml").read_text()
+    workflow = yaml.safe_load(body)
+    declared = set((workflow.get("on") or workflow[True])["workflow_call"]["inputs"])
+    used = set(re.findall(r"inputs\.([a-z0-9-]+)", body))
+    assert not (declared - used), sorted(declared - used)
+
+
+@pytest.mark.parametrize("platform", PROMOTIONS)
+def test_a_promotion_has_no_second_dispatch_form(platform):
+    """The dispatch surface is the consumer's numbered entry point. The form
+    that used to sit in these reusable workflows predated promote-only and
+    never asked for `source-run-id`, so running it could only fail."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows"
+         / f"pipeline-{platform}-release.yml").read_text())
+    triggers = workflow.get("on") or workflow[True]
+    assert "workflow_dispatch" not in triggers
+
+
+def test_ios_validates_the_ipa_it_is_about_to_publish():
+    """Every other platform validated its download; iOS checked the IPA once
+    at build time and never again."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "pipeline-ios-release.yml").read_text())
+    assert "validate-ipa" in workflow["jobs"]
+    steps = str(workflow["jobs"]["validate-ipa"]["steps"])
+    assert "validate_ipa.sh" in steps
+    # And publishing waits for it.
+    assert "validate-ipa" in workflow["jobs"]["internal-testing"]["needs"]
+
+
+@pytest.mark.parametrize("name", [
+    "consumer-20-release-android", "consumer-21-release-ios",
+    "consumer-22-release-webgl", "consumer-23-release-windows",
+    "consumer-24-release-linux",
+])
+def test_a_release_form_passes_only_what_the_pipeline_declares(name):
+    """A caller passing an input the reusable workflow no longer declares is a
+    hard workflow error, not a warning."""
+    import yaml
+
+    template = yaml.safe_load((REPO_ROOT / "templates" / f"{name}.yml").read_text())
+    job = next(iter(template["jobs"].values()))
+    target = str(job["uses"]).split("/")[-1].split("@")[0]
+    pipeline = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / target).read_text())
+    declared = set((pipeline.get("on") or pipeline[True])["workflow_call"]["inputs"])
+    passed = set(job.get("with") or {})
+    assert not (passed - declared), sorted(passed - declared)

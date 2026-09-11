@@ -39,57 +39,9 @@ on:
         default: main
 
       # ── Build inputs ──
-      project-path:
-        type: string
-        required: false
-        default: '.'
-      unity-version:
-        type: string
-        required: true
-      build-config-path:
-        type: string
-        required: false
-        default: BuildConfig
       build-version:
         type: string
         required: true
-      build-addressables:
-        type: boolean
-        required: false
-        default: true
-      image-registry:
-        type: string
-        required: false
-        default: ghcr.io
-      image-namespace:
-        type: string
-        required: false
-        default: ''
-      image-name:
-        type: string
-        required: false
-        default: ''
-      image-digest:
-        type: string
-        required: false
-        default: ''
-      workflow-repository:
-        type: string
-        required: false
-        default: ''
-      workflow-ref:
-        type: string
-        required: false
-        default: ''
-      integration-mode:
-        type: string
-        required: false
-        default: remote
-      toolkit-path:
-        type: string
-        required: false
-        default: tools/unity-build-workflows
-
       # ── Validation inputs ──
       expected-compression:
         description: >-
@@ -139,12 +91,6 @@ on:
         default: false
 
     secrets:
-      UNITY_LICENSE:
-        required: false
-      UNITY_EMAIL:
-        required: false
-      UNITY_PASSWORD:
-        required: false
       # Deploy credentials are checked where they are used. Declaring them
       # required here would make a Build Only run unresolvable in a repository
       # that has no Cloudflare account.
@@ -167,38 +113,12 @@ on:
         description: URL of the production deployment, when one ran.
         value: ${{ jobs.deploy-production.outputs.url }}
 
-  workflow_dispatch:
-    inputs:
-      unity-version:
-        description: Unity editor version
-        required: true
-        type: string
-      build-version:
-        description: Build version string
-        required: true
-        type: string
-      start-phase:
-        description: Phase to start from
-        required: false
-        type: choice
-        default: validate
-        options: [validate, staging, production]
-      artifact-name:
-        description: Existing artifact to deploy (required unless start-phase is build)
-        required: false
-        type: string
-        default: ''
-      expected-compression:
-        description: Expected WebGL compression (any = accept whatever the build emitted)
-        required: false
-        type: choice
-        default: any
-        options: [any, gzip, brotli, none]
-      dry-run:
-        description: Build and validate only — no deployment
-        required: false
-        type: boolean
-        default: false
+# No workflow_dispatch here. These are reusable workflows; the dispatch
+# surface is the consumer's numbered entry point (20/21/22-release-*.yml),
+# which is where a human picks a Release Set to promote. The form that used
+# to sit here predated promote-only and never asked for `source-run-id`, so
+# running it could only ever fail — a second, divergent form for the same
+# pipeline is worse than none.
 
 # The pipeline's stages, declared once. Every job renders this same
 # ladder with itself marked, so the run summary grows into a progress
@@ -293,6 +213,30 @@ jobs:
           run-id: ${{ inputs.source-run-id }}
           github-token: ${{ github.token }}
 
+      # Re-verified here, not just in stage 04. This job downloads the artifact
+      # again — a separate fetch — and an approval on an earlier phase is not
+      # evidence about the bytes this job is holding. Cheap, and it is the last
+      # point at which publishing the wrong binary is still preventable.
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${ inputs.source-run-id }
+          github-token: ${ github.token }
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             WebGL \
+            --artifact-path        build-artifact \
+            --expect-run-id        "${ inputs.source-run-id }" \
+            --expect-artifact-name "${ inputs.artifact-name }" \
+            --expect-version       "${ inputs.build-version }"
+
       - name: Validate artifact
         shell: bash
         run: |
@@ -378,6 +322,30 @@ jobs:
           run-id: ${{ inputs.source-run-id }}
           github-token: ${{ github.token }}
 
+      # Re-verified here, not just in stage 04. This job downloads the artifact
+      # again — a separate fetch — and an approval on an earlier phase is not
+      # evidence about the bytes this job is holding. Cheap, and it is the last
+      # point at which publishing the wrong binary is still preventable.
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${ inputs.source-run-id }
+          github-token: ${ github.token }
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             WebGL \
+            --artifact-path        build-artifact \
+            --expect-run-id        "${ inputs.source-run-id }" \
+            --expect-artifact-name "${ inputs.artifact-name }" \
+            --expect-version       "${ inputs.build-version }"
+
       - name: Deploy to Cloudflare Pages
         id: deploy
         env:
@@ -446,6 +414,30 @@ jobs:
           path: build-artifact/
           run-id: ${{ inputs.source-run-id }}
           github-token: ${{ github.token }}
+
+      # Re-verified here, not just in stage 04. This job downloads the artifact
+      # again — a separate fetch — and an approval on an earlier phase is not
+      # evidence about the bytes this job is holding. Cheap, and it is the last
+      # point at which publishing the wrong binary is still preventable.
+      - name: Download release manifest
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: release-manifest
+          path: release-set/
+          run-id: ${ inputs.source-run-id }
+          github-token: ${ github.token }
+
+      - name: Verify release identity and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/common/release_manifest.py verify \
+            --manifest             release-set/release-manifest.json \
+            --platform             WebGL \
+            --artifact-path        build-artifact \
+            --expect-run-id        "${ inputs.source-run-id }" \
+            --expect-artifact-name "${ inputs.artifact-name }" \
+            --expect-version       "${ inputs.build-version }"
 
       - name: Deploy to Cloudflare Pages
         id: deploy

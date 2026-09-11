@@ -49,6 +49,12 @@ Xcode project while an IPA built from it afterwards is what would have
 shipped. Signing now happens in `Build / Release` stage 03b. A promotion may
 only download, verify, test, approve and publish.
 
+A promotion also holds no credential it could sign with. It used to declare
+`ANDROID_KEYSTORE_*`, the iOS distribution certificate and the Unity licence —
+none of them read by anything in the file, all of them one line of YAML away
+from being usable. `check_promotion_holds_no_signing_secrets` fails CI if any
+of them come back: the rule is not only "does not sign" but "could not".
+
 Its second half took longer to close. Signing moved to the build lane, but the
 IPA carried no artifact manifest, so the only iOS manifest in a release run was
 the Xcode project's — the Release Set listed the project, and the consumer
@@ -110,6 +116,15 @@ platforms; a project enables a subset via the `PLATFORMS` variable. Capability
 ("can this project build iOS?") is not the same question as branch selection
 ("does `develop` build iOS?"). Capability wins. A project that cannot build a
 platform must never see a job for it.
+
+**I-017 — promotion consumes the exact immutable artifact.** Verifying once
+in a dedicated job proves something about *that* download. Every later phase
+downloads again — a separate fetch — and an approval on an earlier phase is not
+evidence about the bytes a later job is holding. Every job that pulls the
+artifact now re-verifies it, and `check_every_download_is_verified` fails CI
+for one that does not. This started as an asymmetry: the Steam pipelines
+verified per phase from the day they were written, while the store pipelines
+verified once and published from a second, unchecked download.
 
 **I-015 — distribution is separate.** Windows and Linux produce valid
 immutable release artifacts with no distribution provider configured. Steam is
