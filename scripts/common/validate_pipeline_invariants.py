@@ -211,6 +211,73 @@ def check_promotion_verifies_identity(workflows_dir, report):
                 report.ok("I-007", f"{path.name}:{name} requires a verified artifact")
 
 
+# Secrets that only a BUILD needs. A promotion runs no Unity and signs
+# nothing, so holding these gives it a capability I-005 forbids it from using
+# — and a capability sitting one line of YAML away from being used is how the
+# iOS signing-during-promotion defect happened in the first place.
+BUILD_ONLY_SECRETS = (
+    "UNITY_LICENSE",
+    "UNITY_EMAIL",
+    "UNITY_PASSWORD",
+    "ANDROID_KEYSTORE_BASE64",
+    "ANDROID_KEYSTORE_PASS",
+    "ANDROID_KEY_ALIAS",
+    "ANDROID_KEY_PASS",
+    "IOS_DISTRIBUTION_CERTIFICATE_BASE64",
+    "IOS_DISTRIBUTION_CERTIFICATE_PASSWORD",
+    "IOS_PROVISIONING_PROFILE_BASE64",
+)
+
+
+def check_promotion_holds_no_signing_secrets(workflows_dir, report):
+    """I-005: a promotion must not even be able to sign."""
+    for path in promotion_workflows(workflows_dir):
+        try:
+            workflow = load_workflow(path)
+        except yaml.YAMLError:
+            continue
+        triggers = workflow.get("on") or workflow.get(True) or {}
+        declared = ((triggers.get("workflow_call") or {}).get("secrets") or {})
+        held = [name for name in BUILD_ONLY_SECRETS if name in declared]
+        if held:
+            report.fail(
+                "I-005",
+                f"{path.name} declares build/signing secrets it must never use "
+                f"({', '.join(held)}). Keep credentials scoped to the lane that "
+                "needs them.",
+            )
+        else:
+            report.ok("I-005", f"{path.name} holds no build or signing credential")
+
+
+def check_every_download_is_verified(workflows_dir, report):
+    """I-017: a job that fetches the artifact must check what it fetched.
+
+    Verifying once in a dedicated job proves something about *that* download.
+    Every later phase downloads again — a separate fetch — and an approval on
+    an earlier phase is not evidence about the bytes a later job is holding.
+    """
+    for path in promotion_workflows(workflows_dir):
+        try:
+            workflow = load_workflow(path)
+        except yaml.YAMLError:
+            continue
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            steps = json.dumps(job.get("steps") or [])
+            # Only jobs that pull the platform artifact; a job that fetches
+            # release notes or the manifest alone has nothing to verify.
+            if "download-artifact" not in steps or "inputs.artifact-name" not in steps:
+                continue
+            if "release_manifest.py verify" in steps:
+                report.ok("I-017", f"{path.name}:{job_id} verifies what it downloaded")
+            else:
+                report.fail(
+                    "I-017",
+                    f"{path.name}:{job_id} downloads the artifact and publishes or "
+                    "validates it without verifying the bytes it received",
+                )
+
+
 # ---------------------------------------------------------------------------
 # I-006 / I-009 — the Release Set
 # ---------------------------------------------------------------------------
@@ -484,6 +551,8 @@ CHECKS = [
     ("signing before boundary", lambda ctx, r: check_signing_before_boundary(ctx["workflows"], r)),
     ("promotion pins its source", lambda ctx, r: check_promotion_pins_its_source(ctx["workflows"], r)),
     ("promotion verifies identity", lambda ctx, r: check_promotion_verifies_identity(ctx["workflows"], r)),
+    ("promotion holds no signing secrets", lambda ctx, r: check_promotion_holds_no_signing_secrets(ctx["workflows"], r)),
+    ("every download is verified", lambda ctx, r: check_every_download_is_verified(ctx["workflows"], r)),
     ("release manifest", lambda ctx, r: check_release_manifest(ctx["workflows"], r)),
     ("one identity per release set", lambda ctx, r: check_one_identity_per_release_set(ctx["workflows"], r)),
     ("CI builds nothing", lambda ctx, r: check_ci_builds_nothing(ctx["templates"], r)),
