@@ -10,6 +10,37 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+
+- **`game-ci/unity-test-runner` pinned to `v4.3.2`.** The `@v4` tag moved to **v4.4.0** on
+  2026-09-09 — not a bug-fix release but a rewrite: a thin wrapper around the new `game-ci`
+  CLI, which it resolves at `cliVersion: latest`. Two floating versions stacked, one of
+  them a different program. Every consumer's test job broke the next morning.
+
+  It did not look like a version problem, which is the part worth recording:
+
+  ```
+  Unclassified error occured while trying to activate license.
+  [Licensing::Client] Error: Code 400 while processing request (status: TimeStamp validation failed)
+  ::error::No test result files were produced (runner/activation error).
+  Total — passed: 0, failed: 0
+  ```
+
+  That reads as a licence fault and sends the reader to `UNITY_LICENSE` and the runner
+  clock. The tell is that **builds in the same run activated fine with the same secret** —
+  they use `unity-builder`, a different action. game-ci's own v4.3.2 notes warn about this
+  exact confusion, describing an unrelated failure "which surfaced as a retry-then-fail
+  loop that looked like a license activation problem".
+
+  Diagnosed by re-running the **last known-green run** on today's runners: the old commit
+  failed identically, which separates "a consumer's change broke CI" from "CI broke" in one
+  command.
+
+  `v4.3.2` is the last release on the old, long-stable architecture and carries the
+  `--shm-size` fix Unity 6.6+ needs. Adopting `v4.4.0` should be a tested branch, not a
+  floating tag.
+
+
 ## [2.2.5] — 2026-09-10
 
 ### Fixed
