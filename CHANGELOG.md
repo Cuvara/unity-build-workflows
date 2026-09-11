@@ -12,6 +12,34 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Changed
 
+- **BREAKING — iOS production signing moved into `Build / Release` (stage 03b).**
+  Signing used to run during promotion, which broke the invariant the whole
+  design rests on: the artifact QA validated was an Xcode *project*, and the
+  artifact that shipped was an IPA built from it afterwards. Those are not the
+  same binary. `Build / Release` now emits a signed `release-ios-ipa`, stage 04
+  validates *that* with `REQUIRE_SIGNED` against the resolved version and build
+  number, and `Release / iOS` only downloads, verifies and publishes. The
+  distribution secrets moved with the work.
+
+  The boundary is machine-checked, not reviewed:
+  `test_promotion_cannot_modify_the_binary` scans every promotion job's `uses`
+  and `run` for anything that builds, archives, signs, re-exports or
+  recompresses, and fails the suite if one appears.
+- **BREAKING — Android's store counter no longer comes from the major version.**
+  `bundleVersionCode` was `cfg.BundleVersion.Split('.')[0]`, so every `1.x.y`
+  release uploaded versionCode `1` and Google Play refused the second one.
+  `game-ci/unity-builder` was also invoked with no version at all, falling back
+  to Semantic versioning from git tags and generating its own counter — two
+  runs of the same commit could disagree, and nothing guaranteed the number
+  increased.
+
+  Stage 01 now resolves the build number once and every platform receives the
+  same value, reusing the convention `IOSBuilder` already applied for
+  `CFBundleVersion` (`BUILD_NUMBER` → `GITHUB_RUN_NUMBER`) rather than
+  inventing a second scheme, plus a `BUILD_NUMBER_OFFSET` repository variable
+  for projects whose store history predates this pipeline. It reaches the
+  builder three ways because three consumers need it: `androidVersionCode`,
+  `version`, and the `BUILD_NUMBER` environment variable.
 - **BREAKING — the release pipelines are promote-only.** They can no longer
   build. `start-phase: build` is gone, the Unity build job is removed from
   each, and `release-orchestrator.yml` — which built and released in one run —

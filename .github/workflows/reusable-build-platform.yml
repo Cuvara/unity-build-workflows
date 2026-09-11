@@ -718,6 +718,10 @@ jobs:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          # IOSBuilder reads BUILD_NUMBER for CFBundleVersion; this is the same
+          # value Android gets as androidVersionCode, so the two platforms of
+          # one release agree.
+          BUILD_NUMBER:   ${{ inputs.build-number }}
         with:
           projectPath: ${{ inputs.project-path }}
           unityVersion: ${{ inputs.unity-version }}
@@ -725,6 +729,19 @@ jobs:
           customParameters: ${{ steps.platform-map.outputs.params }}
           buildMethod: ${{ inputs.build-method }}
           allowDirtyBuild: true
+          # Version and build number are decided by the pipeline, not derived
+          # here. Left unset, game-ci falls back to Semantic versioning from git
+          # tags and generates its own androidVersionCode — so two runs of the
+          # same commit could disagree, and nothing guaranteed the counter ever
+          # increased. Both stores reject a build number they have already seen.
+          #
+          # `Custom` means "use exactly what I pass". Only set when the caller
+          # supplied a version; otherwise keep game-ci's previous behaviour so
+          # existing consumers are unaffected.
+          versioning: ${{ inputs.app-version != '' && 'Custom' || 'Semantic' }}
+          version: ${{ inputs.app-version }}
+          # Android only — the store-facing integer counter.
+          androidVersionCode: ${{ inputs.build-number }}
           # Android only — APK (androidPackage) or App Bundle (androidAppBundle).
           # game-ci ignores this for non-Android targets.
           androidExportType: ${{ inputs.android-export-type == 'aab' && 'androidAppBundle' || 'androidPackage' }}

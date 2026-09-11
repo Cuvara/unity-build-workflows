@@ -45,7 +45,9 @@ VALIDATED_PLATFORMS = ["Android", "WebGL", "iOS"]
 # Expensive jobs that must sit behind the quality gate.
 GATED_JOBS = [BUILD_JOB, "build-addressables"]
 
-STAGE_PREFIX = re.compile(r"^\d{2} / ")
+# `03b` is a sub-stage: iOS production signing sits between the Unity build
+# and artifact validation, inside stage 03.
+STAGE_PREFIX = re.compile(r"^\d{2}[a-z]? / ")
 
 
 def load(path):
@@ -757,4 +759,136 @@ def test_no_workflow_both_builds_and_releases(repo_root):
     assert not (repo_root / ".github" / "workflows" / "release-orchestrator.yml").exists(), (
         "release-orchestrator.yml builds and releases in one run; under "
         "promote-only the release layer must never produce a binary"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Store-facing build number
+# ---------------------------------------------------------------------------
+
+def test_build_number_is_resolved_once_in_stage_01(pipeline_jobs):
+    """Both stores reject a build number they have already seen, so it must be
+    decided before the artifact is built, not discovered afterwards."""
+    assert "build-number" in pipeline_jobs["resolve-config"]["outputs"]
+    for job_id in ("build", "build-addressables"):
+        assert pipeline_jobs[job_id]["with"]["build-number"] == \
+            "${{ needs.resolve-config.outputs.build-number }}", (
+                f"{job_id} does not receive the resolved build number"
+            )
+
+
+def test_builder_applies_the_version_and_build_number(repo_root):
+    """Left unset, game-ci falls back to Semantic versioning from git tags and
+    generates its own androidVersionCode — two runs of the same commit could
+    disagree, and nothing guaranteed the counter increased."""
+    engine = (repo_root / ".github" / "workflows" / "reusable-build-platform.yml").read_text()
+    assert "androidVersionCode: ${{ inputs.build-number }}" in engine, (
+        "the Android version code is not passed to the builder"
+    )
+    assert "version: ${{ inputs.app-version }}" in engine
+    assert "BUILD_NUMBER:   ${{ inputs.build-number }}" in engine, (
+        "IOSBuilder reads BUILD_NUMBER for CFBundleVersion; it never arrives"
+    )
+
+
+def test_android_builder_does_not_derive_version_code_from_major(repo_root):
+    """`bundleVersionCode = major` meant every 1.x.y release uploaded
+    versionCode 1, so Play refused the second one."""
+    builder = (repo_root / "unity-package" / "Packages" / "com.company.build-pipeline"
+               / "Editor" / "PlatformBuilders" / "AndroidBuilder.cs").read_text()
+    assert "cfg.BundleVersion.Split('.')[0]" not in builder, (
+        "Android still derives its store counter from the major version"
+    )
+    assert 'GetEnvironmentVariable("BUILD_NUMBER")' in builder
+
+
+@pytest.mark.parametrize("offset,run_number,expected", [(0, 42, "42"), (1000, 42, "1042")])
+def test_build_number_offset(resolve_matrix, offset, run_number, expected):
+    """A project whose store history predates this pipeline clears it once."""
+    out = resolve_matrix(["Android"], run_number=run_number, build_number_offset=offset)
+    assert out["build-number"] == expected
+
+
+def test_build_number_rejects_a_nonsense_offset(resolve_matrix):
+    with pytest.raises(AssertionError):
+        resolve_matrix(["Android"], build_number_offset="not-a-number")
+
+
+# ---------------------------------------------------------------------------
+# The immutable-artifact boundary
+# ---------------------------------------------------------------------------
+# After Build / Release uploads an artifact, no promotion workflow may rebuild,
+# re-export, re-sign, modify or regenerate it. Promotion may only download,
+# verify, test, approve and publish. This is the acceptance criterion, so it is
+# machine-checked rather than left to review.
+
+# Anything that produces or alters a binary. Matched against each step's `uses`
+# and `run`, so a shell call is caught as readily as an action.
+MUTATING = [
+    ("unity-build-", "runs a Unity build"),
+    ("reusable-build-platform", "runs a Unity build"),
+    ("game-ci/unity-builder", "runs a Unity build"),
+    ("ios-setup-signing", "installs a signing identity"),
+    ("ios-archive-export", "archives and exports an IPA"),
+    ("xcodebuild", "invokes Xcode"),
+    ("xcode_archive.sh", "archives an Xcode project"),
+    ("xcode_export.sh", "exports an IPA"),
+    ("sign_android_build.sh", "signs an Android artifact"),
+    ("compress_webgl.sh", "rewrites the WebGL payload"),
+    ("apply_define_symbols.sh", "changes build configuration"),
+]
+
+
+@pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
+def test_promotion_cannot_modify_the_binary(key, spec):
+    """The acceptance criterion, as a test."""
+    path, _ = spec
+    workflow = load(path)
+    violations = []
+    for job_id, job in workflow["jobs"].items():
+        haystack = str(job.get("uses", ""))
+        for step in job.get("steps", []) or []:
+            haystack += "\n" + str(step.get("uses", "")) + "\n" + str(step.get("run", ""))
+        for token, why in MUTATING:
+            if token in haystack:
+                violations.append(f"{job_id}: {token} — {why}")
+    assert not violations, (
+        f"{path.name} can modify the binary it is supposed to be publishing:\n  "
+        + "\n  ".join(violations)
+    )
+
+
+def test_ios_signing_happens_before_the_boundary(pipeline_jobs):
+    """The correction this test exists for: signing used to run during
+    promotion, so the artifact QA validated (an Xcode project) was not the
+    artifact that shipped (an IPA built from it afterwards)."""
+    assert "sign-ios" in pipeline_jobs, (
+        "the build lane does not sign iOS, so the signed IPA can only be "
+        "produced during promotion"
+    )
+    job = pipeline_jobs["sign-ios"]
+    uses = "\n".join(str(s.get("uses", "")) for s in job["steps"])
+    assert "ios-archive-export" in uses
+    assert "ios-setup-signing" in uses
+    # Only for release builds — a development iOS build needs no distribution identity.
+    assert "sign-ios == 'true'" in str(job.get("if", ""))
+
+
+def test_ios_release_artifact_is_the_ipa(resolve_matrix):
+    """Stage 04 must validate what ships. For a release that is the signed IPA,
+    not the Xcode project it was built from."""
+    release = {r["platform"]: r for r in resolve_matrix(["iOS"], build_type="release")["validate"]}
+    assert release["iOS"]["validator"] == "ipa"
+    assert release["iOS"]["artifact-name"] == "release-ios-ipa"
+
+    dev = {r["platform"]: r for r in resolve_matrix(["iOS"], build_type="development")["validate"]}
+    assert dev["iOS"]["validator"] == "ios", "a development build has no IPA to validate"
+
+
+def test_signed_ipa_is_validated_before_it_can_be_promoted(pipeline_jobs):
+    body = "\n".join(str(s.get("run", "")) for s in pipeline_jobs["validate-artifact"]["steps"])
+    assert "validate_ipa.sh" in body, "the release IPA is never validated"
+    assert "REQUIRE_SIGNED=true" in body, (
+        "an unsigned IPA would reach App Store Connect and be rejected after it "
+        "had already consumed a build number"
     )

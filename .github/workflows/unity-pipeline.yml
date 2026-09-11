@@ -44,6 +44,20 @@ on:
         type: string
 
       # ── Pass-through: mirror of workflow_dispatch inputs ─────────────────
+      ios-export-method:
+        description: >-
+          iOS export method for the production signing stage
+          (app-store | ad-hoc | enterprise | development).
+        required: false
+        default: app-store
+        type: string
+
+      ios-app-name:
+        description: Application name used for the .xcarchive and .ipa filenames.
+        required: false
+        default: Unity
+        type: string
+
       build-type:
         description: >-
           development | release. This is NOT the same axis as `environment`.
@@ -147,6 +161,18 @@ on:
         type: string
 
     secrets:
+      # iOS production signing runs in this lane now (stage 03b), so the
+      # distribution credentials belong here. Optional: a pipeline that never
+      # builds a release iOS artifact must not require them.
+      IOS_DISTRIBUTION_CERTIFICATE_BASE64:
+        description: Base64 .p12 distribution certificate for stage 03b.
+        required: false
+      IOS_DISTRIBUTION_CERTIFICATE_PASSWORD:
+        description: Password for the distribution certificate.
+        required: false
+      IOS_PROVISIONING_PROFILE_BASE64:
+        description: Base64 provisioning profile for stage 03b.
+        required: false
       UNITY_LICENSE:
         description: "Raw .ulf file contents. Optional — docker lane personal activation."
         required: false
@@ -232,6 +258,8 @@ jobs:
       define-symbols-count: ${{ steps.meta.outputs.define-symbols-count }}
       # ── Build matrix + node display labels (stages 03/04) ──────────────────
       configuration:          ${{ steps.matrix.outputs.configuration }}
+      build-number:           ${{ steps.matrix.outputs.build-number }}
+      sign-ios:               ${{ steps.matrix.outputs.sign-ios }}
       build-type:             ${{ steps.matrix.outputs.build-type }}
       build-type-label:       ${{ steps.matrix.outputs.build-type-label }}
       android-artifact-type:  ${{ steps.matrix.outputs.android-artifact-type }}
@@ -398,6 +426,8 @@ jobs:
           ANDROID_TYPE: ${{ steps.flow.outputs.android-export-type }}
           IN_BUILD_TYPE: ${{ inputs.build-type }}
           IN_PLATFORM:   ${{ inputs.platform }}
+          RUN_NUMBER:    ${{ github.run_number }}
+          BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET || '0' }}
           SEL_ANDROID:     ${{ steps.flow.outputs.build-android }}
           SEL_WEBGL:       ${{ steps.flow.outputs.build-webgl }}
           SEL_LINUX64:     ${{ steps.flow.outputs.build-linux64 }}
@@ -415,6 +445,34 @@ jobs:
             *)           CONFIG="$(printf '%s' "${ENVIRONMENT:0:1}" | tr '[:lower:]' '[:upper:]')${ENVIRONMENT:1}" ;;
           esac
           ANDROID_ARTIFACT=$(printf '%s' "${ANDROID_TYPE:-apk}" | tr '[:lower:]' '[:upper:]')
+
+          # ── Build number ──────────────────────────────────────────────────
+          # The store-facing counter: Android bundleVersionCode, iOS
+          # CFBundleVersion. Both stores reject a build number that has already
+          # been uploaded, so it must be monotonic and it must be decided HERE —
+          # before the artifact is built — not discovered afterwards.
+          #
+          # This reuses the convention the Unity package already applies
+          # (IOSBuilder: BUILD_NUMBER -> GITHUB_RUN_NUMBER) rather than
+          # introducing a second scheme. github.run_number is per-workflow and
+          # monotonic, so a project whose store history predates this pipeline
+          # sets BUILD_NUMBER_OFFSET once to clear it.
+          #
+          # Android was the broken one: AndroidBuilder derived versionCode from
+          # the MAJOR version, so every 1.x.y release uploaded versionCode 1 and
+          # Play rejected the second one.
+          OFFSET="${BUILD_NUMBER_OFFSET:-0}"
+          case "${OFFSET}" in
+            ''|*[!0-9]*)
+              echo "::error::BUILD_NUMBER_OFFSET must be a non-negative integer, got '${OFFSET}'"
+              exit 1
+              ;;
+          esac
+          BUILD_NUMBER=$(( RUN_NUMBER + OFFSET ))
+          if [ "${BUILD_NUMBER}" -le 0 ]; then
+            echo "::error::Resolved build number ${BUILD_NUMBER} is not positive"
+            exit 1
+          fi
 
           # Build type is its own axis. A caller that does not state one gets the
           # historical mapping from environment, so existing consumers keep
@@ -488,7 +546,22 @@ jobs:
           }
 
           add "${SEL_ANDROID}"     Android     "${ANDROID_ARTIFACT}" "${ANDROID_ARTIFACT}" android
+
+          # iOS is the one platform whose release artifact is not what Unity
+          # emits. Unity produces an Xcode project; the shippable artifact is a
+          # signed IPA. Signing therefore happens in THIS lane, before the
+          # immutable boundary — if the IPA were produced during promotion, the
+          # binary QA validated (a project) would not be the binary that ships.
+          #
+          # The Xcode project is still uploaded as an intermediate, but for a
+          # release build it is stage 03b's input, and stage 04 validates the
+          # IPA that comes out of it.
           add "${SEL_IOS}"         iOS         XCODEPROJ             "Xcode Project"       ios
+          if [ "${SEL_IOS}" = "true" ] && [ "${BUILD_TYPE}" = "release" ]; then
+            # Replace the iOS validation row: validate the IPA, not the project.
+            VALIDATE_ROWS=$(printf '%s' "${VALIDATE_ROWS}" | sed 's/{"platform":"iOS"[^}]*},//')
+            VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"iOS\",\"artifact-type\":\"IPA\",\"artifact-name\":\"${BUILD_TYPE}-ios-ipa\",\"validator\":\"ipa\",\"node\":\"IPA\"},"
+          fi
           add "${SEL_WEBGL}"       WebGL       WEBGL                 "WebGL"               webgl
           add "${SEL_LINUX64}"     Linux64     LINUX                 "Standalone"          ""
           add "${SEL_LINUXSERVER}" LinuxServer LINUX                 "Dedicated Server"    ""
@@ -501,6 +574,8 @@ jobs:
           # gated on these being non-empty.
           {
             echo "configuration=${CONFIG}"
+            echo "build-number=${BUILD_NUMBER}"
+            echo "sign-ios=$([ "${SEL_IOS}" = "true" ] && [ "${BUILD_TYPE}" = "release" ] && echo true || echo false)"
             echo "build-type=${BUILD_TYPE}"
             echo "build-type-label=${BUILD_TYPE_LABEL}"
             echo "android-artifact-type=${ANDROID_ARTIFACT}"
@@ -863,6 +938,7 @@ jobs:
       configuration:       ${{ needs.resolve-config.outputs.configuration }}
       artifact-type:       ADDRESSABLES
       app-version:         ${{ needs.resolve-config.outputs.app-version }}
+      build-number:        ${{ needs.resolve-config.outputs.build-number }}
       toolkit-repo:        ${{ inputs.toolkit-repo }}
       unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
       project-path:        ${{ needs.resolve-config.outputs.project-path }}
@@ -926,6 +1002,7 @@ jobs:
       artifact-name:       ${{ matrix.artifact-name }}
       configuration:       ${{ needs.resolve-config.outputs.configuration }}
       app-version:         ${{ needs.resolve-config.outputs.app-version }}
+      build-number:        ${{ needs.resolve-config.outputs.build-number }}
       toolkit-repo:        ${{ inputs.toolkit-repo }}
       unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
       project-path:        ${{ needs.resolve-config.outputs.project-path }}
@@ -958,6 +1035,113 @@ jobs:
       SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 03b — iOS PRODUCTION SIGNING  (release builds only)
+  # ════════════════════════════════════════════════════════════════════════════
+  # Unity emits an Xcode project; the shippable iOS artifact is a signed IPA.
+  # That signing happens HERE, inside the build lane, so the IPA exists before
+  # the immutable-artifact boundary.
+  #
+  # It used to happen during promotion, which quietly broke the invariant the
+  # whole design rests on: the artifact QA validated was an Xcode project, and
+  # the artifact that shipped was an IPA built from it afterwards. Those are
+  # not the same binary. A promotion must only download, verify and publish.
+  #
+  # Requires a self-hosted macOS runner with Xcode. Without one the iOS build
+  # itself reports `blocked`, and this job is skipped with it.
+  # ════════════════════════════════════════════════════════════════════════════
+  sign-ios:
+    name: 03b / iOS / Sign & Export IPA
+    needs: [resolve-config, build]
+    if: >-
+      !cancelled() &&
+      needs.resolve-config.outputs.sign-ios == 'true' &&
+      needs.build.result == 'success'
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.runner-labels != '' && needs.resolve-config.outputs.runner-labels || '["self-hosted","macOS"]') }}
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ needs.resolve-config.outputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Download Xcode project
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.resolve-config.outputs.build-type }}-ios-xcodeproj
+          path: xcode-project/
+
+      - name: Setup signing
+        id: signing
+        uses: ./.toolkit/.github/actions/ios-setup-signing
+        with:
+          certificate-base64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          certificate-password: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          provisioning-profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          export-method: ${{ inputs.ios-export-method }}
+
+      - name: Find Xcode project
+        id: find-project
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          XCODEPROJ=$(find xcode-project/ -name '*.xcodeproj' -type d | head -1)
+          if [[ -z "${XCODEPROJ}" ]]; then
+            echo "::error::No .xcodeproj found in the build artifact"
+            exit 1
+          fi
+          echo "project-dir=$(dirname "${XCODEPROJ}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Archive and export
+        id: archive
+        uses: ./.toolkit/.github/actions/ios-archive-export
+        with:
+          xcode-project-path: ${{ steps.find-project.outputs.project-dir }}
+          export-options-path: ${{ steps.signing.outputs.export-options-path }}
+          development-team: ${{ steps.signing.outputs.development-team || '' }}
+          archive-path: build-output/${{ inputs.ios-app-name }}.xcarchive
+          export-path: build-output/ipa
+
+      - name: Upload signed IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.resolve-config.outputs.build-type }}-ios-ipa
+          path: |
+            ${{ steps.archive.outputs.ipa-path }}
+            build-output/${{ inputs.ios-app-name }}.xcarchive/dSYMs/
+          if-no-files-found: error
+          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+
+      # Same shape every other platform's build leg publishes, so stage 07 can
+      # report iOS without a special case.
+      - name: Record platform result
+        if: always()
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.archive.outcome }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p pipeline-results
+          printf '{"platform":"iOS","stage":"03","result":"%s","artifactType":"IPA","artifactName":"%s-ios-ipa"}\n' \
+            "${OUTCOME}" "${{ needs.resolve-config.outputs.build-type }}" \
+            > pipeline-results/build-iOS.json
+
+      - name: Upload platform result
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-result-build-iOS-signed
+          path: pipeline-results/
+          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+
+      - name: Cleanup signing
+        if: always()
+        uses: ./.toolkit/.github/actions/ios-cleanup-signing
+        with:
+          keychain-name: ${{ steps.signing.outputs.keychain-name || '' }}
+
+  # ════════════════════════════════════════════════════════════════════════════
   # STAGE 04 — ARTIFACT VALIDATION  (one matrix job, not one job per platform)
   # ════════════════════════════════════════════════════════════════════════════
   # "The build exited 0" and "the artifact is shippable" are different claims.
@@ -979,10 +1163,13 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   validate-artifact:
     name: 04 / ${{ matrix.platform }} / Validate ${{ matrix.artifact-type }}
-    needs: [resolve-config, build]
+    # sign-ios produces the iOS release artifact, so validation waits for it.
+    # `skipped` is fine: it only runs for release builds that selected iOS.
+    needs: [resolve-config, build, sign-ios]
     if: >-
       !cancelled() &&
       needs.build.result == 'success' &&
+      (needs.sign-ios.result == 'success' || needs.sign-ios.result == 'skipped') &&
       needs.resolve-config.outputs.has-validations == 'true'
     strategy:
       fail-fast: false
@@ -1040,6 +1227,20 @@ jobs:
             ios)
               python3 .toolkit/scripts/ios/validate_xcode_project.py \
                 --search-root build-artifact --report validation-${VALIDATOR}.json
+              ;;
+            ipa)
+              # The signed release artifact. Production must be signed, or it
+              # cannot be distributed and App Store Connect rejects the upload
+              # after it has already consumed a build number.
+              IPA=$(find build-artifact -name '*.ipa' -type f | head -1)
+              if [ -z "${IPA}" ]; then
+                echo "::error::No .ipa found in build-artifact — stage 03b did not produce one"
+                exit 1
+              fi
+              REQUIRE_SIGNED=true \
+              EXPECTED_VERSION="${{ needs.resolve-config.outputs.app-version }}" \
+              EXPECTED_BUILD_NUMBER="${{ needs.resolve-config.outputs.build-number }}" \
+                bash .toolkit/scripts/ios/validate_ipa.sh "${IPA}"
               ;;
             *)
               echo "::error::No validator registered for '${VALIDATOR}'"

@@ -212,108 +212,6 @@ on:
         default: false
 
 jobs:
-  # ─── ARCHIVE & EXPORT IPA ──────────────────────────────────────────────────
-  archive-export:
-    name: 03 / iOS / IPA
-    if: |
-      always() &&
-      inputs.start-phase == 'validate'
-    runs-on: ${{ inputs.ios-runner-label || 'macos-unity-xcode' }}
-    outputs:
-      ipa-artifact-name: ${{ steps.set-artifact.outputs.ipa-artifact-name }}
-      bundle-id: ${{ steps.archive.outputs.bundle-id }}
-      bundle-version: ${{ steps.archive.outputs.bundle-version }}
-    steps:
-      - name: Checkout toolkit
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          repository: ${{ inputs.toolkit-repo }}
-          ref: ${{ inputs.toolkit-ref }}
-          path: .toolkit
-
-      - name: Download Xcode project
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: xcode-project/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Setup signing
-        id: signing
-        uses: ./.toolkit/.github/actions/ios-setup-signing
-        with:
-          ios-distribution-certificate-base64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
-          ios-distribution-certificate-password: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
-          ios-provisioning-profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-          export-method: ${{ inputs.export-method || 'app-store' }}
-
-      - name: Find Xcode project
-        id: find-project
-        shell: bash
-        run: |
-          XCODEPROJ=$(find xcode-project/ -name '*.xcodeproj' -type d | head -1)
-          if [[ -z "${XCODEPROJ}" ]]; then
-            echo "::error::No .xcodeproj found in artifact"
-            exit 1
-          fi
-          PROJECT_DIR=$(dirname "${XCODEPROJ}")
-          echo "project-dir=${PROJECT_DIR}" >> "${GITHUB_OUTPUT}"
-          echo "[archive] Found: ${XCODEPROJ}"
-
-      - name: Archive and export
-        id: archive
-        uses: ./.toolkit/.github/actions/ios-archive-export
-        with:
-          xcode-project-path: ${{ steps.find-project.outputs.project-dir }}
-          export-options-path: ${{ steps.signing.outputs.export-options-path }}
-          development-team: ${{ steps.signing.outputs.development-team || '' }}
-          archive-path: build-output/${{ inputs.app-name || 'Unity' }}.xcarchive
-          export-path: build-output/ipa
-
-      # A 5000-byte floor was the whole of the old gate. An IPA can be the right
-      # size and still be unsigned, carry an expired profile, or hold the wrong
-      # bundle id — all of which App Store Connect rejects after the upload has
-      # already burned a build number.
-      - name: Validate IPA
-        shell: bash
-        env:
-          EXPECTED_BUNDLE_ID: ${{ inputs.bundle-id }}
-          EXPECTED_VERSION: ${{ inputs.version-string }}
-          REQUIRE_SIGNED: 'true'
-        run: |
-          set -Eeuo pipefail
-          bash .toolkit/scripts/ios/validate_ipa.sh "${{ steps.archive.outputs.ipa-path }}"
-
-      - name: Upload IPA artifact
-        id: set-artifact
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
-        with:
-          name: ios-ipa-${{ inputs.build-version }}
-          path: |
-            ${{ steps.archive.outputs.ipa-path }}
-            build-output/${{ inputs.app-name || 'Unity' }}.xcarchive/dSYMs/
-          retention-days: 30
-
-      - name: Set output
-        shell: bash
-        run: echo "ipa-artifact-name=ios-ipa-${{ inputs.build-version }}" >> "${GITHUB_OUTPUT}"
-
-      - name: Cleanup signing
-        if: always()
-        uses: ./.toolkit/.github/actions/ios-cleanup-signing
-        with:
-          keychain-name: ${{ steps.signing.outputs.keychain-name || '' }}
-
-      - name: Summary
-        shell: bash
-        run: |
-          echo "### Archive & Export" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Bundle ID:** ${{ steps.archive.outputs.bundle-id }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Bundle Version:** ${{ steps.archive.outputs.bundle-version }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Export Method:** ${{ inputs.export-method || 'app-store' }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **IPA Artifact:** ios-ipa-${{ inputs.build-version }}" >> "${GITHUB_STEP_SUMMARY}"
-
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
   release-notes:
     name: 04 / iOS / Release Notes
@@ -353,13 +251,10 @@ jobs:
   # ─── PHASE 1: TESTFLIGHT INTERNAL ──────────────────────────────────────────
   internal-testing:
     name: 05 / iOS / Publish — TestFlight Internal
-    needs: [archive-export, release-notes]
+    needs: [release-notes]
     if: |
       always() && !inputs.dry-run &&
-      (
-        needs.archive-export.result == 'success' ||
-        inputs.start-phase == 'internal'
-      )
+      (inputs.start-phase == 'validate' || inputs.start-phase == 'internal')
     runs-on: macos-latest
     environment: internal-testing
     outputs:
@@ -375,7 +270,7 @@ jobs:
       - name: Download IPA artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ${{ needs.archive-export.outputs.ipa-artifact-name || inputs.artifact-name || format('ios-ipa-{0}', inputs.build-version) }}
+          name: ${{ inputs.artifact-name }}
           path: ipa-artifact/
           run-id: ${{ inputs.source-run-id }}
           github-token: ${{ github.token }}
@@ -504,7 +399,7 @@ jobs:
   # to Discord.
   report:
     name: 07 / iOS / Report & Notify
-    needs: [archive-export, release-notes, internal-testing, external-testing, production-release]
+    needs: [release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -527,7 +422,6 @@ jobs:
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
           phases: |
-            03 Archive & Export IPA=${{ needs.archive-export.result }}
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — TestFlight Internal=${{ needs.internal-testing.result }}
             06 Release — TestFlight External=${{ needs.external-testing.result }}
