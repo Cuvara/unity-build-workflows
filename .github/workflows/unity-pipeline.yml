@@ -713,6 +713,7 @@ jobs:
         id: gate
         shell: bash
         env:
+          R_RESOLVE:  ${{ needs.resolve-config.result }}
           R_VALIDATE: ${{ needs.validate-project.result }}
           R_LICENSE:  ${{ needs.validate-license.result }}
           R_TESTS:    ${{ needs.unity-tests.result }}
@@ -736,6 +737,11 @@ jobs:
           }
 
           echo "Quality gate (run-tests=${RUN_TESTS:-false}, test-mode=${TEST_MODE:-N/A})"
+          # resolve-config must be checked explicitly. Everything downstream of
+          # it is SKIPPED when it fails, and `skipped` is a pass here — so
+          # without this line a failed resolver opened the gate and the whole
+          # run reported green with nothing built.
+          gate "01 PREPARE"      "Resolve Build Config"   "${R_RESOLVE}"
           gate "01 PREPARE"      "Validate Unity Project" "${R_VALIDATE}"
           gate "01 PREPARE"      "Validate Unity License" "${R_LICENSE}"
           gate "02 QUALITY GATE" "Unity Tests"            "${R_TESTS}"
@@ -748,6 +754,7 @@ jobs:
             echo ""
             echo "| Check | Result |"
             echo "|---|---|"
+            echo "| 01 / Resolve Build Config | \`${R_RESOLVE}\` |"
             echo "| 01 / Validate Unity Project | \`${R_VALIDATE}\` |"
             echo "| 01 / Validate Unity License | \`${R_LICENSE}\` |"
             echo "| 02 / Unity Tests | \`${R_TESTS}\` |"
@@ -1057,6 +1064,7 @@ jobs:
           SIGNING:       ${{ needs.resolve-config.outputs.signing }}
           TEST_MODE:     ${{ needs.resolve-config.outputs.test-mode }}
           BUILD_MATRIX:  ${{ needs.resolve-config.outputs.build-matrix }}
+          R_RESOLVE:     ${{ needs.resolve-config.result }}
           R_VALIDATE:    ${{ needs.validate-project.result }}
           R_LICENSE:     ${{ needs.validate-license.result }}
           R_TESTS:       ${{ needs.unity-tests.result }}
@@ -1130,6 +1138,9 @@ jobs:
           # ── Overall verdict + the stage that broke it ────────────────────
           failed_stage = ""
           ordered = [
+              # First, because everything else is skipped when it fails and
+              # `skipped` counts as a pass.
+              ("01 PREPARE / Resolve Build Config",   env.get("R_RESOLVE", "")),
               ("01 PREPARE / Validate Unity Project", env.get("R_VALIDATE", "")),
               ("01 PREPARE / Validate Unity License", env.get("R_LICENSE", "")),
               ("02 QUALITY GATE / Unity Tests",       env.get("R_TESTS", "")),
@@ -1174,7 +1185,8 @@ jobs:
           w("### 01–02 — Prepare & Quality Gate")
           w("| Node | Result |")
           w("|---|---|")
-          for label, key in (("01 / Validate Unity Project", "R_VALIDATE"),
+          for label, key in (("01 / Resolve Build Config", "R_RESOLVE"),
+                             ("01 / Validate Unity Project", "R_VALIDATE"),
                              ("01 / Validate Unity License", "R_LICENSE"),
                              (f"02 / Unity Tests ({env.get('TEST_MODE') or 'N/A'})", "R_TESTS"),
                              ("02 / Quality Gate", "R_GATE")):

@@ -105,6 +105,22 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **Every entry-workflow dispatch failed at stage 01.** The `ADVANCED` inputs
+  use `auto` to mean "take the repository variable", which the engine spells as
+  an empty string — but the translation was written
+  `inputs.runner-type == 'auto' && '' || inputs.runner-type`, and GitHub's
+  `&&`/`||` return operands rather than booleans. `''` is falsy, so the `||`
+  always fell through and the literal `auto` reached the resolver:
+  `[ERROR] resolve-build-flow: Invalid runner-type='auto'`. Inverted to
+  `inputs.runner-type != 'auto' && inputs.runner-type || ''`. The test that
+  should have caught it only grepped for the expression text; it now evaluates
+  the expression for both `auto` and a concrete lane.
+- **A failed `resolve-config` reported the whole run green.** Every job
+  downstream of it is *skipped*, and `skipped` is a pass in both the quality
+  gate and the final report — neither of which checked `resolve-config` itself.
+  A dispatch that died in stage 01 therefore showed a green Quality Gate and a
+  green Final Report with nothing built. Both now check it, and the report
+  checks it first.
 - **The Final Report failed a fully green build.** The build engine uploaded
   each platform's result artifact *before* the step that writes it, so
   `pipeline-result-build-<Platform>` was empty on every run and
