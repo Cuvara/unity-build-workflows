@@ -89,6 +89,50 @@ logic. Templates live in `templates/consumer-*.yml`;
 The numeric prefixes order the Actions sidebar by layer instead of
 alphabetically — the list reads CI, then build, then release.
 
+### Four questions, four owners
+
+The trigger form asks one question and no more than one:
+
+| Question | Answered by | Example |
+|---|---|---|
+| **What** do I build? | Platform — the form | Android |
+| **Which** contract applies? | Lifecycle — which entry point you ran | Build / Release |
+| **How** is it built? | Project configuration | `PLATFORMS`, `*_BUILD_PLATFORMS`, runner/engine variables |
+| **Where** does it ship? | Promotion, later and separately | Release / Android → Google Play |
+
+The artifact falls out of the first two and is **not** a form field:
+
+```
+Build / Development      Build / Release
+  Android → APK            Android → signed AAB
+  iOS     → Xcode project  iOS     → signed IPA
+  WebGL   → WebGL          WebGL   → WebGL
+  Windows → Windows        Windows → Windows
+  Linux   → Linux          Linux   → Linux
+```
+
+`resolve_build_flow.sh` owns that mapping. The release form used to offer
+APK-vs-AAB, which made `release + Android + apk` a configuration the pipeline
+accepted: an artifact that passes every gate, carries a release identity,
+enters a Release Set — and cannot be published, because Google Play takes App
+Bundles. The choice was never real; it only created a way to be wrong. A
+`workflow_call` caller may still pass `android-export`, and it is checked
+against the lifecycle rather than ignored: disagreeing fails the run.
+
+**Platform names.** The form says Windows, Linux and Linux Server; the matrix,
+the capability variables and the artifact names keep Unity's identifiers
+(`Windows64`, `Linux64`, `LinuxServer`). The mapping is explicit in
+`resolve_build_flow.sh` and in `label_of()` in the matrix step. Renaming the
+identifiers themselves would change the meaning of every `*_BUILD_PLATFORMS` a
+project has already set, for nothing but appearance.
+
+**`All`** means the platforms this project enabled for that environment — the
+`*_BUILD_PLATFORMS` list, filtered by the `PLATFORMS` capability — never a
+hardcoded set. **`Desktop`** is Windows + Linux, resolved through the same
+capability gate, so a project that has not enabled Linux gets Windows alone.
+
+---
+
 ### Build / Release is not Build / Development with `environment=production`
 
 They differ on their own axis, `build-type`, which is what names the artifacts:

@@ -256,7 +256,8 @@ build_windows64="false"
 build_ios="false"
 signing="none"
 platform_source="default"
-android_export_type="apk"   # apk | aab (Android output format)
+build_type=""               # development | release — the lifecycle
+android_export_type="apk"   # apk | aab, derived from the lifecycle (see below)
 define_symbols=""           # extra Scripting Define Symbols (branch-scoped, additive)
 skipped_platforms=()        # human-readable "PLATFORM: reason" notes for the report
 
@@ -797,7 +798,6 @@ case "${EVENT_NAME}" in
       resolve_branch_optional "release"
       resolve_branch_define_symbols "release"
       signing="android-release"
-      android_export_type="aab"   # release builds produce an App Bundle for the Play Store
     else
       log_warn "Push branch '${branch}' does not match develop/staging/release-*; flow=none"
     fi
@@ -810,7 +810,6 @@ case "${EVENT_NAME}" in
     test_mode="${IN_TEST_MODE}"
     build_addressables="${IN_BUILD_ADDRESSABLES}"
     platform_source="dispatch"
-    android_export_type="${IN_ANDROID_EXPORT:-apk}"
     define_symbols="${IN_DEFINE_SYMBOLS}"
     log_info "workflow_dispatch: platform=${IN_PLATFORM} environment=${environment} run-tests=${run_tests}"
 
@@ -849,14 +848,26 @@ case "${EVENT_NAME}" in
         exit 1
         ;;
       *)
-        requested="$(printf '%s' "${IN_PLATFORM}" | tr ',' ' ' | tr -s ' ')"
+        # Multi-word labels are folded before the split, or "Linux Server"
+        # would tokenise into "Linux" and "Server" and quietly select the
+        # desktop build as well as the dedicated server.
+        requested="$(printf '%s' "${IN_PLATFORM}" \
+          | sed -e 's/Linux Server/LinuxServer/g' -e 's/Linux server/LinuxServer/g' \
+          | tr ',' ' ' | tr -s ' ')"
         # Group aliases, so the dropdown can offer a subset without a second
         # free-text field for a human to disagree with the dropdown in.
+        # The form speaks human; the pipeline keeps its identifiers. Windows64
+        # and Linux64 are Unity's target names and stay that way internally —
+        # renaming a capability identifier for cosmetics would change the
+        # meaning of every *_BUILD_PLATFORMS a project has already set.
         expanded=""
         for token in ${requested}; do
           case "${token}" in
-            Desktop) expanded="${expanded} Windows64 Linux64" ;;
-            *)       expanded="${expanded} ${token}" ;;
+            Desktop)              expanded="${expanded} Windows64 Linux64" ;;
+            Windows)              expanded="${expanded} Windows64" ;;
+            Linux)                expanded="${expanded} Linux64" ;;
+            LinuxServer)          expanded="${expanded} LinuxServer" ;;
+            *)                    expanded="${expanded} ${token}" ;;
           esac
         done
         # A name the toolkit does not know is a typo, and a typo must not
@@ -868,7 +879,7 @@ case "${EVENT_NAME}" in
           case "${token}" in
             Android|iOS|WebGL|Windows64|Linux64|LinuxServer) ;;
             *)
-              log_error "Unknown platform '${token}'. Valid: Android, iOS, WebGL, Windows64, Linux64, LinuxServer, Desktop, All."
+              log_error "Unknown platform '${token}'. Valid: Android, iOS, WebGL, Windows, Linux, Linux Server, Desktop, All."
               exit 1
               ;;
           esac
@@ -916,6 +927,55 @@ case "${flow_type}" in
 esac
 
 log_info "gh-environment=${gh_environment} (deployment target; empty = none)"
+# ---------------------------------------------------------------------------
+# LIFECYCLE → ARTIFACT CONTRACT
+# ---------------------------------------------------------------------------
+# What a platform produces is a consequence of the lifecycle, not a question
+# for whoever presses the button. A development Android build is an APK you can
+# sideload; a release Android build is the App Bundle Google Play requires.
+# Asking the user made `release + Android + apk` a configuration the pipeline
+# accepted — an artifact that passes every gate and cannot be published.
+#
+# The build type is resolved once, here, and everything downstream reads it.
+# The matrix step used to derive it a second time from the same two inputs,
+# which is one divergence away from a release build that names its artifacts
+# `development-*`.
+build_type="${IN_BUILD_TYPE:-}"
+if [[ -z "${build_type}" ]]; then
+    case "${environment}" in
+        production) build_type="release" ;;
+        *)          build_type="development" ;;
+    esac
+fi
+case "${build_type}" in
+    development|release) ;;
+    *)
+        log_error "Unknown build type '${build_type}'. Valid: development, release."
+        exit 1
+        ;;
+esac
+
+case "${build_type}" in
+    release)     android_export_type="aab" ;;
+    development) android_export_type="apk" ;;
+esac
+
+# An explicit format is still accepted from a workflow_call caller — the
+# reusable interface stays technical — but only when it agrees with the
+# lifecycle. Silently ignoring it would leave the caller believing something
+# untrue about the artifact it is about to promote.
+if [[ -n "${IN_ANDROID_EXPORT:-}" ]]; then
+    if [[ "${IN_ANDROID_EXPORT}" != "${android_export_type}" ]]; then
+        log_error "android-export='${IN_ANDROID_EXPORT}' contradicts the ${build_type} lifecycle, which produces '${android_export_type}'. A release Android artifact is an App Bundle; an APK cannot be published to Google Play."
+        exit 1
+    fi
+    if [[ "${build_android}" != "true" ]]; then
+        log_error "android-export='${IN_ANDROID_EXPORT}' was given but no Android build was selected. An Android output format cannot apply to ${IN_PLATFORM:-the selected platforms}."
+        exit 1
+    fi
+fi
+
+log_info "build-type=${build_type} android-export-type=${android_export_type} (from the lifecycle)"
 log_info "flow-type=${flow_type} environment=${environment} run-tests=${run_tests} test-mode=${test_mode}"
 log_info "build-addressables=${build_addressables} signing=${signing}"
 log_info "platforms: android=${build_android} webgl=${build_webgl} linux64=${build_linux64} linuxserver=${build_linuxserver} windows64=${build_windows64} ios=${build_ios}"
@@ -962,7 +1022,8 @@ _source_label() {
     echo "Artifact:             retention=${artifact_retention_days}d compression=${artifact_compression}"
     echo "Clean Build:          ${clean_build} (source: $(_source_label "${clean_build_source}"))"
     echo "Signing:              ${signing}"
-    echo "Android Export Type:  ${android_export_type}"
+    echo "Build Type:           ${build_type} (artifact contract)"
+    echo "Android Export Type:  ${android_export_type} (from the lifecycle)"
     if [[ "${#skipped_platforms[@]}" -gt 0 ]]; then
         echo "Skipped Platforms:"
         for note in "${skipped_platforms[@]}"; do
@@ -992,6 +1053,7 @@ emit "build-linuxserver"       "${build_linuxserver}"
 emit "build-windows64"         "${build_windows64}"
 emit "build-ios"               "${build_ios}"
 emit "signing"                 "${signing}"
+emit "build-type"              "${build_type}"
 emit "android-export-type"     "${android_export_type}"
 emit "platform-source"         "${platform_source}"
 

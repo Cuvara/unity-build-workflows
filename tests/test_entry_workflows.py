@@ -70,7 +70,7 @@ VALID_GROUPS = {"GENERAL", "QUALITY", "CONTENT", "UNITY", "ADVANCED",
                 "ANDROID", "IOS", "WEBGL"}
 
 # Inputs that belong to exactly one platform and must not leak into the others.
-PLATFORM_ONLY_INPUTS = {"android-export": "release"}
+PLATFORM_ONLY_INPUTS = {}
 
 
 def load(path):
@@ -299,9 +299,6 @@ def test_entry_points_have_distinct_concurrency_groups():
 
 @pytest.mark.parametrize("input_name,owner", sorted(PLATFORM_ONLY_INPUTS.items()))
 def test_platform_specific_input_appears_only_where_it_applies(input_name, owner):
-    """`android-export` belongs to Build / Release, where APK-vs-AAB is a real
-    decision. Development always ships an APK, so offering the choice there
-    would invite someone to produce an AAB labelled `development-`."""
     for key, path in ENTRY_POINTS.items():
         present = input_name in dispatch_inputs(load(path))
         assert present == (key == owner), (
@@ -309,16 +306,32 @@ def test_platform_specific_input_appears_only_where_it_applies(input_name, owner
         )
 
 
+def test_no_entry_point_asks_for_an_android_output_format():
+    """It is not a decision. Development builds an APK, release builds the App
+    Bundle Google Play requires — the lifecycle already says which, so offering
+    the choice only creates `release + Android + apk`: an artifact that passes
+    every gate and cannot be published."""
+    for key, path in ENTRY_POINTS.items():
+        assert "android-export" not in dispatch_inputs(load(path)), key
+        job = next(iter(load(path)["jobs"].values()))
+        assert "android-export" not in (job.get("with") or {}), (
+            f"{key} still states a format; the resolver derives it"
+        )
+
+
 def test_development_always_produces_an_apk():
-    """Not configurable: an AAB is a store artifact with no place in a dev build."""
+    """Not configurable: an AAB is a store artifact with no place in a dev
+    build. The entry point states the lifecycle; the format follows from it."""
     job = next(iter(load(ENTRY_POINTS["development"])["jobs"].values()))
-    assert job["with"]["android-export"] == "apk"
+    assert job["with"]["build-type"] == "development"
     assert "android-export" not in dispatch_inputs(load(ENTRY_POINTS["development"]))
 
 
-def test_release_defaults_to_aab():
-    """Google Play requires an App Bundle for new apps."""
-    assert dispatch_inputs(load(ENTRY_POINTS["release"]))["android-export"]["default"] == "aab"
+def test_release_states_the_release_lifecycle():
+    """Google Play requires an App Bundle for new apps, and the release
+    lifecycle is what produces one."""
+    job = next(iter(load(ENTRY_POINTS["release"])["jobs"].values()))
+    assert job["with"]["build-type"] == "release"
 
 
 def test_release_is_not_development_with_another_environment():
@@ -326,7 +339,6 @@ def test_release_is_not_development_with_another_environment():
     dev = next(iter(load(ENTRY_POINTS["development"])["jobs"].values()))["with"]
     rel = next(iter(load(ENTRY_POINTS["release"])["jobs"].values()))["with"]
     assert dev["build-type"] == "development" and rel["build-type"] == "release"
-    assert dev["android-export"] != rel["android-export"]
 
 
 def test_development_cannot_target_production():
