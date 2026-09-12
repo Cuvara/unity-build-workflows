@@ -59,10 +59,15 @@ caller; if you need to override it, that is the `unity-version` dispatch input.
 
 ```bash
 mkdir -p .github/workflows
-curl -fsSL \
-  https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/consumer-unity-build.yml \
-  -o .github/workflows/unity-build.yml
+BASE=https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates
+for f in 01-ci 10-build-development 11-build-release \
+         20-release-android 21-release-ios 22-release-webgl \
+         23-release-windows 24-release-linux; do
+  curl -fsSL "${BASE}/consumer-${f}.yml" -o ".github/workflows/${f}.yml"
+done
 ```
+
+Keep only the release files for platforms you ship.
 
 The template is ready as shipped. Two things in it must stay in step, and a
 mismatch is silent:
@@ -133,15 +138,22 @@ release workflows. It is **not** passed to the Editor on the pipeline path.
 ## 4 — First build
 
 ```bash
-gh workflow run unity-build.yml --repo "$REPO" --ref develop \
-  -f platform=Android -f environment=development -f run-tests=false
+gh workflow run 10-build-development.yml --repo "$REPO" --ref develop \
+  -f platform=Android -f run-tests=false
 gh run watch --repo "$REPO" \
-  "$(gh run list --repo "$REPO" --workflow unity-build.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+  "$(gh run list --repo "$REPO" --workflow 10-build-development.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-Jobs you should see, in order: `resolve-config`, `validate-project`,
-`validate-license`, optionally `Unity Tests`, then `Build Android`, then
-`final-report`.
+Jobs you should see, in stage order: `01 / Resolve Build Config`,
+`01 / Validate Unity Project`, `01 / Validate Unity License`, optionally
+`02 / Unity Tests`, `02 / Quality Gate`, `03 / Android`,
+`04 / Android / Validate APK`, `07 / Final Report`. Every job's summary carries
+a progress ladder showing how far the run has got.
+
+`platform` takes one name, a comma-separated list (`Android,WebGL`), `Desktop`
+for Windows64 + Linux64, or `All` for whatever `*_BUILD_PLATFORMS` says for
+that environment. A name it does not recognise fails the run rather than
+building nothing and reporting success.
 
 Artifacts, from `reusable-build-platform.yml`:
 
@@ -282,9 +294,9 @@ gh variable set RUNNER_LABELS --repo "$REPO" --body "self-hosted,windows"
 Or per run, without changing any variable:
 
 ```bash
-gh workflow run unity-build.yml --repo "$REPO" --ref develop \
+gh workflow run 10-build-development.yml --repo "$REPO" --ref develop \
   -f platform=Windows64 -f runner-type=self-hosted \
-  -f build-engine=local -f runner-labels=self-hosted,windows
+  -f build-engine=local -f runner-labels='["self-hosted","windows"]'
 ```
 
 `RUNNER_LABELS` must equal the runner's registered labels after

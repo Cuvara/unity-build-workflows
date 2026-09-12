@@ -206,6 +206,31 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Changed
 
+- **`All` now means the platforms the project configured.** It was a hardcoded
+  list of five, so a project with `RELEASE_BUILD_PLATFORMS=Android` that picked
+  "All" got five builds — about fifty runner-minutes instead of nine — while
+  the form said "All uses RELEASE_BUILD_PLATFORMS". The form was right about
+  the intent and wrong about the behaviour. iOS still never joins an `All`
+  build: it needs a macOS runner, so including it would make the result depend
+  on infrastructure rather than on the request.
+- **`platform` accepts a list, and rejects a typo.** `Android,WebGL` used to
+  fall through to a warning and build nothing — a green run with no artifacts,
+  which is the worst shape a build failure can take because it looks finished.
+  Lists and the `Desktop` alias (Windows64 + Linux64) now resolve; an
+  unrecognised name fails the run. A *recognised* platform the project has not
+  enabled is still skipped with a note, which is I-016 working as intended.
+- **The disk reclaim only runs when the disk is short.** Current GitHub-hosted
+  runners ship 145G with ~87G free and the Unity image needs ~15G, so the
+  unconditional reclaim spent 57s on the Android job and **276s on WebGL**
+  deleting 30G nobody was going to use. Guarded at 40G free, which keeps the
+  safety net for smaller and self-hosted runners.
+- **The Gradle cache no longer runs on the docker lane.** Unity runs Gradle
+  inside the container with its own JDK, under `Library/Bee/Android/Prj`, so
+  the host's `~/.gradle` is never written: the step cached an empty directory,
+  missed on every run, and told anyone reading the log that Gradle was cached.
+  It stays on the native lane, where it works. `Library/` is cached separately
+  and does cover Bee's output.
+
 - **Promotion workflows no longer hold credentials they cannot use.**
   `pipeline-{android,ios,webgl}-release.yml` declared `UNITY_LICENSE`,
   `UNITY_EMAIL`, `UNITY_PASSWORD`, the Android keystore set and the iOS
@@ -600,6 +625,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
   Note that `core.longpaths` is git's own switch: on Windows the OS-level `LongPathsEnabled`
   registry value does not cover git, and git ignores paths over MAX_PATH without it.
+
+### Removed
+
+- **`templates/consumer-build-{android,ios,webgl,all}.yml`** — the draft that
+  the numbered entry points replaced. Nothing referenced them; shipping two
+  generations side by side only made it unclear which was current.
+  `consumer-unity-build.yml` stays, marked deprecated, because removing it
+  would break projects still on the single-caller architecture; it goes in the
+  next major version with a migration note.
 
 
 ## [2.2.5] — 2026-09-10
