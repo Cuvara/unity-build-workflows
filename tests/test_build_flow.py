@@ -254,9 +254,14 @@ class TestPRRelease:
     def test_no_binary_builds(self):
         assert_all_builds_false(self.out, "F3 PR→release-1.2")
 
-    def test_android_export_type_apk(self):
-        """PR → release: no binary builds, still defaults to apk (not a release push)."""
-        assert self.out["android-export-type"] == "apk"
+    def test_android_export_type_follows_the_release_lifecycle(self):
+        """A PR to release-* builds no binaries, but it is the release
+        lifecycle, so the format it *would* produce is the App Bundle. It used
+        to report apk here purely because only a release *push* set the value —
+        the format tracked the event rather than the contract."""
+        assert self.out["android-export-type"] == "aab"
+        assert self.out["build-type"] == "release"
+        assert_all_builds_false(self.out, "F3 PR→release-1.2")
 
     def test_signing_none(self):
         assert self.out["signing"] == "none"
@@ -753,11 +758,14 @@ class TestAndroidExportType:
             env["IN_ANDROID_EXPORT"] = export
         return run_flow(env)
 
-    def test_dispatch_export_aab(self):
-        """Dispatch with IN_ANDROID_EXPORT=aab → android-export-type=aab."""
+    def test_dispatch_export_aab_contradicting_the_lifecycle_fails(self):
+        """The format is a consequence of the lifecycle, not a choice. A
+        development build produces an APK; asking it for an App Bundle is a
+        request the pipeline cannot honour, so it says so instead of quietly
+        building something else."""
         r = self._dispatch(export="aab")
-        assert r.returncode == 0
-        assert parse_outputs(r.stdout)["android-export-type"] == "aab"
+        assert r.returncode != 0
+        assert "contradicts the development lifecycle" in r.stderr
 
     def test_dispatch_export_apk_explicit(self):
         """Dispatch with IN_ANDROID_EXPORT=apk → android-export-type=apk."""

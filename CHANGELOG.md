@@ -206,6 +206,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Changed
 
+- **The build trigger no longer asks what an artifact should be.** The release
+  form offered APK-vs-AAB, which made `release + Android + apk` a configuration
+  the pipeline accepted: an artifact that passes every gate, carries a release
+  identity, enters a Release Set — and cannot be published, because Google Play
+  takes App Bundles. The format now follows from the lifecycle (development →
+  APK, release → signed AAB), resolved in `resolve_build_flow.sh`. A
+  `workflow_call` caller may still pass `android-export`; it is validated
+  against the lifecycle and the run fails if they disagree, rather than the
+  value being silently ignored.
+- **The lifecycle is resolved once.** The matrix step derived `build-type` a
+  second time from the same two inputs — one divergence away from a release
+  build naming its artifacts `development-*`. It now reads the resolver's.
+- **The platform selector speaks human.** `Windows`, `Linux`, `Linux Server`
+  and `Desktop` in the form and in the Actions graph; `Windows64`, `Linux64`,
+  `LinuxServer` remain the identifiers in the matrix, the capability variables
+  and the artifact names. Renaming those would change the meaning of every
+  `*_BUILD_PLATFORMS` already configured, for nothing but appearance.
+
 - **The release manifest no longer outlives the artifacts it describes.** Its
   retention was hardcoded to 90 days while the artifacts followed the project's
   setting, so a project retaining artifacts for 30 days kept a manifest for 60

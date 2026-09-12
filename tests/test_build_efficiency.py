@@ -211,9 +211,13 @@ def test_the_form_offers_every_platform_and_the_desktop_group(name):
     template = yaml.safe_load((TEMPLATES / f"{name}.yml").read_text())
     triggers = template.get("on") or template[True]
     options = triggers["workflow_dispatch"]["inputs"]["platform"]["options"]
-    for expected in ("All", "Android", "iOS", "WebGL", "Windows64", "Linux64",
-                     "LinuxServer", "Desktop"):
+    # Human names. Windows64/Linux64 are Unity's target identifiers and stay
+    # that way in the config and the matrix; a form is read by people.
+    for expected in ("All", "Desktop", "Android", "iOS", "WebGL", "Windows",
+                     "Linux", "Linux Server"):
         assert expected in options, expected
+    for internal in ("Windows64", "Linux64", "LinuxServer"):
+        assert internal not in options, f"{internal} is an implementation detail"
 
 
 @pytest.mark.parametrize("name", ["consumer-10-build-development",
@@ -332,3 +336,109 @@ def test_the_release_manifest_does_not_outlive_its_artifacts():
             continue
         retention = str(step["with"]["retention-days"])
         assert "artifact-retention-days" in retention, retention
+
+
+# ---------------------------------------------------------------------------
+# The artifact contract: lifecycle + platform, not a form field
+# ---------------------------------------------------------------------------
+
+def resolve(platform="Android", build_type="", environment="production", **extra):
+    """The resolver's view of a dispatch, including the artifact contract."""
+    env = dict(os.environ)
+    env.update(
+        EVENT_NAME="workflow_dispatch", REF_NAME="develop",
+        IN_PLATFORM=platform, IN_ENVIRONMENT=environment, IN_BUILD_TYPE=build_type,
+        IN_RUN_TESTS="false", IN_TEST_MODE="All",
+        IN_BUILD_ADDRESSABLES="false", IN_DEFINE_SYMBOLS="",
+    )
+    for key in list(env):
+        if key.startswith(("VAR_", "NEW_", "LEG_")) or key == "PLATFORMS":
+            del env[key]
+    env.update(extra)
+    with tempfile.NamedTemporaryFile("w", delete=False) as fh:
+        out = fh.name
+    env["GITHUB_OUTPUT"] = out
+    try:
+        proc = subprocess.run(["bash", str(RESOLVER)], env=env,
+                              capture_output=True, text=True)
+        raw = dict(line.split("=", 1)
+                   for line in open(out).read().strip().split("\n") if "=" in line)
+    finally:
+        os.unlink(out)
+    return proc.returncode, raw, proc.stderr
+
+
+def test_development_android_is_an_apk():
+    rc, out, _ = resolve("Android", build_type="development", environment="development")
+    assert rc == 0
+    assert out["android-export-type"] == "apk"
+    assert out["build-type"] == "development"
+
+
+def test_release_android_is_an_app_bundle():
+    rc, out, _ = resolve("Android", build_type="release")
+    assert rc == 0
+    assert out["android-export-type"] == "aab"
+
+
+def test_release_android_cannot_be_an_apk():
+    """The configuration that used to be reachable from the form: an artifact
+    that passes every gate and cannot be published."""
+    rc, _, stderr = resolve("Android", build_type="release", IN_ANDROID_EXPORT="apk")
+    assert rc != 0
+    assert "contradicts the release lifecycle" in stderr
+
+
+def test_development_android_cannot_be_an_app_bundle():
+    rc, _, stderr = resolve("Android", build_type="development",
+                            environment="development", IN_ANDROID_EXPORT="aab")
+    assert rc != 0
+    assert "contradicts the development lifecycle" in stderr
+
+
+@pytest.mark.parametrize("platform", ["Linux", "WebGL", "Windows", "iOS"])
+def test_an_android_format_on_a_non_android_build_fails(platform):
+    """Linux + AAB, WebGL + APK: not silently ignored, because ignoring it
+    leaves the caller believing something untrue about what it will get."""
+    rc, _, stderr = resolve(platform, build_type="release", IN_ANDROID_EXPORT="aab")
+    assert rc != 0
+    assert "no Android build was selected" in stderr
+
+
+def test_a_matching_format_is_accepted():
+    """The workflow_call interface stays technical: a caller may state the
+    format, and gets it checked rather than ignored."""
+    rc, out, _ = resolve("Android", build_type="release", IN_ANDROID_EXPORT="aab")
+    assert rc == 0
+    assert out["android-export-type"] == "aab"
+
+
+def test_the_lifecycle_is_resolved_once():
+    """The matrix step used to derive build-type a second time from the same
+    inputs — one divergence away from a release build naming its artifacts
+    `development-*`."""
+    pipeline = (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text()
+    assert "steps.flow.outputs.build-type" in pipeline
+    # The old local derivation must not come back.
+    assert 'production) BUILD_TYPE="release"' not in pipeline
+
+
+@pytest.mark.parametrize("ui,internal", [
+    ("Windows", "windows64"),
+    ("Linux", "linux64"),
+    ("Linux Server", "linuxserver"),
+])
+def test_human_platform_names_map_to_the_identifiers(ui, internal):
+    """The form says Windows; the capability config and artifact names keep
+    Unity's Windows64. Renaming the identifier would change the meaning of
+    every *_BUILD_PLATFORMS already set."""
+    rc, out, _ = resolve(ui, build_type="release")
+    assert rc == 0
+    assert out[f"build-{internal}"] == "true"
+
+
+def test_the_graph_shows_the_human_name(resolve_matrix):
+    out = resolve_matrix(["Windows64", "Linux64", "LinuxServer"], build_type="release")
+    labels = {row["platform"]: row["label"] for row in out["build"]}
+    assert labels == {"Windows64": "Windows", "Linux64": "Linux",
+                      "LinuxServer": "Linux Server"}

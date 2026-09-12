@@ -278,6 +278,46 @@ def check_every_download_is_verified(workflows_dir, report):
                 )
 
 
+def check_artifact_format_is_not_a_question(templates_dir, report):
+    """I-003: the release build produces the final production artifact, and
+    what that artifact IS follows from the lifecycle.
+
+    Offering APK-vs-AAB on the release form made `release + Android + apk` a
+    configuration the pipeline accepted: an artifact that passes every gate,
+    carries a release identity, enters a Release Set — and cannot be published,
+    because Google Play takes App Bundles. The choice was never real; it only
+    created a way to be wrong.
+    """
+    if not templates_dir.is_dir():
+        return
+    offenders = []
+    for path in sorted(templates_dir.glob("consumer-1*-build-*.yml")):
+        try:
+            workflow = load_workflow(path)
+        except yaml.YAMLError:
+            continue
+        triggers = workflow.get("on") or workflow.get(True) or {}
+        inputs = ((triggers.get("workflow_dispatch") or {}).get("inputs") or {})
+        for name in inputs:
+            if "export" in name or "output-format" in name:
+                offenders.append(f"{path.name}:{name}")
+        # And no entry point may state a format for the pipeline either — that
+        # would be a second source for a decision the resolver owns.
+        for job in (workflow.get("jobs") or {}).values():
+            if "android-export" in (job.get("with") or {}):
+                offenders.append(f"{path.name}: passes android-export")
+    if offenders:
+        for offender in offenders:
+            report.fail(
+                "I-003",
+                f"{offender} — the Android output format is a consequence of the "
+                "lifecycle, not a choice. Development builds an APK, release "
+                "builds the App Bundle Google Play requires.",
+            )
+    else:
+        report.ok("I-003", "no build entry point asks for an artifact format")
+
+
 # ---------------------------------------------------------------------------
 # I-006 / I-009 — the Release Set
 # ---------------------------------------------------------------------------
@@ -556,6 +596,7 @@ CHECKS = [
     ("release manifest", lambda ctx, r: check_release_manifest(ctx["workflows"], r)),
     ("one identity per release set", lambda ctx, r: check_one_identity_per_release_set(ctx["workflows"], r)),
     ("CI builds nothing", lambda ctx, r: check_ci_builds_nothing(ctx["templates"], r)),
+    ("artifact format is not a question", lambda ctx, r: check_artifact_format_is_not_a_question(ctx["templates"], r)),
     ("production is gated", lambda ctx, r: check_production_is_gated(ctx["workflows"], r)),
     ("build number resolved", lambda ctx, r: check_build_number_is_resolved(ctx["workflows"], r)),
     ("platform capabilities", lambda ctx, r: check_platform_capabilities(ctx["scripts"], r)),
