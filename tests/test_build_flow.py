@@ -501,8 +501,11 @@ class TestDispatchAll:
         """F8: dispatch All includes Windows64."""
         assert self.out["build-windows64"] == "true"
 
-    def test_platform_source_dispatch(self):
-        assert self.out["platform-source"] == "dispatch"
+    def test_platform_source_is_where_the_list_came_from(self):
+        """`All` delegates to the environment's platform list, so with no
+        variable set the source is the default. The dispatch input chose which
+        list to read, not what was in it."""
+        assert self.out["platform-source"] == "default"
 
 
 # ---------------------------------------------------------------------------
@@ -984,7 +987,11 @@ class TestDispatchOverridesRepoVars:
         assert out["build-webgl"] == "false"
         assert out["platform-source"] == "dispatch"
 
-    def test_dispatch_all_ignores_staging_var(self):
+    def test_dispatch_all_honours_the_environment_variable(self):
+        """`All` used to mean a hardcoded five, ignoring the project's
+        configuration — so a project set up for Android that picked "All" paid
+        for five builds. The form always said "All uses *_BUILD_PLATFORMS";
+        now it does."""
         r = run_flow({
             "EVENT_NAME": "workflow_dispatch",
             "IN_PLATFORM": "All",
@@ -996,13 +1003,12 @@ class TestDispatchOverridesRepoVars:
         })
         assert r.returncode == 0
         out = parse_outputs(r.stdout)
-        # All → all 5 core platforms, ignoring the var
         assert out["build-android"] == "true"
-        assert out["build-webgl"] == "true"
-        assert out["build-linux64"] == "true"
-        assert out["build-linuxserver"] == "true"
-        assert out["build-windows64"] == "true"
-        assert out["platform-source"] == "dispatch"
+        for absent in ("webgl", "linux64", "linuxserver", "windows64"):
+            assert out[f"build-{absent}"] == "false", absent
+        # The list came from the variable, and platform-source says so rather
+        # than crediting the dispatch input that merely said "All".
+        assert out["platform-source"] == "variable-legacy"
 
 
 # ---------------------------------------------------------------------------
@@ -1128,9 +1134,21 @@ class TestPlatformSourceEmitted:
         ({"EVENT_NAME": "push", "REF_NAME": "release-1.0"}, "default"),
         ({"EVENT_NAME": "push", "REF_NAME": "main"}, "default"),
         ({"EVENT_NAME": "pull_request", "BASE_REF": "develop"}, "default"),
+        # `All` delegates to the environment's platform list, so with no
+        # variable set the source is the default — not the dispatch input,
+        # which only chose *which* list to read.
         ({
             "EVENT_NAME": "workflow_dispatch",
             "IN_PLATFORM": "All",
+            "IN_ENVIRONMENT": "production",
+            "IN_RUN_TESTS": "false",
+            "IN_TEST_MODE": "All",
+            "IN_BUILD_ADDRESSABLES": "false",
+        }, "default"),
+        # An explicit platform IS the dispatch's own decision.
+        ({
+            "EVENT_NAME": "workflow_dispatch",
+            "IN_PLATFORM": "Android",
             "IN_ENVIRONMENT": "production",
             "IN_RUN_TESTS": "false",
             "IN_TEST_MODE": "All",

@@ -813,27 +813,67 @@ case "${EVENT_NAME}" in
     # Routed through set_platforms_from_list so a manual dispatch is filtered by
     # the project's PLATFORMS capability exactly like a branch build. Asking for
     # a platform the project cannot build must not produce a job.
+    # `All` means the platforms this project configured for this environment,
+    # NOT every platform the toolkit knows. It used to be a hardcoded list of
+    # five, so a project with RELEASE_BUILD_PLATFORMS=Android that picked "All"
+    # got five builds — fifty runner-minutes instead of nine — while the form
+    # said "All uses RELEASE_BUILD_PLATFORMS". The form was right about the
+    # intent and wrong about the behaviour.
+    #
+    # Anything else is a list: one name, "Android,WebGL", or a group alias.
+    # set_platforms_from_list already loops and already applies the capability
+    # filter, so a list costs nothing but the split.
     case "${IN_PLATFORM}" in
       All)
-        # All excludes iOS — no macOS runner in automatic builds
-        set_platforms_from_list "Android WebGL Linux64 LinuxServer Windows64"
-        skipped_platforms+=("iOS: manual-only, not included in 'All'")
-        ;;
-      Android|WebGL|Linux64|LinuxServer)
-        set_platforms_from_list "${IN_PLATFORM}"
-        ;;
-      Windows64)
-        set_platforms_from_list "Windows64"
-        ;;
-      iOS)
-        # iOS: manual only; reusable guard blocks it without a macOS runner
-        set_platforms_from_list "iOS" "true"
+        case "${environment}" in
+          development) dispatch_branch_type="develop" ;;
+          staging)     dispatch_branch_type="staging" ;;
+          *)           dispatch_branch_type="release" ;;
+        esac
+        resolve_branch_platforms "${dispatch_branch_type}"
+        # iOS never joins an "All" build: it needs a macOS runner, so including
+        # it would make the result depend on infrastructure rather than on the
+        # request. Ask for it by name.
+        if [[ "${build_ios}" == "true" ]]; then
+          build_ios="false"
+          skipped_platforms+=("iOS: manual-only, not included in 'All'")
+        fi
         ;;
       "")
-        log_warn "IN_PLATFORM not set for workflow_dispatch; no platform builds will run"
+        log_error "platform is empty. Choose a platform, a comma-separated list, or All."
+        exit 1
         ;;
       *)
-        log_warn "Unknown IN_PLATFORM='${IN_PLATFORM}'; no platform builds will run"
+        requested="$(printf '%s' "${IN_PLATFORM}" | tr ',' ' ' | tr -s ' ')"
+        # Group aliases, so the dropdown can offer a subset without a second
+        # free-text field for a human to disagree with the dropdown in.
+        expanded=""
+        for token in ${requested}; do
+          case "${token}" in
+            Desktop) expanded="${expanded} Windows64 Linux64" ;;
+            *)       expanded="${expanded} ${token}" ;;
+          esac
+        done
+        # A name the toolkit does not know is a typo, and a typo must not
+        # produce a green run with no artifacts — that is a build failure
+        # wearing a success badge. A KNOWN platform the project has not
+        # enabled is different: set_platforms_from_list skips it with a note,
+        # which is I-016 working as intended.
+        for token in ${expanded}; do
+          case "${token}" in
+            Android|iOS|WebGL|Windows64|Linux64|LinuxServer) ;;
+            *)
+              log_error "Unknown platform '${token}'. Valid: Android, iOS, WebGL, Windows64, Linux64, LinuxServer, Desktop, All."
+              exit 1
+              ;;
+          esac
+        done
+        # iOS is allowed only when asked for by name, which this is.
+        if [[ " ${expanded} " == *" iOS "* ]]; then
+          set_platforms_from_list "${expanded}" "true"
+        else
+          set_platforms_from_list "${expanded}"
+        fi
         ;;
     esac
     ;;

@@ -17,7 +17,7 @@ is set, appends there too. Never prints secrets.
 | `EVENT_NAME` | `push` \| `pull_request` \| `workflow_dispatch` |
 | `REF_NAME` | branch name (push: the branch; PR: head branch; dispatch: current ref) |
 | `BASE_REF` | PR target branch (empty for push/dispatch) |
-| `IN_PLATFORM` | dispatch input `platform` (All/Android/WebGL/Linux64/LinuxServer/Windows64/iOS) |
+| `IN_PLATFORM` | dispatch input `platform`. One name, a comma- or space-separated list (`Android,WebGL`), the group alias `Desktop` (Windows64 + Linux64), or `All`. `All` resolves to the environment's `*_BUILD_PLATFORMS` list, minus iOS — which needs a macOS runner and is only ever built when asked for by name. An unrecognised name **fails the run**; a recognised one the project has not enabled in `PLATFORMS` is skipped with a note (I-016). |
 | `IN_ENVIRONMENT` | dispatch input `environment` |
 | `IN_RUN_TESTS` | dispatch input `run-tests` (true/false) |
 | `IN_TEST_MODE` | dispatch input `test-mode` |
