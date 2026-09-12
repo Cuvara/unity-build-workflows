@@ -274,11 +274,18 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@v
 > Use `@v3` to track stable, `@v3.0.0` for an exact pin, `@main` for
 > development, or a SHA for full reproducibility.
 >
-> Release tags are created by hand:
+> Release tags are created by hand, and they must be **lightweight**:
 > ```bash
-> git tag vX.Y.Z && git push origin vX.Y.Z           # e.g. git tag v2.0.0
-> git tag -f vMAJOR && git push -f origin vMAJOR     # e.g. git tag -f v2 — only after first vMAJOR.x.x tag
+> git tag vX.Y.Z && git push origin vX.Y.Z           # NOT git tag -a
+> git tag -f vMAJOR && git push -f origin vMAJOR     # only after the first vMAJOR.x.x tag
 > ```
+>
+> **Do not use `git tag -a`.** An annotated tag makes
+> `uses: …/unity-pipeline.yml@vX.Y.Z` fail with `startup_failure`, no jobs and
+> no logs — the run simply never begins, and nothing says why. `@main` and a
+> commit SHA keep working, so the fault looks like it is anywhere but the tag.
+> Release notes belong on the GitHub Release, which is where people read them
+> anyway.
 
 Major version increments indicate breaking changes to the workflow input interface.
 
