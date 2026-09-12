@@ -218,6 +218,13 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 - **The lifecycle is resolved once.** The matrix step derived `build-type` a
   second time from the same two inputs — one divergence away from a release
   build naming its artifacts `development-*`. It now reads the resolver's.
+- **Platform labels come from one table.** The fold that keeps a multi-word
+  label intact and the alias that expands it were two separate pieces of code,
+  so adding an option meant remembering both — and forgetting the fold would
+  tokenise "Linux Server" into "Linux" plus "Server", selecting the desktop
+  build alongside the dedicated server and exiting 0. One table now drives
+  both, and a test asserts every dropdown option resolves to the exact set it
+  names rather than merely not failing.
 - **The platform selector speaks human.** `Windows`, `Linux`, `Linux Server`
   and `Desktop` in the form and in the Actions graph; `Windows64`, `Linux64`,
   `LinuxServer` remain the identifiers in the matrix, the capability variables

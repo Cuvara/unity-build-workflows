@@ -220,16 +220,54 @@ def test_the_form_offers_every_platform_and_the_desktop_group(name):
         assert internal not in options, f"{internal} is an implementation detail"
 
 
+# Every dropdown option and the exact platform set it must produce. Asserting
+# only "it does not fail" is not enough: "Linux Server" tokenised on its space
+# and selected the desktop build alongside the dedicated server, which exits 0
+# and builds the wrong thing.
+PLATFORM_OPTIONS = {
+    "Android": {"android"},
+    "iOS": {"ios"},
+    "WebGL": {"webgl"},
+    "Windows": {"windows64"},
+    "Linux": {"linux64"},
+    "Linux Server": {"linuxserver"},
+    "Desktop": {"windows64", "linux64"},
+}
+
+
 @pytest.mark.parametrize("name", ["consumer-10-build-development",
                                   "consumer-11-build-release"])
-def test_every_option_the_form_offers_actually_resolves(name):
+def test_every_option_the_form_offers_resolves_to_exactly_what_it_says(name):
     """The form and the resolver disagreeing is how "All" came to mean
-    something the description denied."""
+    something its own description denied."""
     template = yaml.safe_load((TEMPLATES / f"{name}.yml").read_text())
     triggers = template.get("on") or template[True]
-    for option in triggers["workflow_dispatch"]["inputs"]["platform"]["options"]:
-        rc, _, stderr = dispatch(option)
+    options = triggers["workflow_dispatch"]["inputs"]["platform"]["options"]
+    for option in options:
+        rc, built, stderr = dispatch(option)
         assert rc == 0, f"{name}: the form offers {option!r} but it fails: {stderr[-200:]}"
+        if option == "All":
+            continue  # covered by its own tests; depends on project config
+        expected = PLATFORM_OPTIONS.get(option)
+        assert expected is not None, (
+            f"{name} offers {option!r}, which no test knows the meaning of — "
+            f"add it to PLATFORM_OPTIONS"
+        )
+        assert built == expected, f"{option!r} selected {sorted(built)}"
+
+
+@pytest.mark.parametrize("label", [l for l in PLATFORM_OPTIONS if " " in l])
+def test_a_multi_word_label_survives_tokenising(label):
+    """`IN_PLATFORM` is split on whitespace as well as commas, so a label with
+    a space in it has to be folded first. The fold and the alias table are one
+    table for exactly this reason."""
+    rc, built, _ = dispatch(label)
+    assert rc == 0
+    assert built == PLATFORM_OPTIONS[label]
+    # And it still works inside a list, which is where the split happens.
+    rc, built, _ = dispatch(f"{label},Android")
+    assert rc == 0
+    assert built == PLATFORM_OPTIONS[label] | {"android"}
 
 
 def test_the_superseded_per_platform_templates_are_gone():
@@ -442,3 +480,24 @@ def test_the_graph_shows_the_human_name(resolve_matrix):
     labels = {row["platform"]: row["label"] for row in out["build"]}
     assert labels == {"Windows64": "Windows", "Linux64": "Linux",
                       "LinuxServer": "Linux Server"}
+
+
+@pytest.mark.parametrize("name", ["consumer-10-build-development",
+                                  "consumer-11-build-release",
+                                  "consumer-20-release-android",
+                                  "consumer-21-release-ios",
+                                  "consumer-22-release-webgl",
+                                  "consumer-23-release-windows",
+                                  "consumer-24-release-linux"])
+def test_a_form_stays_within_reach_of_the_dispatch_input_limit(name):
+    """GitHub documents a maximum of 10 `workflow_dispatch` inputs. The two
+    build forms sit at 11 and have dispatched fine all along, so the limit is
+    not enforced as documented — but it is not a number to drift past casually.
+    This is a tripwire, not a rule: if a form needs a twelfth input, check the
+    limit is still unenforced before adding it, and move something into a
+    repository variable if it is not.
+    """
+    template = yaml.safe_load((TEMPLATES / f"{name}.yml").read_text())
+    triggers = template.get("on") or template[True]
+    count = len(triggers["workflow_dispatch"]["inputs"])
+    assert count <= 11, f"{name} has {count} inputs; GitHub documents 10"

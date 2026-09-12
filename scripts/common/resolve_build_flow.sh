@@ -848,27 +848,50 @@ case "${EVENT_NAME}" in
         exit 1
         ;;
       *)
-        # Multi-word labels are folded before the split, or "Linux Server"
-        # would tokenise into "Linux" and "Server" and quietly select the
-        # desktop build as well as the dedicated server.
-        requested="$(printf '%s' "${IN_PLATFORM}" \
-          | sed -e 's/Linux Server/LinuxServer/g' -e 's/Linux server/LinuxServer/g' \
-          | tr ',' ' ' | tr -s ' ')"
-        # Group aliases, so the dropdown can offer a subset without a second
-        # free-text field for a human to disagree with the dropdown in.
         # The form speaks human; the pipeline keeps its identifiers. Windows64
         # and Linux64 are Unity's target names and stay that way internally —
         # renaming a capability identifier for cosmetics would change the
         # meaning of every *_BUILD_PLATFORMS a project has already set.
+        #
+        # ONE table. A label and the identifiers it stands for, in the order
+        # `label=identifiers`. Adding a dropdown option means adding a row here
+        # and nothing else — the previous version needed a `sed` fold AND a
+        # `case` arm, so a new multi-word label would tokenise on its space and
+        # silently select the wrong platforms. "Linux Server" became "Linux"
+        # plus "Server": the desktop build as well as the dedicated server.
+        PLATFORM_ALIASES=(
+          "Desktop=Windows64 Linux64"
+          "Linux Server=LinuxServer"
+          "Windows=Windows64"
+          "Linux=Linux64"
+        )
+
+        # Fold every multi-word label before splitting, driven by the table so
+        # the two cannot disagree.
+        requested="${IN_PLATFORM}"
+        for entry in "${PLATFORM_ALIASES[@]}"; do
+          label="${entry%%=*}"
+          case "${label}" in
+            *" "*)
+              placeholder="$(printf '%s' "${label}" | tr ' ' '\037')"
+              requested="${requested//${label}/${placeholder}}"
+              ;;
+          esac
+        done
+        requested="$(printf '%s' "${requested}" | tr ',' ' ' | tr -s ' ')"
+
         expanded=""
         for token in ${requested}; do
-          case "${token}" in
-            Desktop)              expanded="${expanded} Windows64 Linux64" ;;
-            Windows)              expanded="${expanded} Windows64" ;;
-            Linux)                expanded="${expanded} Linux64" ;;
-            LinuxServer)          expanded="${expanded} LinuxServer" ;;
-            *)                    expanded="${expanded} ${token}" ;;
-          esac
+          # Undo the fold so the token matches its row again.
+          token="$(printf '%s' "${token}" | tr '\037' ' ')"
+          replacement=""
+          for entry in "${PLATFORM_ALIASES[@]}"; do
+            if [[ "${token}" == "${entry%%=*}" ]]; then
+              replacement="${entry#*=}"
+              break
+            fi
+          done
+          expanded="${expanded} ${replacement:-${token}}"
         done
         # A name the toolkit does not know is a typo, and a typo must not
         # produce a green run with no artifacts — that is a build failure
