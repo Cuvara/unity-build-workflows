@@ -144,9 +144,15 @@ on:
         type: string
 
       android-export:
-        description: "Android output format: apk (installable) or aab (Play Store bundle)."
+        description: >-
+          DEPRECATED and no longer required. The Android output format is a
+          consequence of the lifecycle — development builds an APK, release
+          builds the App Bundle Google Play requires — so there is nothing to
+          choose. Kept for workflow_call compatibility: pass it and it is
+          checked against the lifecycle, and the call fails if they disagree.
+          Leave it blank.
         required: false
-        default: 'apk'
+        default: ''
         type: string
 
       define-symbols:
@@ -368,6 +374,10 @@ jobs:
           IN_RUN_TESTS:          ${{ inputs.run-tests || '' }}
           IN_TEST_MODE:          ${{ inputs.test-mode || '' }}
           IN_BUILD_ADDRESSABLES: ${{ inputs.build-addressables || '' }}
+          IN_BUILD_TYPE:         ${{ inputs.build-type || '' }}
+          # Kept for workflow_call compatibility. It no longer selects the
+          # format — the lifecycle does — but a caller that states one gets it
+          # validated rather than ignored.
           IN_ANDROID_EXPORT:     ${{ inputs.android-export || '' }}
           IN_DEFINE_SYMBOLS:     ${{ inputs.define-symbols || '' }}
           # ── Platform capability (I-013/I-014) ──────────────────────────────
@@ -454,7 +464,7 @@ jobs:
         env:
           ENVIRONMENT:  ${{ steps.flow.outputs.environment }}
           ANDROID_TYPE: ${{ steps.flow.outputs.android-export-type }}
-          IN_BUILD_TYPE: ${{ inputs.build-type }}
+          BUILD_TYPE_IN: ${{ steps.flow.outputs.build-type }}
           IN_PLATFORM:   ${{ inputs.platform }}
           RUN_NUMBER:    ${{ github.run_number }}
           BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET || '0' }}
@@ -506,16 +516,16 @@ jobs:
             exit 1
           fi
 
-          # Build type is its own axis. A caller that does not state one gets the
-          # historical mapping from environment, so existing consumers keep
-          # working; the Build / Development and Build / Release entry points
-          # state it explicitly.
-          BUILD_TYPE="${IN_BUILD_TYPE}"
+          # Resolved once, by resolve_build_flow.sh, which also derives the
+          # Android output format from it. Deriving it here as well was one
+          # divergence away from a release build naming its artifacts
+          # `development-*` — or producing an APK nobody can publish.
+          BUILD_TYPE="${BUILD_TYPE_IN:-}"
           if [ -z "${BUILD_TYPE}" ]; then
-            case "${ENVIRONMENT}" in
-              production) BUILD_TYPE="release" ;;
-              *)          BUILD_TYPE="development" ;;
-            esac
+            # Deriving a fallback here is what created two copies of the rule.
+            # If the resolver did not emit one, that is the bug to fix.
+            echo "::error::resolve_build_flow.sh emitted no build-type; the artifact contract cannot be resolved."
+            exit 1
           fi
           # ── Artifact retention, by what the artifact is for ─────────────
           # A Release Set is the input to every later promotion: once its
@@ -597,19 +607,32 @@ jobs:
             esac
           }
 
+          # What a person calls the platform. Windows64 and Linux64 are Unity's
+          # target identifiers and stay that way in the config and the matrix;
+          # the graph is read by humans, so it says Windows and Linux.
+          label_of() {
+            case "$1" in
+              Windows64)   echo "Windows" ;;
+              Linux64)     echo "Linux" ;;
+              LinuxServer) echo "Linux Server" ;;
+              *)           printf '%s' "$1" ;;
+            esac
+          }
+
           add() {
             [ "$1" = "true" ] || return 0
             local platform="$2" artifact="$3" suffix="$4" validator="$5"
-            local slug lower_artifact name
+            local slug lower_artifact name label
             slug=$(slug_of "${platform}")
+            label=$(label_of "${platform}")
             lower_artifact=$(printf '%s' "${artifact}" | tr '[:upper:]' '[:lower:]')
             case "${platform}" in
               Android|iOS) name="${BUILD_TYPE}-${slug}-${lower_artifact}" ;;
               *)           name="${BUILD_TYPE}-${slug}" ;;
             esac
-            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\"},"
+            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\"},"
             if [ -n "${validator}" ]; then
-              VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"${platform}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"validator\":\"${validator}\",\"node\":\"${suffix}\"},"
+              VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"validator\":\"${validator}\",\"node\":\"${suffix}\"},"
             fi
           }
 
@@ -628,7 +651,7 @@ jobs:
           if [ "${SEL_IOS}" = "true" ] && [ "${BUILD_TYPE}" = "release" ]; then
             # Replace the iOS validation row: validate the IPA, not the project.
             VALIDATE_ROWS=$(printf '%s' "${VALIDATE_ROWS}" | sed 's/{"platform":"iOS"[^}]*},//')
-            VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"iOS\",\"artifact-type\":\"IPA\",\"artifact-name\":\"${BUILD_TYPE}-ios-ipa\",\"validator\":\"ipa\",\"node\":\"IPA\"},"
+            VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"iOS\",\"label\":\"iOS\",\"artifact-type\":\"IPA\",\"artifact-name\":\"${BUILD_TYPE}-ios-ipa\",\"validator\":\"ipa\",\"node\":\"IPA\"},"
           fi
           add "${SEL_WEBGL}"       WebGL       WEBGL                 "WebGL"               webgl
           # Desktop players had no stage-04 leg at all, so a Windows or Linux
@@ -1054,7 +1077,7 @@ jobs:
   # failed iOS leg must not cancel a running Android leg.
   # ════════════════════════════════════════════════════════════════════════════
   build:
-    name: 03 / ${{ matrix.platform }}
+    name: 03 / ${{ matrix.label }}
     needs: [resolve-config, quality-gate, build-addressables]
     if: >-
       !cancelled() &&
@@ -1292,7 +1315,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
 
   validate-artifact:
-    name: 04 / ${{ matrix.platform }} / Validate ${{ matrix.artifact-type }}
+    name: 04 / ${{ matrix.label }} / Validate ${{ matrix.artifact-type }}
     # sign-ios produces the iOS release artifact, so validation waits for it.
     # `skipped` is fine: it only runs for release builds that selected iOS.
     needs: [resolve-config, build, sign-ios]

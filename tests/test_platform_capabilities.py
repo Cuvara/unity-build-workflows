@@ -585,10 +585,12 @@ def test_the_pipeline_actually_passes_the_capability_variable():
 
     pipeline = yaml.safe_load(
         (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text())
+    # The step that RUNS it, not one that merely names it in an error message.
     steps = [step
              for job in pipeline["jobs"].values()
              for step in job.get("steps", [])
-             if "resolve_build_flow.sh" in str(step.get("run", ""))]
+             if "bash" in str(step.get("run", ""))
+             and "resolve_build_flow.sh" in str(step.get("run", ""))]
     assert steps, "no step runs the resolver"
     for step in steps:
         env = step.get("env", {})

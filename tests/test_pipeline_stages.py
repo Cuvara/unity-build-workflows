@@ -131,9 +131,14 @@ def test_no_ambiguous_build_node_names(pipeline_jobs):
 
 
 def test_build_node_name_carries_the_platform(pipeline_jobs):
-    """`03 / ${{ matrix.platform }}` renders one node per selected platform."""
+    """`03 / ${{ matrix.label }}` renders one node per selected platform.
+
+    The label, not the identifier: the graph is read by people, so it says
+    Windows where the matrix says Windows64. Renaming the identifier itself
+    would change the meaning of every `*_BUILD_PLATFORMS` already configured.
+    """
     name = str(pipeline_jobs[BUILD_JOB]["name"])
-    assert "matrix.platform" in name, (
+    assert "matrix.label" in name, (
         f"the build node must name its platform from the matrix, got {name!r}"
     )
     assert name.startswith("03 / ")
@@ -153,7 +158,7 @@ def test_build_node_name_does_not_repeat_the_node_label(pipeline_jobs):
 
 def test_validate_node_name_carries_the_platform(pipeline_jobs):
     name = str(pipeline_jobs[VALIDATE_JOB]["name"])
-    assert "matrix.platform" in name
+    assert "matrix.label" in name
     assert name.startswith("04 / ")
 
 

@@ -168,8 +168,10 @@ def resolve_matrix():
         env = dict(os.environ)
         env["ENVIRONMENT"] = environment
         env["ANDROID_TYPE"] = android_export
-        # build-type is its own axis; empty derives it from the environment.
-        env["IN_BUILD_TYPE"] = build_type
+        # The resolver owns the lifecycle now and hands the matrix step the
+        # answer, so the fixture mirrors what it would have emitted.
+        env["BUILD_TYPE_IN"] = build_type or (
+            "release" if environment == "production" else "development")
         # `None` is the CI lane: validate and test, build nothing.
         env["IN_PLATFORM"] = platform_input
         # The store-facing build number, resolved once in stage 01.
