@@ -16,7 +16,12 @@ Nothing yet.
 
 ## [3.0.0] — 2026-09-13
 
-A **major**. The release layer arrived — `Build / Release`
+A **major**.
+
+> Tagged **lightweight**, deliberately. An annotated tag makes
+> `uses: …@vX.Y.Z` fail with `startup_failure`, no jobs and no logs, while
+> `@main` and a commit SHA keep working — so the fault looks like it is
+> anywhere but the tag. See the Versioning Policy in the README. The release layer arrived — `Build / Release`
 produces an immutable Release Set, and promotion publishes those exact bytes
 without rebuilding — and a handful of inputs that never did anything were
 removed along the way.
