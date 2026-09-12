@@ -222,13 +222,16 @@ gh workflow run unity-build.yml \
   -f clean-build=false
 
 # Build an Android App Bundle (AAB) for Play Store submission
-gh workflow run unity-build.yml \
+gh workflow run 11-build-release.yml \
   --repo Cuvara/NDCUnityTemplate \
   --ref main \
-  -f platform=Android \
-  -f environment=production \
-  -f android-export=aab
+  -f platform=Android
 ```
+
+There is no output-format flag: `Build / Release` produces the signed App
+Bundle because that is what the release lifecycle means. `Build / Development`
+produces an APK for the same reason. See `docs/PIPELINE_ARCHITECTURE.md`
+§"Four questions, four owners".
 
 ### Per-platform job names in the UI
 

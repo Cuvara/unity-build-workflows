@@ -36,30 +36,37 @@ Use an approved macOS runner: runs-on: macos-13
 
 **Full documentation:** [docs/IOS.md](IOS.md), [docs/IOS_SIGNING.md](IOS_SIGNING.md), [docs/IOS_RELEASE.md](IOS_RELEASE.md)
 
-## Unsupported Platforms
+## Partially supported platforms
 
-### Windows
+### Windows — supported, with one real limit
 
-**Status:** Unsupported by this repository.
+**Status:** Supported. `Windows64` builds on the Docker lane and ships through
+`Release / Windows` to Steam. This page previously said "unsupported by this
+repository", which contradicted
+[PLATFORM_MATRIX.md](PLATFORM_MATRIX.md) — the authoritative matrix — and was
+disproved by a real release build.
 
-**Reason:** Unity Windows builds (Win64) require:
-- Windows containers on Windows Docker hosts (not Linux containers)
-- MSVC compiler for IL2CPP builds
-- Windows-specific Unity modules
+**The limit is the scripting backend, not the platform.** The Docker lane
+cross-compiles to `StandaloneWindows64` using the `windows-mono` editor image,
+so it produces **Mono** binaries. A Linux container cannot produce IL2CPP
+Windows binaries: IL2CPP emits C++ that MSVC has to compile, and MSVC does not
+run there.
 
-While Windows containers exist, they are not verified in our CI environment. We do not claim support without proof.
+| You need | Lane |
+|---|---|
+| Mono Windows build | Docker on `ubuntu-latest` — the default, nothing to configure |
+| IL2CPP Windows build | Self-hosted Windows runner with Unity installed: `runner-type=self-hosted`, `build-engine=local` |
 
-**Alternative:** Use a dedicated Windows-based CI pipeline:
-- GitHub Actions `windows-latest` runner with native Unity installation
-- Self-hosted Windows runner with Unity Hub
+See [SELF_HOSTED_WINDOWS_RUNNER.md](SELF_HOSTED_WINDOWS_RUNNER.md) for the
+second lane, and [PLATFORM_MATRIX.md](PLATFORM_MATRIX.md) for every
+platform/executor combination.
 
-**Error message when attempted:**
-```
-Target `Windows64` is unsupported by the Docker-only build platform.
-This repository does not permit native Unity execution.
-Use the dedicated Windows pipeline documented in
-docs/PLATFORM_LIMITATIONS.md.
-```
+## Unsupported platforms
+
+None of the five first-class platforms is unsupported. What is *not* built
+automatically is iOS: it needs a macOS runner, so it is dispatch-only and never
+joins an `All` build — a selection whose result depends on infrastructure is
+not a selection.
 
 ## Platform-Specific Limitations
 

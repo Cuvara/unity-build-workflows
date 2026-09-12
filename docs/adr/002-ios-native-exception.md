@@ -1,5 +1,11 @@
 # ADR-002: iOS Native Executor Exception to Docker-Mandatory Architecture
 
+> **Amendment (later).** Windows64 is no longer unsupported: the Docker lane
+> cross-compiles it with the `windows-mono` image, and a self-hosted Windows
+> runner covers IL2CPP. The decision recorded below stands as written — an ADR
+> records what was decided when, not what is true now. See
+> [PLATFORM_MATRIX.md](../PLATFORM_MATRIX.md).
+
 **Status:** Accepted
 **Date:** 2026-06-18
 **Decision Makers:** BuzzelStudio Build Platform Team

@@ -154,8 +154,8 @@ jobs:
 
 > **Choosing `<ref>`:**
 > - Development / pre-release: `@main` (tracks latest) or `@<commit-sha>` (pinned)
-> - Stable release: use an exact released tag (e.g. `@vX.Y.Z`) — the latest is `@v2.2.5`; see [CHANGELOG.md](CHANGELOG.md) and the repository Releases page.
-> - A floating `@vMAJOR` tag tracks the newest release of that major version. `@v2` is published and moves with each `v2.x.y` release; `@v1` is frozen at `v1.1.3` and receives no further updates.
+> - Stable release: an exact released tag (e.g. `@vX.Y.Z`) — the latest is `@v2.3.0`; see [CHANGELOG.md](CHANGELOG.md) and the Releases page. Note that it predates the release layer.
+> - A floating `@vMAJOR` tag tracks the newest release of that major version. `@v2` moves with each `v2.x.y` release; `@v1` is frozen at `v1.1.3`.
 
 The executor (Docker or macOS) is selected automatically from `target-platform`. No `executor-mode` input exists.
 
@@ -261,9 +261,15 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@a
 uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@vX.Y.Z
 ```
 
-> **`@v2` is the current floating major tag**, repointed at each `v2.x.y` release. `@v1` is
-> frozen at `v1.1.3`. Use `@main` for development, `@v2` to track stable, or an exact SHA/tag
-> for full reproducibility.
+> **`@main` is what the numbered entry templates ship with today.** The release
+> layer — `Build / Release`, the Release Set, the promotion workflows, the
+> platform capability model and the immutable artifact boundary — all landed
+> after `v2.3.0`, so `@v2` gets you the build half and none of the release
+> half. The next tag will be a major: the promotion workflows dropped inputs
+> that never did anything, which is breaking for anyone who passed them.
+>
+> Use `@main` for now, or an exact SHA for full reproducibility, and pin to a
+> tag once your project is live.
 >
 > Release tags are created by hand:
 > ```bash
@@ -273,7 +279,8 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@v
 
 Major version increments indicate breaking changes to the workflow input interface.
 
-Current version: **2.2.5** — see [CHANGELOG.md](CHANGELOG.md).
+Current tag: **v2.3.0**. `main` is well ahead of it — see the `[Unreleased]`
+section of [CHANGELOG.md](CHANGELOG.md), which is staged as the next major.
 
 ---
 
@@ -281,6 +288,10 @@ Current version: **2.2.5** — see [CHANGELOG.md](CHANGELOG.md).
 
 | Document | Contents |
 |---|---|
+| **[docs/README.md](docs/README.md)** | **The documentation index — which docs are current, which are reference, which are superseded** |
+| **[docs/CONSUMER\_SETUP.md](docs/CONSUMER_SETUP.md)** | **Setting a project up: entry workflows, secrets, variables, environments, first build** |
+| **[.github/pipeline-policy/invariants.md](.github/pipeline-policy/invariants.md)** | **The seventeen rules the pipeline enforces in CI, and why each exists** |
+| [docs/STEAM_DISTRIBUTION.md](docs/STEAM_DISTRIBUTION.md) | Shipping Windows and Linux through Steam |
 | **[docs/NEW\_PROJECT\_END\_TO\_END.md](docs/NEW_PROJECT_END_TO_END.md)** | **Start here — one pass from an empty Unity repo to a green build, then to building on your own runner. Picks between the two consumption paths and says which images each needs** |
 | **[docs/PIPELINE\_ARCHITECTURE.md](docs/PIPELINE_ARCHITECTURE.md)** | **Pipeline stages 01–08, node naming, quality gate, artifact flow, publish/release separation, retry, approval, adding a platform** |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layer diagram, executor lanes (docker-unity + macos-unity-xcode), extension points |
@@ -288,7 +299,6 @@ Current version: **2.2.5** — see [CHANGELOG.md](CHANGELOG.md).
 | [docs/DOCKER_BUILD.md](docs/DOCKER_BUILD.md) | Container flow, mounts, caches, licensing, debugging |
 | [docs/IMAGE_LIFECYCLE.md](docs/IMAGE_LIFECYCLE.md) | Base image, variants, bootstrap, scanning, SBOM, tagging, deprecation |
 | [docs/ADD_NEW_PROJECT.md](docs/ADD_NEW_PROJECT.md) | Step-by-step consumer onboarding guide |
-| **[docs/CONSUMER\_SETUP.md](docs/CONSUMER_SETUP.md)** | **New — drop-in pipeline setup for new projects (thin caller + secrets + environments)** |
 | [docs/BUILD_CONFIG.md](docs/BUILD_CONFIG.md) | Every BuildConfig field documented (including full iOS section) |
 | [docs/ANDROID.md](docs/ANDROID.md) | Android signing, AAB, symbol export via Docker, image bootstrap |
 | [docs/IOS.md](docs/IOS.md) | Full iOS pipeline: Unity → Xcode → archive → IPA → TestFlight |
@@ -297,7 +307,7 @@ Current version: **2.2.5** — see [CHANGELOG.md](CHANGELOG.md).
 | [docs/IOS_VERIFICATION.md](docs/IOS_VERIFICATION.md) | macOS runner verification runbook (Level 0–3, checklist) |
 | [docs/WEBGL.md](docs/WEBGL.md) | WebGL compression, hosting via Docker |
 | [docs/LINUX.md](docs/LINUX.md) | Linux standalone and dedicated server builds |
-| [docs/PLATFORM_LIMITATIONS.md](docs/PLATFORM_LIMITATIONS.md) | iOS (macOS lane, supported), Windows (unsupported), GPU/native plugin limits |
+| [docs/PLATFORM_LIMITATIONS.md](docs/PLATFORM_LIMITATIONS.md) | iOS (macOS lane, dispatch-only), Windows (Mono on Docker, IL2CPP needs a Windows runner), GPU/native plugin limits |
 | [docs/RELEASE_FLOW.md](docs/RELEASE_FLOW.md) | Tag-based release, environments, digest enforcement |
 | [docs/SELF_HOSTED_RUNNER.md](docs/SELF_HOSTED_RUNNER.md) | Runner setup with Docker requirements |
 | **[docs/SELF\_HOSTED\_ORG\_RUNNER.md](docs/SELF_HOSTED_ORG_RUNNER.md)** | **Register your own machine as an organization runner and route builds to it — runner groups, org variables, public-repo risks** |
@@ -422,7 +432,7 @@ copy. `01-ci.yml` validates and tests on every push and **builds nothing**;
 `11-build-release.yml` produces the immutable Release Set that the `20`–`24`
 files promote without rebuilding.
 
-**Pin the version**: `@v2` (latest stable, auto-fixes) or `@v2.2.5` (exact) for
+**Pin the version**: `@main` today (see Versioning Policy) or an exact SHA for
 production; `@main` only for development. Keep `toolkit-ref:` set to the same
 ref. See [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md).
 

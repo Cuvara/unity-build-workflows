@@ -25,7 +25,7 @@ Related docs:
 - [BRANCH\_FLOW\_CONTRACT.md](BRANCH_FLOW_CONTRACT.md) — branch → flow rules and Repository Variables reference
 - [GITHUB\_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md) — environment protection rules, deployment hygiene
 - [UNITY\_PERSONAL\_DOCKER\_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md) — Unity Personal/free license setup
-- [EXPLICIT\_PLATFORM\_FLOW.md](EXPLICIT_PLATFORM_FLOW.md) — job graph, dispatch inputs, platform selection rules
+- [PIPELINE\_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md) — the stage model, the artifact contract, the immutable boundary
 
 ---
 
@@ -107,14 +107,16 @@ it.
 
 **Version pinning (recommended):**
 
-| Ref | Use for | Behavior |
+| Ref | Use for | Behaviour |
 |---|---|---|
-| `@v2` | **production (default)** | latest stable `v2.x`; receives backward-compatible fixes automatically |
-| `@v2.2.5` | locked / reproducible | exact release, never moves |
-| `@main` | development only | bleeding edge; may break |
+| `@main` | what the numbered templates ship with today | current; the release layer is still settling |
+| `@v2.3.0` | locked / reproducible | exact release, never moves — but predates the release layer, the platform capability model and the immutable artifact boundary |
 
-The numbered templates ship pinned to `@main` while the release layer settles; pin them to a tag once your project is live. For fully reproducible builds, pin to an
-exact tag (e.g. `@v2.2.5`) and bump it deliberately. Available tags:
+The numbered templates ship pinned to `@main` while the release layer settles.
+`@v2` and its tags predate all of it: the release workflows, the Release Set,
+the promotion contract and the capability model arrived after `v2.3.0`, so
+pinning there gets you the build half and none of the release half. Pin to a
+tag once your project is live and bump it deliberately. Available tags:
 `gh release list -R Cuvara/unity-build-workflows` or
 `git ls-remote --tags https://github.com/Cuvara/unity-build-workflows`.
 Set `toolkit-ref:` in the caller to the SAME ref so the toolkit scripts are
@@ -228,6 +230,25 @@ default `token`.
 Repository Variables control per-branch build behaviour without touching the
 workflow file. All are optional — hardcoded defaults apply when unset.
 
+### What this project *can* build, versus what a branch *does* build
+
+Two different questions, and conflating them is the usual first mistake.
+
+```bash
+REPO="YOUR_ORG/YOUR_REPO"
+
+# CAPABILITY — the platforms this project supports at all. Authoritative:
+# nothing can build a platform absent from here, including a manual dispatch.
+# Unset means "all of them", so an existing project is unaffected.
+gh variable set PLATFORMS --repo "${REPO}" --body "Android,WebGL"
+```
+
+`*_BUILD_PLATFORMS` below says which of those a given branch builds. Capability
+wins: a project that cannot build iOS never gets an iOS job, however it is
+asked. That is why asking for a platform you have not enabled produces no job
+rather than an error — the request was valid, the project simply does not ship
+that platform.
+
 ```bash
 REPO="YOUR_ORG/YOUR_REPO"
 
@@ -259,7 +280,21 @@ gh variable set BUILD_CLEAN  --repo "${REPO}" --body "false"
 
 # Discord thread ID (optional — pin notifications to a specific forum thread)
 gh variable set DISCORD_THREAD_ID  --repo "${REPO}" --body "1234567890123456789"
+
+# Artifact retention. Leave UNSET and the pipeline tiers it by what the
+# artifact is for: release 90 days, staging 14, development 7, and logs and
+# reports 7 regardless. Setting this is a decision and overrides every tier.
+#
+# Ninety days for a release is not generosity — a promotion downloads the exact
+# artifact its Release Set names, so when that expires the release can never be
+# promoted again.
+# gh variable set ARTIFACT_RETENTION_DAYS --repo "${REPO}" --body "90"
 ```
+
+**Steam** (only if you ship Windows or Linux through it) is configured
+separately, because a distribution provider is not a platform capability: a
+project builds desktop artifacts with no Steam account at all. See
+[STEAM\_DISTRIBUTION.md](STEAM_DISTRIBUTION.md).
 
 > **These are the current, grouped variable names** (`BUILD_*`, `TEST_*`,
 > `ADDRESSABLES_*`, `RUNNER_*`). The older ungrouped names —
@@ -331,9 +366,28 @@ If you do **not** use Addressables, skip this step entirely and keep
 
 ## Step 6: Configure GitHub Environments
 
-The pipeline creates GitHub Deployment records in three named environments:
-`development`, `staging`, and `production`. These must be configured before
-your first push to `release-*`.
+Two sets, for two different jobs.
+
+**Build environments** — `development`, `staging`, `production`. The pipeline
+creates a GitHub Deployment record in these; configure them before your first
+push to `release-*`.
+
+**Promotion environments** — these are the approval gates in front of a store
+or a storefront, and they are where a human says yes:
+
+| Environment | Gates |
+|---|---|
+| `internal-testing` | Google Play internal, TestFlight internal |
+| `external-testing` | Play closed testing, TestFlight external |
+| `production` | Play production, App Store |
+| `staging` | WebGL staging deploy |
+| `steam-internal` / `steam-external` / `steam-production` | Steam branches |
+
+Only create the ones you use. Steam's are deliberately separate from the
+stores': a Steam release and an App Store release are different decisions, and
+one shared set of reviewers would conflate them. Add required reviewers to
+whichever environment fronts a real audience — that is the only thing standing
+between a green build and your players.
 
 ### Create the environments (one-time setup)
 
@@ -437,19 +491,24 @@ After setup, the pipeline provides:
 
 | Feature | How it works |
 |---|---|
-| **Branch-based CI** | Push to `develop` → builds Android+WebGL; push to `staging` → adds Linux64+LinuxServer+Windows64; push to `release-*` → full build (same set) + Addressables + Android release signing. Windows64 uses the Mono scripting backend in the docker lane — use `runner-mode=self-hosted-windows` for IL2CPP ([EXPLICIT\_PLATFORM\_FLOW.md §5](EXPLICIT_PLATFORM_FLOW.md#5-platform-selection-rules)) |
-| **PR validation** | Tests only on PRs to `develop`/`staging`/`release-*`; no binary builds; no environment secrets exposed |
-| **Manual dispatch** | 9 inputs for full control (platform, tests, addressables, environment, runner mode, etc.) |
-| **Per-platform UI jobs** | Each platform is a separate, independently-retryable job node in GitHub Actions |
-| **Discord notifications** | Build-completion embeds with status, platform, and artifact links (when `DISCORD_WEBHOOK_URL` is set) |
-| **GitHub Environments** | One deployment record per push run; production gated by branch policy + optional human approval |
-| **Addressables support** | `build-addressables` step runs before platform builds; pre-built catalog is available to all builds |
+| **Three lifecycle layers** | `01-ci` validates and tests and **builds nothing**; `10-build-development` makes disposable builds; `11-build-release` makes the immutable Release Set |
+| **Artifact follows the lifecycle** | Development Android is an APK, release Android is the signed App Bundle. Not a form field — see [PIPELINE\_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md) |
+| **Promotion never rebuilds** | `20`–`24` publish the exact bytes of a named Release Set, verified by SHA-256 before every phase. "Retry the deploy" costs seconds, not a rebuild |
+| **Platform capability** | `PLATFORMS` decides what the project can build; a disabled platform creates no job and no artifact |
+| **Branch-based CI** | Push to `develop`/`staging`/`release-*` runs the branch's configured platform set; PRs run tests only, with no binary builds and no environment secrets |
+| **Progress ladder** | Every job draws how far the run has got into its summary, so the graph's shape is not the only clue |
+| **Per-platform jobs** | One independently-retryable node per platform, named for people (`03 / Windows`, not `03 / Windows64`) |
+| **Discord notifications** | Build and release embeds with status, platform and artifact links (when `DISCORD_WEBHOOK_URL` is set) |
+| **GitHub Environments** | Deployment records per run; every publishing phase behind an Environment you can put a reviewer on |
+| **Addressables support** | `build-addressables` runs before the platform builds; the catalog is available to all of them |
 
 ### Further reading
 
 | Document | Description |
 |---|---|
-| [EXPLICIT\_PLATFORM\_FLOW.md](EXPLICIT_PLATFORM_FLOW.md) | Job graph, all dispatch inputs, platform selection rules, iOS requirements |
+| [PIPELINE\_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md) | **Start here.** The stage model, the artifact contract, the immutable boundary, platform capabilities |
+| [STEAM\_DISTRIBUTION.md](STEAM_DISTRIBUTION.md) | Shipping Windows and Linux through Steam; configuration and the staging boundary |
+| [.github/pipeline-policy/invariants.md](../.github/pipeline-policy/invariants.md) | The seventeen rules the pipeline enforces in CI, and why each exists |
 | [BRANCH\_FLOW\_CONTRACT.md](BRANCH_FLOW_CONTRACT.md) | Branch → flow mapping, Repository Variable reference, flow-type table |
 | [GITHUB\_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md) | Environment protection rules, deployment hygiene, stale deployment cleanup |
 | [UNITY\_PERSONAL\_DOCKER\_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md) | Unity Personal/free license — `.ulf` generation, `personal-combined` strategy, troubleshooting |

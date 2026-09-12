@@ -1,5 +1,15 @@
 # Release Flow
 
+> ## ⚠️ Superseded
+>
+> This predates the promote-only release layer. Release is now three lifecycle
+> layers with an immutable artifact boundary between build and publish —
+> nothing in `20`–`24` can rebuild, re-export or re-sign.
+>
+> Kept for the reasoning it records, not as instructions. For how the pipeline
+> works today read [PIPELINE_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md); to set
+> a project up read [CONSUMER_SETUP.md](CONSUMER_SETUP.md).
+
 This document describes the tag-based release process for the Docker-mandatory Unity CI/CD platform.
 
 > For the **store** release pipelines — build → validate → publish → production
