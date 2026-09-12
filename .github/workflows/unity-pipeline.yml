@@ -1502,7 +1502,12 @@ jobs:
           name: release-manifest
           path: release-manifest.json
           if-no-files-found: error
-          retention-days: 90
+          # The same lifetime as the artifacts it describes. Ninety days was
+          # hardcoded here while the artifacts followed the project's setting,
+          # so a project retaining artifacts for thirty days kept a manifest
+          # for sixty more days after the bytes it points at had gone — a
+          # Release Set that reads as promotable and is not.
+          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
 
       # Where the run has got to, drawn into this job's summary.
       - name: Progress
