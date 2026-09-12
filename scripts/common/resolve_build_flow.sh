@@ -722,6 +722,11 @@ resolve_setting "30" "" \
     variable-new "${NEW_ARTIFACT_RETENTION_DAYS:-}" \
     variable-new "${ARTIFACT_RETENTION_DAYS:-}"
 artifact_retention_days="${_resolved_value}"
+# Whether the project actually asked for this number or just inherited the
+# default. A release artifact that expires cannot be promoted, so the pipeline
+# lengthens the default for release builds — but a number the project chose
+# deliberately must not be silently overruled.
+artifact_retention_source="${_resolved_source}"
 validate_positive_int "ARTIFACT_RETENTION_DAYS" "${artifact_retention_days}"
 
 resolve_setting "zip" "" \
@@ -1018,4 +1023,5 @@ emit "cache-gradle"            "${cache_gradle}"
 emit "cache-addressables"      "${cache_addressables}"
 emit "cache-nuget"             "${cache_nuget}"
 emit "artifact-retention-days" "${artifact_retention_days}"
+emit "artifact-retention-source" "${artifact_retention_source}"
 emit "artifact-compression"    "${artifact_compression}"

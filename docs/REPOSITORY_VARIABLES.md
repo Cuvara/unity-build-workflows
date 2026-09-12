@@ -296,7 +296,7 @@ CACHE_NUGET_ENABLED=true
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ARTIFACT_RETENTION_DAYS` | `30` | Positive integer; days GitHub Actions retains build artifacts. |
+| `ARTIFACT_RETENTION_DAYS` | per build type | Positive integer. **Unset** the pipeline tiers it: release **90** days, staging 14, development 7 — a release artifact that expires can never be promoted, while a development one is disposable (I-002). Logs and reports always keep 7. Setting this is a decision and overrides every tier. |
 | `ARTIFACT_COMPRESSION` | `zip` | See [Known limitations](#known-limitations) — only `zip` is supported today. |
 
 ```

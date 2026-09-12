@@ -80,6 +80,13 @@ on:
         default: 14
         type: number
 
+      log-retention-days:
+        description: >-
+          Days to retain test logs and reports. Diagnostics for this run only.
+        required: false
+        default: 7
+        type: number
+
       # ── Grouped-config additions (backward compatible; defaults preserve today) ─
       build-timeout-minutes:
         description: Maximum minutes the test job may run before GitHub Actions cancels it.
@@ -484,7 +491,7 @@ jobs:
           name: unity-tests-${{ inputs.test-mode }}
           path: test-results/
           if-no-files-found: warn
-          retention-days: ${{ inputs.artifact-retention-days }}
+          retention-days: ${{ inputs.log-retention-days }}
 
       # ── 7. Set job-level result output ────────────────────────────────────────
       - name: Set result output

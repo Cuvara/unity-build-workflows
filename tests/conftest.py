@@ -163,7 +163,8 @@ def resolve_matrix():
 
     def run(platforms, environment="production", android_export="aab",
             build_type="", platform_input="All", run_number=42,
-            build_number_offset=0):
+            build_number_offset=0, retention_days=30,
+            retention_source="default"):
         env = dict(os.environ)
         env["ENVIRONMENT"] = environment
         env["ANDROID_TYPE"] = android_export
@@ -174,6 +175,10 @@ def resolve_matrix():
         # The store-facing build number, resolved once in stage 01.
         env["RUN_NUMBER"] = str(run_number)
         env["BUILD_NUMBER_OFFSET"] = str(build_number_offset)
+        # Retention is tiered by build type here, so the fixture has to say
+        # what the resolver would have said.
+        env["RETENTION_DAYS"] = str(retention_days)
+        env["RETENTION_SOURCE"] = retention_source
         for platform, key in PLATFORM_ENV.items():
             env[key] = "true" if platform in platforms else "false"
 

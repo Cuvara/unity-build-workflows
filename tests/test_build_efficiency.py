@@ -255,3 +255,64 @@ def test_onboarding_docs_install_the_numbered_set(doc):
     assert "-o .github/workflows/unity-build.yml" not in body, (
         f"{doc} still installs the superseded single caller"
     )
+
+
+# ---------------------------------------------------------------------------
+# Retention: how long an artifact has to stay promotable
+# ---------------------------------------------------------------------------
+# Thirty days for everything turned a storage default into a promotion
+# deadline. Once a Release Set's artifacts expire, download-artifact cannot
+# fetch them and that release can never be promoted again — the immutable
+# boundary holds and there is simply nothing left on the other side of it.
+
+@pytest.mark.parametrize("build_type,environment,expected", [
+    ("release", "production", 90),
+    ("development", "development", 7),
+    ("development", "staging", 14),
+])
+def test_retention_follows_what_the_artifact_is_for(resolve_matrix, build_type,
+                                                    environment, expected):
+    out = resolve_matrix(["Android"], build_type=build_type, environment=environment)
+    assert int(out["retention-days"]) == expected
+
+
+def test_a_project_that_chose_a_number_keeps_it(resolve_matrix):
+    """`ARTIFACT_RETENTION_DAYS` is a decision, not a suggestion. Lengthening
+    the default is help; overruling an explicit value is not."""
+    out = resolve_matrix(["Android"], build_type="release",
+                         retention_days=45, retention_source="variable-new")
+    assert int(out["retention-days"]) == 45
+
+
+def test_diagnostics_expire_sooner_than_the_artifact(resolve_matrix):
+    """Logs, reports and result files are for the run that produced them.
+    Keeping them as long as a release artifact is 83 days of storage for
+    something nothing reads."""
+    out = resolve_matrix(["Android"], build_type="release")
+    assert int(out["log-retention-days"]) == 7
+    assert int(out["log-retention-days"]) < int(out["retention-days"])
+
+
+def test_diagnostics_never_outlive_the_artifact(resolve_matrix):
+    """A project that sets a very short retention gets short logs too, rather
+    than logs that outlast the thing they describe."""
+    out = resolve_matrix(["Android"], build_type="release",
+                         retention_days=3, retention_source="variable-new")
+    assert int(out["log-retention-days"]) == 3
+
+
+def test_the_build_lane_separates_the_two_lifetimes():
+    workflow = yaml.safe_load(BUILD_LANE.read_text())
+    inputs = (workflow.get("on") or workflow[True])["workflow_call"]["inputs"]
+    assert "log-retention-days" in inputs
+    body = BUILD_LANE.read_text()
+    # The artifact and its manifest keep the long tier; logs and result files
+    # take the short one.
+    for name, expected in (
+        ("${{ steps.artifact-type.outputs.artifact-name }}-logs", "log-retention-days"),
+        ("pipeline-result-build-${{ inputs.platform }}", "log-retention-days"),
+        ("${{ steps.artifact-type.outputs.artifact-name }}", "artifact-retention-days"),
+    ):
+        at = body.index(f"name: {name}\n")
+        window = body[at:at + 500]
+        assert expected in window, f"{name} does not use {expected}"
