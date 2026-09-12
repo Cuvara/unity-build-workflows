@@ -396,11 +396,14 @@ The Unity version single source of truth is the consumer's
 The fastest way to add this pipeline to a new Unity project:
 
 ```bash
-# 1. Copy the caller workflow template
+# 1. Copy the entry workflows — one per lifecycle layer
 mkdir -p .github/workflows
-curl -fsSL \
-  https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/consumer-unity-build.yml \
-  -o .github/workflows/unity-build.yml
+BASE=https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates
+for f in 01-ci 10-build-development 11-build-release \
+         20-release-android 21-release-ios 22-release-webgl \
+         23-release-windows 24-release-linux; do
+  curl -fsSL "${BASE}/consumer-${f}.yml" -o ".github/workflows/${f}.yml"
+done
 
 # 2. Set required secrets
 gh secret set UNITY_EMAIL    --repo YOUR_ORG/YOUR_REPO
@@ -408,14 +411,16 @@ gh secret set UNITY_PASSWORD --repo YOUR_ORG/YOUR_REPO
 gh secret set UNITY_LICENSE  --repo YOUR_ORG/YOUR_REPO < Unity_lic.ulf
 
 # 3. Commit and push — CI is now live
-git add .github/workflows/unity-build.yml
-git commit -m "ci: add Unity build pipeline"
+git add .github/workflows/
+git commit -m "ci: add the Unity build and release entry workflows"
 git push
 ```
 
-The caller workflow (`consumer-unity-build.yml`) uses a single
-`uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2`
-call with `secrets: inherit` — no per-secret wiring, no build scripts to copy.
+Keep only the release files for platforms you ship. Each entry point is a thin
+caller using `secrets: inherit` — no per-secret wiring, no build scripts to
+copy. `01-ci.yml` validates and tests on every push and **builds nothing**;
+`11-build-release.yml` produces the immutable Release Set that the `20`–`24`
+files promote without rebuilding.
 
 **Pin the version**: `@v2` (latest stable, auto-fixes) or `@v2.2.5` (exact) for
 production; `@main` only for development. Keep `toolkit-ref:` set to the same

@@ -371,13 +371,30 @@ jobs:
       - name: Free disk space
         if: ${{ inputs.build-engine == 'docker' && steps.ios-guard.outputs.blocked != 'true' }}
         shell: bash
+        env:
+          # The Unity editor image is ~15GB unpacked. Reclaim only when the
+          # runner cannot comfortably hold it.
+          REQUIRED_GB: '40'
         run: |
-          # The Unity editor image (e.g. unityci/editor:ubuntu-<ver>-android-*) is
-          # ~15GB. GitHub-hosted runners have ~14GB free by default, so the pull
-          # can fail with "no space left on device". Aggressively reclaim space.
-          # The build runs INSIDE the container, so the host's Android SDK and the
-          # tool cache are not needed here and are safe to remove.
-          echo "Before:"; df -h / | tail -1
+          set -Eeuo pipefail
+          free_gb() { df -BG --output=avail / | tail -1 | tr -dc '0-9'; }
+
+          BEFORE="$(free_gb)"
+          echo "Free space: ${BEFORE}G (need ${REQUIRED_GB}G)"
+
+          # This used to run unconditionally, on the assumption that a runner
+          # has ~14GB free. Current GitHub-hosted images ship 145G with ~87G
+          # free, so the reclaim was pure cost: 57s on the Android job and 276s
+          # on WebGL, deleting 30GB nobody was going to need. Guarding it keeps
+          # the safety net for smaller or self-hosted runners and gives the
+          # time back everywhere else.
+          if [ "${BEFORE}" -ge "${REQUIRED_GB}" ]; then
+            echo "Enough space already — skipping the reclaim."
+            exit 0
+          fi
+
+          echo "Reclaiming: the build runs INSIDE the container, so the host's"
+          echo "Android SDK, .NET and tool cache are not needed here."
           sudo rm -rf \
             /usr/share/dotnet \
             /usr/local/lib/android \
@@ -386,7 +403,7 @@ jobs:
             /usr/local/share/boost \
             /usr/share/swift 2>/dev/null || true
           sudo docker image prune -af 2>/dev/null || true
-          echo "After:"; df -h / | tail -1
+          echo "Free space: $(free_gb)G (was ${BEFORE}G)"
 
       # ── Step 3: Checkout ──────────────────────────────────────────────────
       - name: Checkout
@@ -580,10 +597,19 @@ jobs:
             Library-${{ inputs.platform }}-
             Library-
 
-      # ── Step 6b: Cache Gradle (docker lane, Android only) ──────────────────
+      # ── Step 6b: Cache Gradle (Android, native lane only) ──────────────────
       # Best-effort — cache misses/failures never fail the build.
+      #
+      # NOT on the docker lane. Unity runs Gradle inside the container, with
+      # its own bundled JDK and a working directory under
+      # Library/Bee/Android/Prj — the host's ~/.gradle is never written, so
+      # this cached an empty directory and missed on every single run:
+      #   Cache not found for input keys: gradle-2cb35154…, gradle-
+      # Eight seconds a build for nothing, and a step name that told anyone
+      # reading it that Gradle was cached when it was not. Library/ is cached
+      # separately and does cover Bee's output.
       - name: Cache Gradle
-        if: ${{ inputs.cache-gradle == true && inputs.platform == 'Android' && inputs.build-engine == 'docker' && steps.ios-guard.outputs.blocked != 'true' }}
+        if: ${{ inputs.cache-gradle == true && inputs.platform == 'Android' && inputs.build-engine != 'docker' && steps.ios-guard.outputs.blocked != 'true' }}
         continue-on-error: true
         uses: actions/cache@v4
         with:

@@ -23,6 +23,20 @@
 # See docs/CONSUMER_SETUP.md for the full onboarding walkthrough.
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ DEPRECATED — previous generation.                                        │
+# │                                                                          │
+# │ This single caller predates the three-layer architecture. It still works │
+# │ and existing projects need not migrate, but it reaches only the build    │
+# │ side: no release layer, no immutable artifact boundary, no promotion.    │
+# │                                                                          │
+# │ New projects use the numbered set instead — 01-ci, 10-build-development, │
+# │ 11-build-release and the 20–24 release entry points. See                 │
+# │ docs/CONSUMER_SETUP.md step 2.                                           │
+# │                                                                          │
+# │ Scheduled for removal in the next major version, with a migration note.  │
+# └──────────────────────────────────────────────────────────────────────────┘
+
 name: Unity Build
 
 # Manual builds live in the per-platform entry workflows, NOT here:
