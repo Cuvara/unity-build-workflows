@@ -2,7 +2,8 @@
 # consumer-unity-build.yml — Thin caller template for unity-build-workflows
 #
 # Copy this file to .github/workflows/unity-build.yml in your project.
-# Pinned to @v2 (latest stable v2.x). Use @v2.2.5 for an exact pin, or @main
+# Pinned to @v2 — the last release that had this shape. The numbered entry
+# workflows are pinned to @v3; see docs/CONSUMER_SETUP.md. Use @main
 # for development. Keep `toolkit-ref` below on the SAME ref as `uses`.
 #
 # Required secrets (set in Settings → Secrets and variables → Actions):
