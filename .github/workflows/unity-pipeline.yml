@@ -258,7 +258,8 @@ jobs:
       cache-gradle:            ${{ steps.flow.outputs.cache-gradle }}
       cache-addressables:      ${{ steps.flow.outputs.cache-addressables }}
       cache-nuget:             ${{ steps.flow.outputs.cache-nuget }}
-      artifact-retention-days: ${{ steps.flow.outputs.artifact-retention-days }}
+      artifact-retention-days: ${{ steps.matrix.outputs.retention-days }}
+      log-retention-days:      ${{ steps.matrix.outputs.log-retention-days }}
       artifact-compression:    ${{ steps.flow.outputs.artifact-compression }}
       # ── Project metadata (extract_project_metadata.sh) ─────────────────────
       product-name:       ${{ steps.meta.outputs.product-name }}
@@ -457,6 +458,8 @@ jobs:
           IN_PLATFORM:   ${{ inputs.platform }}
           RUN_NUMBER:    ${{ github.run_number }}
           BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET || '0' }}
+          RETENTION_DAYS:   ${{ steps.flow.outputs.artifact-retention-days }}
+          RETENTION_SOURCE: ${{ steps.flow.outputs.artifact-retention-source }}
           SEL_ANDROID:     ${{ steps.flow.outputs.build-android }}
           SEL_WEBGL:       ${{ steps.flow.outputs.build-webgl }}
           SEL_LINUX64:     ${{ steps.flow.outputs.build-linux64 }}
@@ -514,6 +517,42 @@ jobs:
               *)          BUILD_TYPE="development" ;;
             esac
           fi
+          # ── Artifact retention, by what the artifact is for ─────────────
+          # A Release Set is the input to every later promotion: once its
+          # artifacts expire, `actions/download-artifact` cannot fetch them and
+          # the release can never be promoted again. Thirty days for everything
+          # made a storage default into a promotion deadline nobody had agreed
+          # to. Development artifacts are disposable by I-002 and can go sooner.
+          #
+          # A project that set ARTIFACT_RETENTION_DAYS chose a number; that is
+          # never overruled here.
+          # Defaulted rather than assumed: the step runs under `set -u`, and a
+          # caller that predates these two variables must not crash the matrix.
+          RETENTION_DAYS="${RETENTION_DAYS:-30}"
+          RETENTION_SOURCE="${RETENTION_SOURCE:-default}"
+          if [ "${RETENTION_SOURCE}" = "default" ]; then
+            case "${BUILD_TYPE}" in
+              release) RETENTION_DAYS=90 ;;
+              *)
+                case "${ENVIRONMENT}" in
+                  staging) RETENTION_DAYS=14 ;;
+                  *)       RETENTION_DAYS=7 ;;
+                esac
+                ;;
+            esac
+          fi
+          # Logs, validation reports and per-platform result files are
+          # diagnostics for the run that produced them. Nothing downstream
+          # reads them, so they never need the artifact's lifetime.
+          LOG_RETENTION_DAYS=7
+          [ "${RETENTION_DAYS}" -lt "${LOG_RETENTION_DAYS}" ] && LOG_RETENTION_DAYS="${RETENTION_DAYS}"
+          echo "retention-days=${RETENTION_DAYS}"
+          echo "log-retention-days=${LOG_RETENTION_DAYS}"
+          {
+            echo "retention-days=${RETENTION_DAYS}"
+            echo "log-retention-days=${LOG_RETENTION_DAYS}"
+          } >> "${GITHUB_OUTPUT}"
+
           case "${BUILD_TYPE}" in
             development) BUILD_TYPE_LABEL="Development" ;;
             release)     BUILD_TYPE_LABEL="Release" ;;
@@ -853,6 +892,7 @@ jobs:
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+      log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
       runner-macos-label:      ${{ needs.resolve-config.outputs.runner-macos-label }}
       runner-linux-label:      ${{ needs.resolve-config.outputs.runner-linux-label }}
@@ -988,6 +1028,7 @@ jobs:
       cache-addressables:      ${{ fromJSON(needs.resolve-config.outputs.cache-addressables) }}
       cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+      log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
       artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
       build-method:            ${{ needs.resolve-config.outputs.build-method }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
@@ -1053,6 +1094,7 @@ jobs:
       cache-addressables:      ${{ fromJSON(needs.resolve-config.outputs.cache-addressables) }}
       cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+      log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
       artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
       build-method:            ${{ needs.resolve-config.outputs.build-method }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
@@ -1207,7 +1249,7 @@ jobs:
         with:
           name: pipeline-result-build-iOS-signed
           path: pipeline-results/
-          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+          retention-days: ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
 
       - name: Cleanup signing
         if: always()
@@ -1366,7 +1408,7 @@ jobs:
         with:
           name: pipeline-result-validate-${{ matrix.platform }}
           path: pipeline-results/
-          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+          retention-days: ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
 
       - name: Upload validation report
         if: always()
@@ -1376,7 +1418,7 @@ jobs:
           name: ${{ matrix.artifact-name }}-validation-report
           path: validation-${{ matrix.validator }}.json
           if-no-files-found: ignore
-          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
+          retention-days: ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
 
       # Where the run has got to, drawn into this job's summary.
       - name: Progress

@@ -206,6 +206,17 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Changed
 
+- **Artifact retention is tiered by what the artifact is for.** Thirty days
+  for everything turned a storage default into a promotion deadline: a
+  promotion consumes the exact artifact its Release Set names, so once that
+  expired the release could never be promoted again — the immutable boundary
+  still held and there was nothing left on the other side of it. Release
+  artifacts now keep 90 days, staging 14, development 7 (disposable by I-002),
+  and logs, validation reports and per-platform result files keep 7 regardless,
+  since nothing downstream reads them. `ARTIFACT_RETENTION_DAYS` still wins
+  where a project set it — lengthening a default is help, overruling an
+  explicit choice is not.
+
 - **`All` now means the platforms the project configured.** It was a hardcoded
   list of five, so a project with `RELEASE_BUILD_PLATFORMS=Android` that picked
   "All" got five builds — about fifty runner-minutes instead of nine — while

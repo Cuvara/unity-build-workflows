@@ -126,6 +126,15 @@ for one that does not. This started as an asymmetry: the Steam pipelines
 verified per phase from the day they were written, while the store pipelines
 verified once and published from a second, unchecked download.
 
+**Retention is part of I-017 in practice.** A promotion consumes the exact
+artifact a Release Set names, so once that artifact expires the release can
+never be promoted again — the boundary still holds and there is nothing left on
+the other side of it. Thirty days for everything turned a storage default into
+a promotion deadline nobody had agreed to. Release artifacts now keep 90 days,
+staging 14, development 7 (they are disposable by I-002), and logs and reports
+7 regardless — nothing downstream reads them. A project that sets
+`ARTIFACT_RETENTION_DAYS` has made a decision, and it is not overruled.
+
 **I-015 — distribution is separate.** Windows and Linux produce valid
 immutable release artifacts with no distribution provider configured. Steam is
 a delivery choice, not a build prerequisite. Requiring one to produce an
