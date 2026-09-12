@@ -206,6 +206,11 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Changed
 
+- **The release manifest no longer outlives the artifacts it describes.** Its
+  retention was hardcoded to 90 days while the artifacts followed the project's
+  setting, so a project retaining artifacts for 30 days kept a manifest for 60
+  days after the bytes it points at had gone — a Release Set that reads as
+  promotable and is not.
 - **Artifact retention is tiered by what the artifact is for.** Thirty days
   for everything turned a storage default into a promotion deadline: a
   promotion consumes the exact artifact its Release Set names, so once that

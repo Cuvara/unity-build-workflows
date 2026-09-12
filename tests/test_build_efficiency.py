@@ -316,3 +316,19 @@ def test_the_build_lane_separates_the_two_lifetimes():
         at = body.index(f"name: {name}\n")
         window = body[at:at + 500]
         assert expected in window, f"{name} does not use {expected}"
+
+
+def test_the_release_manifest_does_not_outlive_its_artifacts():
+    """90 days was hardcoded for the manifest while the artifacts followed the
+    project's setting. A project retaining artifacts for 30 days kept a
+    manifest for 60 days after the bytes it points at had gone — a Release Set
+    that reads as promotable and is not."""
+    import yaml as _yaml
+
+    pipeline = _yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text())
+    for step in pipeline["jobs"]["release-manifest"]["steps"]:
+        if "upload-artifact" not in str(step.get("uses", "")):
+            continue
+        retention = str(step["with"]["retention-days"])
+        assert "artifact-retention-days" in retention, retention
