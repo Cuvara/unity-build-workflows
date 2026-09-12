@@ -197,7 +197,7 @@ In `v2.0.0`, iOS was listed as unsupported. The `v2.1.0` release adds the `unity
 
 **Migration steps:**
 
-1. Update your workflow reference: use `@main` (latest) or a specific commit SHA; use an exact tag (e.g. `@vX.Y.Z`) once a release is published — no tags exist yet; `@v2` floating tag does not exist yet
+1. Update your workflow reference: use `@v3` (latest stable 3.x), `@v3.0.0` for an exact pin, or `@main` when developing the toolkit itself.
 2. Add the iOS BuildConfig fields listed in [IOS.md](IOS.md)
 3. Add the required GitHub Secrets listed in [IOS_SIGNING.md](IOS_SIGNING.md)
 4. Create the `production` GitHub Environment if using TestFlight

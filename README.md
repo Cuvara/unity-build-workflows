@@ -154,8 +154,8 @@ jobs:
 
 > **Choosing `<ref>`:**
 > - Development / pre-release: `@main` (tracks latest) or `@<commit-sha>` (pinned)
-> - Stable release: an exact released tag (e.g. `@vX.Y.Z`) — the latest is `@v2.3.0`; see [CHANGELOG.md](CHANGELOG.md) and the Releases page. Note that it predates the release layer.
-> - A floating `@vMAJOR` tag tracks the newest release of that major version. `@v2` moves with each `v2.x.y` release; `@v1` is frozen at `v1.1.3`.
+> - Stable release: an exact released tag (e.g. `@vX.Y.Z`) — the latest is `@v3.0.0`; see [CHANGELOG.md](CHANGELOG.md) and the Releases page.
+> - A floating `@vMAJOR` tag tracks the newest release of that major version. `@v3` moves with each `3.x.y` release; `@v2` is frozen before the release layer; `@v1` at `v1.1.3`.
 
 The executor (Docker or macOS) is selected automatically from `target-platform`. No `executor-mode` input exists.
 
@@ -261,15 +261,18 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@a
 uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@vX.Y.Z
 ```
 
-> **`@main` is what the numbered entry templates ship with today.** The release
-> layer — `Build / Release`, the Release Set, the promotion workflows, the
-> platform capability model and the immutable artifact boundary — all landed
-> after `v2.3.0`, so `@v2` gets you the build half and none of the release
-> half. The next tag will be a major: the promotion workflows dropped inputs
-> that never did anything, which is breaking for anyone who passed them.
+> **`@v3` is the current floating major tag**, repointed at each `3.x.y`
+> release. The numbered entry templates ship pinned to it.
 >
-> Use `@main` for now, or an exact SHA for full reproducibility, and pin to a
-> tag once your project is live.
+> `@v2` predates the release layer: `Build / Release`, the Release Set, the
+> promotion workflows, the platform capability model and the immutable artifact
+> boundary all arrived in 3.0.0, so pinning there gets the build half and none
+> of the release half. 3.0.0 is a major because the promotion workflows dropped
+> inputs that never did anything — see the migration notes in
+> [CHANGELOG.md](CHANGELOG.md).
+>
+> Use `@v3` to track stable, `@v3.0.0` for an exact pin, `@main` for
+> development, or a SHA for full reproducibility.
 >
 > Release tags are created by hand:
 > ```bash
@@ -279,8 +282,7 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@v
 
 Major version increments indicate breaking changes to the workflow input interface.
 
-Current tag: **v2.3.0**. `main` is well ahead of it — see the `[Unreleased]`
-section of [CHANGELOG.md](CHANGELOG.md), which is staged as the next major.
+Current version: **3.0.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -432,7 +434,7 @@ copy. `01-ci.yml` validates and tests on every push and **builds nothing**;
 `11-build-release.yml` produces the immutable Release Set that the `20`–`24`
 files promote without rebuilding.
 
-**Pin the version**: `@main` today (see Versioning Policy) or an exact SHA for
+**Pin the version**: `@v3` (latest stable 3.x) or `@v3.0.0` (exact) for
 production; `@main` only for development. Keep `toolkit-ref:` set to the same
 ref. See [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md).
 
