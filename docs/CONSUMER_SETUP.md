@@ -109,14 +109,15 @@ it.
 
 | Ref | Use for | Behaviour |
 |---|---|---|
-| `@main` | what the numbered templates ship with today | current; the release layer is still settling |
-| `@v2.3.0` | locked / reproducible | exact release, never moves — but predates the release layer, the platform capability model and the immutable artifact boundary |
+| `@v3` | **production (default)** | latest stable `3.x`; moves with each release, so backward-compatible fixes arrive automatically |
+| `@v3.0.0` | locked / reproducible | exact release, never moves |
+| `@main` | development only | bleeding edge; may break |
 
-The numbered templates ship pinned to `@main` while the release layer settles.
-`@v2` and its tags predate all of it: the release workflows, the Release Set,
-the promotion contract and the capability model arrived after `v2.3.0`, so
-pinning there gets you the build half and none of the release half. Pin to a
-tag once your project is live and bump it deliberately. Available tags:
+The numbered templates ship pinned to `@v3`, and that is what most projects
+want. `@v2` and its tags predate the release layer entirely — the release
+workflows, the Release Set, the promotion contract and the platform capability
+model all arrived in 3.0.0 — so pinning there gets the build half and none of
+the release half. Available tags:
 `gh release list -R Cuvara/unity-build-workflows` or
 `git ls-remote --tags https://github.com/Cuvara/unity-build-workflows`.
 Set `toolkit-ref:` in the caller to the SAME ref so the toolkit scripts are

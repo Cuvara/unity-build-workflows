@@ -10,7 +10,13 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
-Staged as the next **major**. The release layer arrived — `Build / Release`
+Nothing yet.
+
+---
+
+## [3.0.0] — 2026-09-13
+
+A **major**. The release layer arrived — `Build / Release`
 produces an immutable Release Set, and promotion publishes those exact bytes
 without rebuilding — and a handful of inputs that never did anything were
 removed along the way.
@@ -735,6 +741,21 @@ Unity version SSOT are all untouched.
   would break projects still on the single-caller architecture; it goes in the
   next major version with a migration note.
 
+
+## [2.3.0] — 2026-09-10
+
+Tagged but never written up at the time; recorded here from the commits it
+contains, so the tag list and this file stop disagreeing.
+
+### Added
+
+- **Phased store release pipelines for Android and iOS** — the first version of
+  `pipeline-{android,ios}-release.yml`, with the internal → external →
+  production phase chain behind GitHub Environments. Everything that followed
+  in 3.0.0 — promote-only, the Release Set, the immutable artifact boundary —
+  was built on this shape.
+
+---
 
 ## [2.2.5] — 2026-09-10
 

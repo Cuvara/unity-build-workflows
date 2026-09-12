@@ -73,14 +73,18 @@ The template is ready as shipped. Two things in it must stay in step, and a
 mismatch is silent:
 
 ```yaml
-uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v2
+uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v3
 ...
-toolkit-ref:  'v2'   # MUST equal the @ref above
+toolkit-ref:  'v3'   # MUST equal the @ref above
 ```
 
-`@v2` is the floating major tag and moves with each `v2.x.y` release; `@v2.2.5`
-pins exactly; `@main` is for developing the toolkit itself. **`@v1` is frozen at
-`v1.1.3`** and receives nothing further.
+The workflow and the scripts it runs have to come from the same version, and
+nothing warns you when they do not.
+
+`@v3` is the floating major tag and moves with each `3.x.y` release; `@v3.0.0`
+pins exactly; `@main` is for developing the toolkit itself. **`@v2` predates the
+release layer** — no Release Set, no promotion, no platform capability model —
+and `@v1` is frozen at `v1.1.3`.
 
 Commit and push it. Pushes to `develop`, `staging` and `release-*` and pull
 requests against them now build; `workflow_dispatch` gives you manual control.
