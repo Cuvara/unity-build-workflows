@@ -1,5 +1,14 @@
 # Discord Build Delivery — Design Plan
 
+> ## ⚠️ Superseded
+>
+> A delivery plan, now implemented. See
+> [DISCORD_NOTIFICATIONS.md](DISCORD_NOTIFICATIONS.md) for what actually ships.
+>
+> Kept for the reasoning it records, not as instructions. For how the pipeline
+> works today read [PIPELINE_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md); to set
+> a project up read [CONSUMER_SETUP.md](CONSUMER_SETUP.md).
+
 > **Status:** DESIGN — published by workflow-architect for implementation engineers
 > **Branch:** `feature/explicit-platform-jobs`
 > **Date:** 2026-06-30
