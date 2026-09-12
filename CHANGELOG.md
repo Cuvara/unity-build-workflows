@@ -10,6 +10,47 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+Staged as the next **major**. The release layer arrived — `Build / Release`
+produces an immutable Release Set, and promotion publishes those exact bytes
+without rebuilding — and a handful of inputs that never did anything were
+removed along the way.
+
+### Migrating from v2.x
+
+**1. Install the numbered entry workflows.** The single `unity-build.yml`
+caller still works and reaches only the build half: no release layer, no
+immutable artifact boundary, no platform capability model. The numbered set
+(`01-ci`, `10-build-development`, `11-build-release`, `20`–`24`) is the current
+path — see [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md) step 2.
+
+**2. Stop passing removed inputs.** The three store promotion workflows dropped
+twelve build inputs each that nothing read, `unity-version` among them, and the
+release build form dropped `android-export`. A caller still passing one fails
+to resolve. The shipped templates are already correct; if you hand-wrote a
+caller, drop:
+
+| Removed | Why |
+|---|---|
+| `unity-version`, `project-path`, `build-config-path`, `image-*`, `workflow-*`, `integration-mode`, `toolkit-path` on `pipeline-{android,ios,webgl}-release.yml` | A promotion runs no Unity. They were `required: true` on a workflow that never builds |
+| `android-export` on the release form | The artifact follows the lifecycle: development → APK, release → signed AAB |
+| `bundle-id` on the iOS release form | Never read |
+
+**3. Promotion needs `source-run-id`.** Promotion pins one exact
+`Build / Release` run rather than resolving "the latest artifact with this
+name". `Build / Release`'s final report prints the ready-made command.
+
+**4. iOS promotes the IPA, not the Xcode project.** If you pinned
+`artifact-name: release-ios-xcodeproj`, change it to `release-ios-ipa`. The
+project is an intermediate a promotion cannot turn into anything installable.
+
+**5. Optional but recommended:** unset `ARTIFACT_RETENTION_DAYS` so retention
+tiers by purpose (release 90 days, staging 14, development 7, logs 7). A
+release artifact that expires can never be promoted again.
+
+**6. Nothing changes for the build lane itself.** Docker and native builds,
+`game-ci/unity-builder`, builder provenance, runner/engine selection and the
+Unity version SSOT are all untouched.
+
 ### Added
 
 - **iOS promotion validates the IPA it is about to publish.** Every other
@@ -205,6 +246,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   AXML reader and all three validators, against synthesised artifacts.
 
 ### Changed
+
+- **Documentation reorganised around what is current.** Thirty-seven documents
+  had accumulated across three architectures, and several taught the
+  pre-refactor setup as if it were the path — a reader following them ended up
+  with no release layer at all. `docs/README.md` is now an index that says which
+  documents are current, which are reference and which are superseded; the
+  superseded ones carry a banner naming their replacement rather than being
+  deleted, since the reasoning they record is worth keeping.
+- **`PLATFORM_LIMITATIONS.md` said Windows was unsupported.** It contradicted
+  `PLATFORM_MATRIX.md` — which the README calls the authoritative matrix — and
+  a real release build disproved it. The limit is the scripting backend, not
+  the platform: the Docker lane cross-compiles Windows with Mono, and IL2CPP
+  needs a self-hosted Windows runner because MSVC does not run in a Linux
+  container. ADR-002 keeps its original text with an amendment note; an ADR
+  records what was decided when, not what is true now.
+- **Version pinning advice pointed at `@v2`,** which predates the release
+  layer, the capability model and the immutable artifact boundary — so anyone
+  following it got the build half and none of the release half.
 
 - **The build trigger no longer asks what an artifact should be.** The release
   form offered APK-vs-AAB, which made `release + Android + apk` a configuration

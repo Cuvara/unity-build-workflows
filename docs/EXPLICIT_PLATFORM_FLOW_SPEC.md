@@ -1,5 +1,19 @@
 # Explicit Platform Flow — Interface Contract & Architecture Spec
 
+> ## ⚠️ Superseded
+>
+> This document describes the `feature/explicit-platform-jobs` flow, whose
+> premise — one hand-written job per platform, replacing the matrix — is no
+> longer how the pipeline works. The matrix came back deliberately: six
+> near-identical jobs each gated by `if:` rendered every unselected platform as
+> a greyed-out node, so an Android-only run advertised five platforms nobody
+> had asked for.
+>
+> It is kept for the reasoning it records, not as instructions. For how the
+> pipeline works today, read
+> [PIPELINE_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md); to set a project up,
+> read [CONSUMER_SETUP.md](CONSUMER_SETUP.md).
+
 > **Status:** DRAFT — published by workflow-architect for implementation engineers  
 > **Branch:** `feature/explicit-platform-jobs`  
 > **Unity version SSOT:** `ProjectSettings/ProjectVersion.txt` → `6000.0.26f1`  

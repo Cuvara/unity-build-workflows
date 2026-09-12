@@ -1,5 +1,10 @@
 # Architecture
 
+> **Scope.** This describes the toolkit's internals — layers, resolvers,
+> executors, the Docker lane. It predates the release layer and says nothing
+> about Release Sets, the immutable artifact boundary or promotion; for those
+> read [PIPELINE_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md).
+
 `unity-build-workflows` is a Docker-mandatory CI/CD platform for Unity games. All Unity operations run inside pinned, versioned Docker containers. The CI runner is an orchestrator only.
 
 ---

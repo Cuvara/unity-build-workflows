@@ -120,7 +120,7 @@ iOS builds run on the `macos-unity-xcode` executor (macOS runner + native Xcode)
 
 ## `windows` Object
 
-**Note:** Windows builds are unsupported by the Docker-only platform. The `windows` config section remains in the schema for projects using dedicated Windows pipelines.
+**Note:** the Docker lane builds Windows with the **Mono** scripting backend (a Linux container cannot produce IL2CPP Windows binaries — IL2CPP emits C++ that MSVC must compile). For IL2CPP, use a self-hosted Windows runner. See [PLATFORM_LIMITATIONS.md](PLATFORM_LIMITATIONS.md).
 
 | Field | Type | Default |
 |---|---|---|

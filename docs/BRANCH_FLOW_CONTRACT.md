@@ -22,7 +22,8 @@ is set, appends there too. Never prints secrets.
 | `IN_RUN_TESTS` | dispatch input `run-tests` (true/false) |
 | `IN_TEST_MODE` | dispatch input `test-mode` |
 | `IN_BUILD_ADDRESSABLES` | dispatch input `build-addressables` (true/false) |
-| `IN_ANDROID_EXPORT` | dispatch input `android-export` (apk \| aab; default: apk) |
+| `IN_BUILD_TYPE` | the lifecycle: `development` \| `release`. Blank derives it from the environment (`production` → release). Everything about the artifact follows from this. |
+| `IN_ANDROID_EXPORT` | **Deprecated.** The Android output format is a consequence of the lifecycle, not an input. Kept for `workflow_call` compatibility: pass it and it is checked against the lifecycle, and the run **fails** if they disagree. Leave it blank. |
 
 ### Repository Variable inputs (env, optional)
 
@@ -88,7 +89,8 @@ the full legacy → new migration table.
 | `build-linuxserver` | true \| false |
 | `build-windows64` | true \| false  (docker lane: Mono scripting backend only; IL2CPP requires self-hosted-windows) |
 | `build-ios` | true \| false  (only manual platform==iOS; never automatic) |
-| `android-export-type` | `apk` \| `aab` — `push-release` always emits `aab`; `workflow_dispatch` uses `IN_ANDROID_EXPORT` (default `apk`); all other flows emit `apk` |
+| `build-type` | `development` \| `release` — the lifecycle, resolved once here and read by everything downstream |
+| `android-export-type` | `apk` \| `aab`, **derived from `build-type`**: release builds the App Bundle Google Play requires, development builds an installable APK. Not selectable — `release + apk` was a configuration that passed every gate and could not be published. |
 | `signing` | none \| android-release |
 | `platform-source` | default \| variable \| dispatch |
 | `define-symbols` | Extra Scripting Define Symbols (`';'`-joined) from the branch's `UNITY_*_DEFINE_SYMBOLS` (or legacy `*_DEFINE_SYMBOLS`) variable, or `IN_DEFINE_SYMBOLS` for manual dispatch; **empty** when unset. Applied additively to `ProjectSettings.asset` before the build by `apply_define_symbols.sh`. |
