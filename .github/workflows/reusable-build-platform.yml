@@ -176,9 +176,22 @@ on:
         type: string
 
       artifact-retention-days:
-        description: Days to retain uploaded build artifacts.
+        description: >-
+          Days to retain the build artifact and its manifest. For a release
+          build this is the promotion window: once these expire,
+          `actions/download-artifact` cannot fetch them and the Release Set can
+          never be promoted again.
         required: false
         default: 14
+        type: number
+
+      log-retention-days:
+        description: >-
+          Days to retain logs and per-platform result files. Diagnostics for
+          the run that produced them — nothing downstream reads them, so they
+          never need the artifact's lifetime.
+        required: false
+        default: 7
         type: number
 
       # ── Grouped-config additions (backward compatible; defaults preserve today) ─
@@ -1343,7 +1356,7 @@ jobs:
             Editor-addressables-pre.log
             Editor-activate.log
           if-no-files-found: ignore
-          retention-days: ${{ inputs.artifact-retention-days }}
+          retention-days: ${{ inputs.log-retention-days }}
 
       # ── Step 13: Set job outputs (always) ─────────────────────────────────
       # Examines build step outcomes to produce a canonical result string:
@@ -1433,4 +1446,4 @@ jobs:
           name: pipeline-result-build-${{ inputs.platform }}
           path: pipeline-results/
           if-no-files-found: warn
-          retention-days: ${{ inputs.artifact-retention-days }}
+          retention-days: ${{ inputs.log-retention-days }}
