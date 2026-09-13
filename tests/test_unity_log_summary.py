@@ -110,3 +110,36 @@ def test_the_build_lane_runs_it():
             / "reusable-build-platform.yml").read_text()
     assert "summarise_unity_log.py" in lane
     assert "always()" in lane.split("Summarise the Unity log")[1][:200]
+
+
+def test_the_report_job_may_read_other_jobs_logs():
+    """Reading another job's log is an `actions: read` operation. Without it
+    the API returns 403, the job list comes back empty, and the summary says
+    "no build jobs" — which reads like there were none to summarise. That is
+    what the first runtime run reported."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text())
+    permissions = workflow["jobs"]["final-report"].get("permissions") or {}
+    assert permissions.get("actions") == "read", permissions
+
+
+def test_the_callers_grant_that_permission():
+    """A called workflow's permissions are capped by the caller's, so
+    declaring it in the reusable workflow alone achieves nothing."""
+    import yaml
+
+    for name in ("consumer-01-ci", "consumer-10-build-development",
+                 "consumer-11-build-release"):
+        template = yaml.safe_load(
+            (REPO_ROOT / "templates" / f"{name}.yml").read_text())
+        job = next(iter(template["jobs"].values()))
+        permissions = job.get("permissions") or {}
+        assert permissions.get("actions") == "read", f"{name}: {permissions}"
+
+
+def test_an_unreadable_job_list_is_reported_as_a_problem():
+    body = (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text()
+    assert "actions: read" in body
+    assert "::warning::Could not list this run's build jobs" in body
