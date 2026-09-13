@@ -270,7 +270,9 @@ inputs:
   artifact-dir:
     description: |
       Local directory containing downloaded build artifacts.
-      Expected layout: <artifact-dir>/unity-build-<Platform>/ subdirs,
+      Expected layout: <artifact-dir>/<artifact-name>/ subdirs — the name comes
+      from platform-diagnostics; <artifact-dir>/unity-build-<Platform>/ is the
+      pre-build-type fallback,
       as produced by actions/download-artifact@v4 with merge-multiple: false.
     required: false
     default: './artifacts'
@@ -376,10 +378,11 @@ runs:
         fi
 
         # ── Step 3b: Parse platform-diagnostics ──────────────────────────────
-        # Format: "Platform=errors,warnings,logsArtifactId,binaryArtifactId"
-        # Four comma-separated fields; trailing fields may be empty.
+        # Format: "Platform=errors,warnings,logsArtifactId,binaryArtifactId,artifactName"
+        # Five comma-separated fields; trailing fields may be empty. The fifth
+        # is newer than the rest, so its absence falls back to the old guess.
         # Uses bash 4+ associative arrays (always available on ubuntu-latest).
-        declare -A _PLAT_ERR _PLAT_WARN _PLAT_LOGID _PLAT_BINID
+        declare -A _PLAT_ERR _PLAT_WARN _PLAT_LOGID _PLAT_BINID _PLAT_ARTNAME
         if [ -n "${INPUT_PLATFORM_DIAGNOSTICS:-}" ]; then
           while IFS='=' read -r _dp _dv || [ -n "${_dp}" ]; do
             _dp="$(printf '%s' "${_dp}" | tr -d '[:space:]')"
@@ -388,6 +391,7 @@ runs:
             _PLAT_WARN["${_dp}"]="$( printf '%s' "${_dv}" | cut -d',' -f2 | tr -d '[:space:]')"
             _PLAT_LOGID["${_dp}"]="$(printf '%s' "${_dv}" | cut -d',' -f3 | tr -d '[:space:]')"
             _PLAT_BINID["${_dp}"]="$(printf '%s' "${_dv}" | cut -d',' -f4 | tr -d '[:space:]')"
+            _PLAT_ARTNAME["${_dp}"]="$(printf '%s' "${_dv}" | cut -d',' -f5 | tr -d '[:space:]')"
           done <<< "${INPUT_PLATFORM_DIAGNOSTICS}"
         fi
 
@@ -448,7 +452,16 @@ runs:
           fi
 
           if [ "${RESULT}" = "success" ]; then
-            ARTIFACT_SUBDIR="${INPUT_ARTIFACT_DIR:-./artifacts}/unity-build-${PLAT}"
+            # Named by the pipeline (development-android-apk, release-webgl…).
+            # The old hardcoded `unity-build-<Platform>` stopped matching when
+            # artifacts gained a build-type prefix, and the mismatch was silent:
+            # no directory, no zip, no attachment, just a link.
+            _ART_NAME="${_PLAT_ARTNAME[${PLAT}]:-}"
+            if [ -n "${_ART_NAME}" ]; then
+              ARTIFACT_SUBDIR="${INPUT_ARTIFACT_DIR:-./artifacts}/${_ART_NAME}"
+            else
+              ARTIFACT_SUBDIR="${INPUT_ARTIFACT_DIR:-./artifacts}/unity-build-${PLAT}"
+            fi
             ZIP_PATH="/tmp/unity-build-${PLAT}-$$.zip"
             ATTACHED=0
 

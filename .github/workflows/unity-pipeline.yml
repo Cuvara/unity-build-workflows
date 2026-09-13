@@ -1784,16 +1784,31 @@ jobs:
               w(f"  {'':<14} {done}/{len(builds)} platforms")
               w("```")
               w("")
-              w("| Platform | Result | Type | Size | Duration | Artifact |")
+              w("| Platform | Result | Type | Size | Duration | Errors | Warnings | Artifact |")
               w("|---|---|---|---|---|---|")
               addr = env.get("R_ADDR", "")
               w(f"| Addressables | {emoji(addr)} `{addr or 'no result'}` | — | — | — | "
                 f"`{build_type}-addressables` |")
               for platform, row in sorted(builds.items()):
                   result = row.get("result", "")
+                  errs = int(row.get("errorCount") or 0)
+                  warns = int(row.get("warningCount") or 0)
                   w(f"| {platform} | {emoji(result)} `{result or 'no result'}` | "
                     f"`{row.get('artifactType') or '—'}` | {mib(row.get('artifactSizeBytes'))} | "
-                    f"{dur(row.get('durationSeconds'))} | `{row.get('artifactName') or '—'}` |")
+                    f"{dur(row.get('durationSeconds'))} | "
+                    f"{'**' + str(errs) + '**' if errs else '0'} | {warns} | "
+                    f"`{row.get('artifactName') or '—'}` |")
+              # A count tells you something is wrong; the message tells you
+              # what. Stage 07 is where someone looks after a red run, so the
+              # first error belongs here rather than in a log artifact.
+              failed_with_reason = [(p, r) for p, r in sorted(builds.items())
+                                    if r.get("firstError")]
+              if failed_with_reason:
+                  w("")
+                  w("**First error per platform**")
+                  w("")
+                  for platform, row in failed_with_reason:
+                      w(f"- **{platform}** — {row['firstError']}")
           else:
               w("_No platform build ran._")
           w("")
@@ -2079,7 +2094,13 @@ jobs:
               | grep "^${ART} " \
               | awk '{print $2}' | head -1) || binid=""
 
-            DIAG="${DIAG}${P}=${errors},${warnings},${logsid},${binid}"$'\n'
+            # The artifact NAME travels too. Discord used to look for
+            # ./artifacts/unity-build-<Platform>/ — the pre-build-type naming —
+            # so the directory never matched, nothing was ever zipped, and
+            # every platform silently fell back to a link. A build small enough
+            # to attach was still posted as a URL nobody outside the repo can
+            # open.
+            DIAG="${DIAG}${P}=${errors},${warnings},${logsid},${binid},${ART}"$'\n'
             TOTAL_ERRORS=$(( TOTAL_ERRORS + errors ))
             TOTAL_WARNINGS=$(( TOTAL_WARNINGS + warnings ))
           done

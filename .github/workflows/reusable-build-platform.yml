@@ -304,6 +304,15 @@ on:
           Convention: unity-build-<Platform> (e.g. unity-build-Android).
         value: ${{ jobs.build.outputs.artifact-name }}
 
+      artifact-url:
+        description: |
+          Direct download URL for the uploaded artifact. Starts the download
+          instead of opening the run page — but it is a GitHub artifact, so it
+          still requires a signed-in account with access to the repository.
+          A link anyone can open needs a real file host; see
+          docs/BUILD_DELIVERY.md.
+        value: ${{ jobs.build.outputs.artifact-url }}
+
       unity-version-used:
         description: Exact Unity version string used for this build.
         value: ${{ jobs.build.outputs.unity-version-used }}
@@ -354,6 +363,7 @@ jobs:
 
     outputs:
       result:                 ${{ steps.set-outputs.outputs.result }}
+      artifact-url:           ${{ steps.set-outputs.outputs.artifact-url }}
       artifact-name:          ${{ steps.set-outputs.outputs.artifact-name }}
       unity-version-used:     ${{ steps.set-outputs.outputs.unity-version-used }}
       build-duration-seconds: ${{ steps.set-outputs.outputs.build-duration-seconds }}
@@ -1309,6 +1319,7 @@ jobs:
       # Skipped on blocked (iOS without macOS runner) and for Addressables platform.
       # if-no-files-found: warn — missing binary is a build failure already caught by exit code.
       - name: Upload build artifact
+        id: upload
         if: ${{ inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' }}
         # On self-hosted runners the build output already persists on the
         # operator's own machine (build/), so a failed upload (e.g. GitHub
@@ -1338,6 +1349,45 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
+
+      # ── Step 11b: Surface what the log says ────────────────────────────────
+      # A failed Unity build used to say "Process completed with exit code 1"
+      # and leave the reason inside an 8 MB Editor.log in an artifact. The one
+      # `error CS0103` line that explains it was findable only by downloading a
+      # zip and searching it, while the run page — where everyone looks first —
+      # said nothing. This puts the errors on the run page as annotations and
+      # into the job summary, and it runs on success too, because a build that
+      # succeeded with two hundred new warnings is worth knowing about.
+      - name: Summarise the Unity log
+        if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
+        continue-on-error: true
+        id: unity-log
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ ! -f ".toolkit/scripts/common/summarise_unity_log.py" ]; then
+            echo "::warning::toolkit checkout unavailable — skipping the log summary"
+            exit 0
+          fi
+          python3 .toolkit/scripts/common/summarise_unity_log.py \
+            "${{ inputs.project-path }}/Editor.log" \
+            "${{ inputs.project-path }}/Library/Editor.log" \
+            Editor.log \
+            Editor-addressables-pre.log \
+            --search-root "${{ inputs.project-path }}/Logs" \
+            --platform "${{ inputs.platform }}" \
+            --report "${RUNNER_TEMP}/unity-log-report.json" \
+            --github-output
+
+      - name: Upload the log summary
+        if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact-type.outputs.artifact-name }}-log-summary
+          path: ${{ runner.temp }}/unity-log-report.json
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.log-retention-days }}
 
       # ── Step 12: Upload logs artifact (always — diagnose failures) ─────────
       # Collects Editor.log and any BuildReport files from common locations.
@@ -1423,7 +1473,11 @@ jobs:
           # arbitrary leg. Write the result to a file the report stage can
           # collect instead, so stage 07 can still say which platform failed.
           mkdir -p pipeline-results
-          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s"}\n' \
+          # Error and warning counts travel with the result so stage 07 can say
+          # "Android failed — CS0103 in Player.cs:42" instead of "Android
+          # failed", and so a build that succeeded with two hundred new
+          # warnings is visible without opening anything.
+          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s","errorCount":"%s","warningCount":"%s","firstError":"%s","artifactUrl":"%s"}\n' \
             "${{ inputs.platform }}" \
             "${RESULT}" \
             "${{ steps.artifact-type.outputs.artifact-type }}" \
@@ -1431,7 +1485,22 @@ jobs:
             "${{ steps.manifest.outputs.artifact-size-bytes }}" \
             "${BUILD_DURATION:-0}" \
             "${CONFIGURATION}" \
+            "${{ steps.unity-log.outputs.error-count || '0' }}" \
+            "${{ steps.unity-log.outputs.warning-count || '0' }}" \
+            "$(printf '%s' "${{ steps.unity-log.outputs.first-error }}" | tr -d '"\\' | cut -c1-160)" \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${{ steps.upload.outputs.artifact-id }}" \
             > "pipeline-results/build-${{ inputs.platform }}.json"
+
+          # A link that starts the download, rather than one that opens a page
+          # and leaves you to find the file. actions/upload-artifact@v4 hands
+          # back the artifact id, and /artifacts/<id> is the endpoint the
+          # browser's own download button uses.
+          ARTIFACT_ID="${{ steps.upload.outputs.artifact-id }}"
+          if [ -n "${ARTIFACT_ID}" ]; then
+            ARTIFACT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${ARTIFACT_ID}"
+            echo "artifact-url=${ARTIFACT_URL}" >> "$GITHUB_OUTPUT"
+            echo "[artifact] ${ARTIFACT_URL}"
+          fi
 
       # ── Step 14: Upload this platform's result for the report stage ───────
       # MUST run after `Set job outputs` — that step writes the file. Placed

@@ -10,7 +10,34 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Unity errors and warnings reach the run page.** A failed build said
+  "Process completed with exit code 1" and left the reason inside an 8 MB
+  `Editor.log` in an artifact — one `error CS0103` line among a hundred
+  thousand, findable only by downloading a zip and searching it, while the run
+  page said nothing. `scripts/common/summarise_unity_log.py` now parses the log
+  and emits GitHub **annotations** (inline on the file and line for compiler
+  diagnostics), a job-summary table, and a JSON report. It runs on success too:
+  a build that passed with two hundred new warnings is worth knowing about.
+  Matching is deliberately narrow — Unity logs say "error" in hundreds of
+  benign places, and noisy annotations are annotations people stop reading.
+- **Stage 07 reports error and warning counts per platform**, plus the first
+  error message, so a red run says *why* without opening anything.
+
+### Fixed
+
+- **Discord never attached a build, whatever its size.** The action looked for
+  `./artifacts/unity-build-<Platform>/`, the naming from before artifacts
+  gained a build-type prefix. No directory, no zip, no attachment, no error —
+  every platform silently fell back to a link, including builds small enough to
+  post as a file. The artifact name now travels with the per-platform
+  diagnostics; the old path stays as a fallback for callers on an older
+  pipeline.
+- **The build lane exposes `artifact-url`** — the `/artifacts/<id>` endpoint the
+  browser's own download button uses, so the link starts a download instead of
+  opening a page to hunt through. It is still a GitHub artifact and still needs
+  a signed-in account with repository access.
 
 ---
 
