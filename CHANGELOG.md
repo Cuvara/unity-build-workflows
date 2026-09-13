@@ -10,6 +10,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+Nothing yet.
+
+---
+
+## [3.1.3] — 2026-09-13
+
 ### Removed
 
 - **The API-based log summariser, which could not work.** Stage 07 fetched each
