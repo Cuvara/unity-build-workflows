@@ -10,7 +10,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The log summary read the wrong file, and said "clean" about it.** On the
+  game-ci lane Unity streams its log to the job console rather than writing
+  `Editor.log`, so the logs artifact contains only a shader-compiler log —
+  nothing to parse. The summariser found that file, found no errors in it, and
+  reported "No errors or warnings found in the Editor log", which is a
+  different statement from "I could not find the log" and the reason a summary
+  earns the right to be ignored. It now says which files it scanned and warns
+  when the Editor log is absent.
+- **Stage 07 fetches each build job's log through the API** and summarises
+  that, so the diagnostics come from where Unity actually put them. One place,
+  every lane, no per-platform plumbing.
 
 ---
 

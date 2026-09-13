@@ -1585,6 +1585,61 @@ jobs:
           path: pipeline-results
           merge-multiple: true
 
+      - name: Checkout toolkit
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ needs.resolve-config.outputs.toolkit-ref }}
+          path: .toolkit
+
+      # ── Unity diagnostics, from where Unity actually put them ──────────────
+      # On the game-ci lane Unity streams its log to the job console instead of
+      # writing Editor.log, so the logs artifact holds only a shader-compiler
+      # file and there is nothing on disk to parse. The build output is still
+      # there — in the job's own log — so this fetches each build job's log
+      # through the API and summarises that. One place, every lane, no
+      # per-platform plumbing.
+      - name: Summarise Unity diagnostics
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SUMMARISER=".toolkit/scripts/common/summarise_unity_log.py"
+          if [ ! -f "${SUMMARISER}" ]; then
+            echo "::warning::toolkit checkout unavailable — skipping diagnostics"
+            exit 0
+          fi
+
+          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --paginate -q '.jobs[]|select(.name|test("/ 0(3|3b) /"))|"\(.id) \(.name)"' \
+            > jobs.txt 2>/dev/null || true
+
+          if [ ! -s jobs.txt ]; then
+            echo "No build jobs found to summarise."
+            exit 0
+          fi
+
+          while read -r JOB_ID JOB_NAME; do
+            [ -n "${JOB_ID}" ] || continue
+            # A job that is still running returns what it has so far, which is
+            # everything we need: the build step finished before this one began.
+            if ! gh api "repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" \
+                 > "job-${JOB_ID}.log" 2>/dev/null; then
+              echo "::warning::Could not fetch the log for ${JOB_NAME}"
+              continue
+            fi
+            python3 "${SUMMARISER}" "job-${JOB_ID}.log" \
+              --platform "${JOB_NAME}" \
+              --assume-complete \
+              --annotate-errors 15 \
+              --annotate-warnings 8 || true
+          done < jobs.txt
+
       - name: Write step summary
         id: report
         shell: bash
