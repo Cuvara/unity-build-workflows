@@ -10,7 +10,16 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The diagnostics summary reported "no build jobs" on every run.** Reading
+  another job's log is an `actions: read` operation, and the default workflow
+  token does not have it — the API returned 403, the job list came back empty,
+  and the message read as though there had been nothing to summarise. The
+  report job declares the permission, the entry templates grant it (a called
+  workflow's permissions are capped by its caller's, so declaring it in one
+  place alone achieves nothing), and a failure now says what it probably is
+  instead of looking like a quiet success.
 
 ---
 
