@@ -185,6 +185,17 @@ on:
         default: 14
         type: number
 
+      build-delivery:
+        description: >-
+          Where a finished build is copied so people can download it by
+          clicking a link: `r2` (Cloudflare R2), `local` (a directory on a
+          self-hosted runner that your web server serves), or `none`.
+          A GitHub artifact link requires a signed-in account with repository
+          access, so it is not an answer for anyone else.
+        required: false
+        default: none
+        type: string
+
       log-retention-days:
         description: >-
           Days to retain logs and per-platform result files. Diagnostics for
@@ -283,6 +294,15 @@ on:
           Private SSH key used to fetch submodules when submodule-auth is 'ssh'.
           Optional — when unset, the runner's own SSH credentials are used, which
           is usually what a self-hosted runner already has.
+        required: false
+      R2_ACCESS_KEY_ID:
+        description: >-
+          Cloudflare R2 access key, when build-delivery is `r2`. Optional here
+          and checked at the point of use: a project that does not publish
+          builds must still be able to build them.
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        description: Cloudflare R2 secret key, when build-delivery is `r2`.
         required: false
       UNITY_EMAIL:
         description: Unity account email. Required for docker lane activation.
@@ -1350,6 +1370,43 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
 
+      # ── Step 11a: Publish the build where a person can download it ─────────
+      # A GitHub artifact link 404s for anyone not signed in with repository
+      # access — on a public repo too — so the link in a Discord message is
+      # useless to exactly the people who need it. This copies the build to a
+      # host that serves it. Off by default; nothing changes until a project
+      # sets BUILD_DELIVERY.
+      - name: Publish the build for download
+        id: publish
+        if: ${{ always() && inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
+        env:
+          BUILD_DELIVERY:         ${{ inputs.build-delivery }}
+          # Public ids, safe to log.
+          R2_ACCOUNT_ID:          ${{ vars.R2_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID:  ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET:              ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_BASE_URL:     ${{ vars.R2_PUBLIC_BASE_URL }}
+          BUILD_PUBLISH_DIR:      ${{ vars.BUILD_PUBLISH_DIR }}
+          BUILD_PUBLISH_BASE_URL: ${{ vars.BUILD_PUBLISH_BASE_URL }}
+          # Credentials, never printed by the script.
+          R2_ACCESS_KEY_ID:       ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY:   ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ ! -f ".toolkit/scripts/common/publish_build.py" ]; then
+            echo "::warning::toolkit checkout unavailable — skipping delivery"
+            exit 0
+          fi
+          ARTIFACT="${{ steps.manifest.outputs.artifact-path }}"
+          # Unguessable enough that a public bucket is not a directory listing:
+          # branch, run number and the commit the build came from.
+          KEY="${GITHUB_REF_NAME//\//-}/${GITHUB_RUN_NUMBER}/${GITHUB_SHA:0:7}/$(basename "${ARTIFACT}")"
+          python3 .toolkit/scripts/common/publish_build.py \
+            --file "${ARTIFACT}" \
+            --key  "${KEY}" \
+            --github-output
+
       # ── Step 11b: Surface what the log says ────────────────────────────────
       # A failed Unity build used to say "Process completed with exit code 1"
       # and leave the reason inside an 8 MB Editor.log in an artifact. The one
@@ -1477,7 +1534,7 @@ jobs:
           # "Android failed — CS0103 in Player.cs:42" instead of "Android
           # failed", and so a build that succeeded with two hundred new
           # warnings is visible without opening anything.
-          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s","errorCount":"%s","warningCount":"%s","firstError":"%s","artifactUrl":"%s"}\n' \
+          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s","errorCount":"%s","warningCount":"%s","firstError":"%s","artifactUrl":"%s","downloadUrl":"%s"}\n' \
             "${{ inputs.platform }}" \
             "${RESULT}" \
             "${{ steps.artifact-type.outputs.artifact-type }}" \
@@ -1489,6 +1546,7 @@ jobs:
             "${{ steps.unity-log.outputs.warning-count || '0' }}" \
             "$(printf '%s' "${{ steps.unity-log.outputs.first-error }}" | tr -d '"\\' | cut -c1-160)" \
             "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${{ steps.upload.outputs.artifact-id }}" \
+            "${{ steps.publish.outputs.download-url }}" \
             > "pipeline-results/build-${{ inputs.platform }}.json"
 
           # A link that starts the download, rather than one that opens a page

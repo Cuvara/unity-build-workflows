@@ -292,6 +292,12 @@ gh variable set DISCORD_THREAD_ID  --repo "${REPO}" --body "1234567890123456789"
 # gh variable set ARTIFACT_RETENTION_DAYS --repo "${REPO}" --body "90"
 ```
 
+**Build delivery** (optional) decides where a finished build is copied so
+people can download it by clicking a link. A GitHub artifact URL 404s for
+anyone not signed in with repository access, so without this the link in a
+Discord message is unusable by testers. Set `BUILD_DELIVERY` to `r2` or
+`local` — see [BUILD\_DELIVERY.md](BUILD_DELIVERY.md).
+
 **Steam** (only if you ship Windows or Linux through it) is configured
 separately, because a distribution provider is not a platform capability: a
 project builds desktop artifacts with no Steam account at all. See
