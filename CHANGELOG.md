@@ -10,7 +10,20 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
-Nothing yet.
+### Removed
+
+- **The API-based log summariser, which could not work.** Stage 07 fetched each
+  build job's log through the API to summarise it. `GITHUB_TOKEN` cannot
+  download a job's log while the run is still in progress — the endpoint 404s
+  until the run completes — so every build ended with three
+  "Could not fetch the log" warnings and no summary. Proven on two clean runs.
+  Removed rather than left in place: a mechanism that always warns teaches
+  people to ignore warnings.
+
+  The file-based summariser stays and works wherever Unity writes a log — the
+  native and self-hosted lanes, the addressables pre-pass, licence activation.
+  On the game-ci docker lane Unity streams to the job console and writes no
+  file, and the summary now says exactly that instead of reporting "no errors".
 
 ---
 
