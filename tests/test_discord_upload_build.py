@@ -393,3 +393,32 @@ class TestActionTextLevel:
         assert not wrong, (
             f"result-* inputs with unexpected defaults: {wrong}"
         )
+
+
+# ---------------------------------------------------------------------------
+# The attachment path
+# ---------------------------------------------------------------------------
+# Discord posted a link for every build, including ones small enough to attach.
+# The cause was not the size logic: the action looked for
+# ./artifacts/unity-build-<Platform>/, which stopped existing when artifacts
+# gained a build-type prefix. No directory, no zip, no attachment, no error —
+# just a URL nobody outside the repository can open.
+
+def test_the_attachment_directory_comes_from_the_artifact_name():
+    body = (REPO_ROOT / ".github" / "actions" / "discord-upload-build"
+            / "action.yml").read_text()
+    assert '_PLAT_ARTNAME' in body, "the artifact name is never parsed"
+    assert 'ARTIFACT_SUBDIR="${INPUT_ARTIFACT_DIR:-./artifacts}/${_ART_NAME}"' in body
+
+
+def test_the_old_naming_survives_as_a_fallback():
+    """A caller on an older pipeline still passes four fields."""
+    body = (REPO_ROOT / ".github" / "actions" / "discord-upload-build"
+            / "action.yml").read_text()
+    assert 'unity-build-${PLAT}' in body, "no fallback for the four-field form"
+
+
+def test_the_pipeline_supplies_the_artifact_name():
+    """Both halves, or the parse finds an empty field and falls back forever."""
+    body = (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text()
+    assert '${logsid},${binid},${ART}' in body
