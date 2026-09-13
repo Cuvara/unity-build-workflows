@@ -10,6 +10,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+Nothing yet.
+
+---
+
+## [3.2.0] — 2026-09-14
+
 ### Added
 
 - **Build delivery: a download link that works for people without a GitHub
