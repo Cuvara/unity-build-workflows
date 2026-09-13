@@ -198,6 +198,15 @@ on:
           self-hosted runner usually already has.
         required: false
 
+      R2_ACCESS_KEY_ID:
+        description: >-
+          Cloudflare R2 access key, used only when BUILD_DELIVERY=r2. Optional:
+          a project that does not publish builds still builds them.
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        description: Cloudflare R2 secret key, used only when BUILD_DELIVERY=r2.
+        required: false
+
 # The pipeline's stages, declared once. Every job renders this same ladder with
 # itself marked, so the run summary grows into a progress view while the run is
 # still going — GitHub draws no progress on a workflow node, and the graph
@@ -1052,6 +1061,7 @@ jobs:
       cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
       log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
+      build-delivery:          ${{ vars.BUILD_DELIVERY || 'none' }}
       artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
       build-method:            ${{ needs.resolve-config.outputs.build-method }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
@@ -1062,6 +1072,8 @@ jobs:
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
       SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 03 — BUILD ARTIFACTS  (one matrix job, not one job per platform)
@@ -1118,6 +1130,7 @@ jobs:
       cache-nuget:             ${{ fromJSON(needs.resolve-config.outputs.cache-nuget) }}
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
       log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
+      build-delivery:          ${{ vars.BUILD_DELIVERY || 'none' }}
       artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
       build-method:            ${{ needs.resolve-config.outputs.build-method }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
@@ -1128,6 +1141,8 @@ jobs:
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
       SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 03b — iOS PRODUCTION SIGNING  (release builds only)
@@ -1919,6 +1934,13 @@ jobs:
           pattern: ${{ needs.resolve-config.outputs.build-type }}-*
           path: ./artifacts
 
+      - name: Download platform results
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pipeline-result-build-*
+          path: ./platform-results
+
       - name: Derive overall status
         id: status
         shell: bash
@@ -2100,7 +2122,14 @@ jobs:
             # every platform silently fell back to a link. A build small enough
             # to attach was still posted as a URL nobody outside the repo can
             # open.
-            DIAG="${DIAG}${P}=${errors},${warnings},${logsid},${binid},${ART}"$'\n'
+            # A link a person can actually open, when the project publishes
+            # builds somewhere. Empty otherwise, and Discord falls back to the
+            # artifact URL — which only works for someone already signed in.
+            DL=$(find ./platform-results -name "build-${P}.json" -print 2>/dev/null \
+              | head -1 | xargs -r cat 2>/dev/null \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("downloadUrl",""))' 2>/dev/null) || DL=""
+
+            DIAG="${DIAG}${P}=${errors},${warnings},${logsid},${binid},${ART},${DL}"$'\n'
             TOTAL_ERRORS=$(( TOTAL_ERRORS + errors ))
             TOTAL_WARNINGS=$(( TOTAL_WARNINGS + warnings ))
           done

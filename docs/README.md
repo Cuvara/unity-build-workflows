@@ -36,6 +36,7 @@ drift apart quietly.
 
 | Document | Covers |
 |---|---|
+| [BUILD_DELIVERY.md](BUILD_DELIVERY.md) | Getting a finished build to a person: Cloudflare R2, or a directory on your own runner |
 | [STEAM_DISTRIBUTION.md](STEAM_DISTRIBUTION.md) | Windows and Linux to Steam; configuration, and why staging cannot mutate the artifact |
 | [IOS_RELEASE.md](IOS_RELEASE.md) · [IOS_SIGNING.md](IOS_SIGNING.md) · [IOS_VERIFICATION.md](IOS_VERIFICATION.md) | The iOS lane, signing before the immutable boundary, and verification |
 | [GITHUB_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md) | Environment protection, approvals, deployment hygiene |

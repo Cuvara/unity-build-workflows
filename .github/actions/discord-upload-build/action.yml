@@ -378,11 +378,13 @@ runs:
         fi
 
         # ── Step 3b: Parse platform-diagnostics ──────────────────────────────
-        # Format: "Platform=errors,warnings,logsArtifactId,binaryArtifactId,artifactName"
-        # Five comma-separated fields; trailing fields may be empty. The fifth
-        # is newer than the rest, so its absence falls back to the old guess.
+        # Format: "Platform=errors,warnings,logsArtifactId,binaryArtifactId,artifactName,downloadUrl"
+        # Six comma-separated fields; trailing fields may be empty. The last
+        # two are newer than the rest, and their absence falls back to the old
+        # behaviour: the artifact name is guessed, and the link is the GitHub
+        # artifact URL that only a signed-in collaborator can open.
         # Uses bash 4+ associative arrays (always available on ubuntu-latest).
-        declare -A _PLAT_ERR _PLAT_WARN _PLAT_LOGID _PLAT_BINID _PLAT_ARTNAME
+        declare -A _PLAT_ERR _PLAT_WARN _PLAT_LOGID _PLAT_BINID _PLAT_ARTNAME _PLAT_DLURL
         if [ -n "${INPUT_PLATFORM_DIAGNOSTICS:-}" ]; then
           while IFS='=' read -r _dp _dv || [ -n "${_dp}" ]; do
             _dp="$(printf '%s' "${_dp}" | tr -d '[:space:]')"
@@ -392,6 +394,7 @@ runs:
             _PLAT_LOGID["${_dp}"]="$(printf '%s' "${_dv}" | cut -d',' -f3 | tr -d '[:space:]')"
             _PLAT_BINID["${_dp}"]="$(printf '%s' "${_dv}" | cut -d',' -f4 | tr -d '[:space:]')"
             _PLAT_ARTNAME["${_dp}"]="$(printf '%s' "${_dv}" | cut -d',' -f5 | tr -d '[:space:]')"
+            _PLAT_DLURL["${_dp}"]="$(printf '%s' "${_dv}" | cut -d',' -f6- | tr -d '[:space:]')"
           done <<< "${INPUT_PLATFORM_DIAGNOSTICS}"
         fi
 
@@ -445,9 +448,14 @@ runs:
           _P_LOGID="${_PLAT_LOGID[${PLAT}]:-}"
           _P_BINID="${_PLAT_BINID[${PLAT}]:-}"
 
-          # Build binary artifact download URL (used below and in diag suffix)
+          # The link to hand a person. A published build wins: a GitHub
+          # artifact URL 404s for anyone not signed in with repository access,
+          # which is most of the people a build notification is for.
+          _P_DLURL="${_PLAT_DLURL[${PLAT}]:-}"
           BIN_URL=""
-          if [ -n "${_P_BINID}" ] && [ -n "${RUN_ID}" ] && [ -n "${INPUT_REPOSITORY:-}" ]; then
+          if [ -n "${_P_DLURL}" ]; then
+            BIN_URL="${_P_DLURL}"
+          elif [ -n "${_P_BINID}" ] && [ -n "${RUN_ID}" ] && [ -n "${INPUT_REPOSITORY:-}" ]; then
             BIN_URL="https://github.com/${INPUT_REPOSITORY}/actions/runs/${RUN_ID}/artifacts/${_P_BINID}"
           fi
 
