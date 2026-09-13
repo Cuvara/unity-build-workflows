@@ -153,8 +153,21 @@ def annotate(items, severity, limit):
               f"see the uploaded logs artifact")
 
 
-def render(errors, warnings, platform, show):
+def render(errors, warnings, platform, show, scanned=(), saw_editor_log=True):
     lines = [f"### {platform} — Unity log", ""]
+    if not saw_editor_log:
+        # "No errors found" and "I could not find the log" are different
+        # statements, and reporting the second as the first is how a summary
+        # earns the right to be ignored.
+        lines += [
+            "⚠️ **No Unity Editor log was found**, so nothing could be checked. "
+            "On the game-ci lane Unity streams its log to the job console "
+            "rather than to a file; the console is where the errors are.",
+            "",
+            f"Scanned: {', '.join(str(p) for p in scanned) or 'nothing'}",
+            "",
+        ]
+        return "\n".join(lines)
     if not errors and not warnings:
         lines += ["No errors or warnings found in the Editor log.", ""]
         return "\n".join(lines)
@@ -190,6 +203,9 @@ def main(argv=None):
     parser.add_argument("--summary-items", type=int, default=15)
     parser.add_argument("--report", default="", help="Write a JSON report here")
     parser.add_argument("--github-output", action="store_true")
+    parser.add_argument("--assume-complete", action="store_true",
+                        help="The input IS the full build output (a job log, "
+                             "say), so do not warn about a missing Editor.log")
     args = parser.parse_args(argv)
 
     paths = [Path(p) for p in args.logs if Path(p).is_file()]
@@ -215,7 +231,17 @@ def main(argv=None):
     annotate(errors, "error", args.annotate_errors)
     annotate(warnings, "warning", args.annotate_warnings)
 
-    summary = render(errors, warnings, args.platform, args.summary_items)
+    # A shader-compiler log is not the Editor log. Finding only the former and
+    # announcing "no errors" is a lie of omission.
+    saw_editor_log = any(
+        "editor" in path.name.lower() or path.name.lower() == "unity.log"
+        for path in unique
+    ) or args.assume_complete
+    summary = render(errors, warnings, args.platform, args.summary_items,
+                     scanned=unique, saw_editor_log=saw_editor_log)
+    if not saw_editor_log:
+        print("::warning::No Unity Editor log found — the build output could not "
+              "be summarised. Errors, if any, are in the job console.")
     print(summary)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
