@@ -1576,6 +1576,12 @@ jobs:
       overall: ${{ steps.report.outputs.overall }}
       failed-stage: ${{ steps.report.outputs.failed-stage }}
       platform-summary: ${{ steps.report.outputs.platform-summary }}
+    # Reading another job's log is an `actions: read` operation. Without it
+    # the API returns 403, the query yields nothing, and the summary reports
+    # "no build jobs" — which reads like there were none.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Collect platform results
         continue-on-error: true
@@ -1620,7 +1626,10 @@ jobs:
             > jobs.txt 2>/dev/null || true
 
           if [ ! -s jobs.txt ]; then
-            echo "No build jobs found to summarise."
+            echo "::warning::Could not list this run's build jobs. The most "\
+                 "likely cause is a token without \`actions: read\` — the caller "\
+                 "workflow needs \`permissions: { actions: read }\` for the log "\
+                 "summary to work. Build diagnostics are unavailable for this run."
             exit 0
           fi
 
