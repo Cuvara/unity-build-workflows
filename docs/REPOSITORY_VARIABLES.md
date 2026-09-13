@@ -297,6 +297,9 @@ CACHE_NUGET_ENABLED=true
 | Variable | Default | Notes |
 |---|---|---|
 | `ARTIFACT_RETENTION_DAYS` | per build type | Positive integer. **Unset** the pipeline tiers it: release **90** days, staging 14, development 7 — a release artifact that expires can never be promoted, while a development one is disposable (I-002). Logs and reports always keep 7. Setting this is a decision and overrides every tier. |
+| `BUILD_DELIVERY` | `none` | Where a finished build is copied so people can download it: `r2`, `local`, or `none`. A GitHub artifact link 404s for anyone not signed in with repository access. See [BUILD_DELIVERY.md](BUILD_DELIVERY.md) |
+| `R2_BUCKET` · `R2_ACCOUNT_ID` · `R2_PUBLIC_BASE_URL` | — | Cloudflare R2 target, when `BUILD_DELIVERY=r2`. `R2_ACCOUNT_ID` falls back to `CLOUDFLARE_ACCOUNT_ID`. Secrets `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` carry the credentials |
+| `BUILD_PUBLISH_DIR` · `BUILD_PUBLISH_BASE_URL` | — | Directory and public base URL, when `BUILD_DELIVERY=local`. Self-hosted lane only — the file has to be on the machine that serves it |
 | `ARTIFACT_COMPRESSION` | `zip` | See [Known limitations](#known-limitations) — only `zip` is supported today. |
 
 ```

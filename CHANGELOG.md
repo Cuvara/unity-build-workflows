@@ -10,7 +10,35 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Build delivery: a download link that works for people without a GitHub
+  account.** An Actions artifact URL 404s for anyone not signed in with
+  repository access — on a public repo too — so the link in a build
+  notification was unusable by exactly the testers and artists it was for.
+  `BUILD_DELIVERY` chooses where a finished build is copied:
+
+  | Value | Where |
+  |---|---|
+  | `none` | default — nothing published, nothing changes |
+  | `r2` | Cloudflare R2 over the S3 API. Egress is free, which is the reason to prefer it |
+  | `local` | a directory on your self-hosted runner, served by your own web server |
+
+  Discord then links to that URL instead of the artifact. Objects are written
+  with `Content-Disposition: attachment` so the browser downloads rather than
+  displays, and the key is `<branch>/<run>/<sha>/<file>` so a public bucket is
+  not a directory listing.
+
+  SigV4 is signed with `hmac`/`hashlib` rather than shelling out to `aws-cli`,
+  which is absent on most self-hosted runners; the implementation is checked
+  against AWS's published test vector, because a signing bug produces a 403
+  that reads like a credentials problem.
+
+  Delivery never fails a build — a green build that could not be copied
+  somewhere is still green. Misconfiguration does fail: asking for `r2`
+  without credentials stops the step, because the alternative is a pipeline
+  that looks healthy and quietly delivers nothing. See
+  `docs/BUILD_DELIVERY.md`.
 
 ---
 
