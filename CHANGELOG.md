@@ -10,6 +10,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+Nothing yet.
+
+---
+
+## [3.1.0] — 2026-09-13
+
 ### Added
 
 - **Unity errors and warnings reach the run page.** A failed build said
