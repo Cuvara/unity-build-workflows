@@ -2094,14 +2094,14 @@ jobs:
             -q '.artifacts[]|"\(.name) \(.id)"' 2>/dev/null) || true
 
           # ── Per-platform scan ─────────────────────────────────────────────
-          # Artifacts are named <build-type>-<platform>-<artifact>, so the
-          # platform's own artifact name is discovered from the map rather than
-          # reconstructed — the artifact type is not knowable here.
+          # Artifacts are named {product}_{version}_{build}_{type}_{platform}_{artifact},
+          # so the platform's own artifact name is discovered from the map by
+          # matching the build-type and platform slug anywhere in the name.
           for P in Android WebGL Linux64 LinuxServer Windows64 iOS; do
             SLUG=$(printf '%s' "${P}" | tr '[:upper:]' '[:lower:]')
             ART=$(printf '%s\n' "${ARTIFACT_MAP}" \
               | awk '{print $1}' \
-              | grep -E "^${BUILD_TYPE}-${SLUG}-[a-z0-9]+$" | head -1) || ART=""
+              | grep -E "_${BUILD_TYPE}_${SLUG}(_[a-z0-9]+)?$" | head -1) || ART=""
             [ -z "${ART}" ] && continue
 
             LOG=$(find ./artifacts -path "*${ART}-logs*Editor.log" \
