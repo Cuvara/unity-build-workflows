@@ -10,6 +10,30 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+
+- **Discord thread/forum-post routing for `discord-notify`.** The `discord-notify`
+  composite action now reads `DISCORD_THREAD_ID` from the environment and appends
+  `?thread_id=<id>` to the webhook URL when set. Existing webhook-only
+  configurations require zero changes — the variable is optional and the action
+  falls back to the channel root when it is absent. Malformed thread IDs produce
+  a `::warning::` and fall back safely. The four workflows that call
+  `discord-notify` (`unity-build`, `unity-build-ios`, `unity-release`,
+  `unity-release-ios`) now pass `vars.DISCORD_THREAD_ID` through their job
+  environment. Documentation in `DISCORD_NOTIFICATIONS.md` previously described
+  this variable but the `discord-notify` action did not implement it — the
+  implementation and documentation are now consistent.
+
+### Changed
+
+- **`discord-upload-build` URL construction hardened.** The `?thread_id=` append
+  now uses `&thread_id=` when the webhook URL already contains a query string,
+  matching the same logic added to `discord-notify`.
+
+---
+
+## [5.7.0] — 2026-09-14
+
 ### Fixed
 
 - **The Addressables stage shipped no bundles, and said `size unknown` instead of

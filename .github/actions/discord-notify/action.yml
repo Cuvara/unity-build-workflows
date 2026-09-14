@@ -66,6 +66,30 @@ runs:
         # defence in case the value was set from a non-secret source in testing.)
         echo "::add-mask::${DISCORD_WEBHOOK_URL}"
 
+        # ── Thread routing — optional DISCORD_THREAD_ID ──────────────────────────
+        # When set, appends ?thread_id=<id> (or &thread_id=<id> if the URL
+        # already contains a query string) to route the message into a Discord
+        # thread or forum post.  The variable is NOT a secret — it is safe to
+        # log for diagnostics.
+        FINAL_WEBHOOK_URL="${DISCORD_WEBHOOK_URL}"
+        _THREAD_ID="${DISCORD_THREAD_ID:-}"
+        # Trim whitespace
+        _THREAD_ID="${_THREAD_ID#"${_THREAD_ID%%[![:space:]]*}"}"
+        _THREAD_ID="${_THREAD_ID%"${_THREAD_ID##*[![:space:]]}"}"
+
+        if [ -n "${_THREAD_ID}" ]; then
+          # Validate: Discord snowflake IDs are purely numeric (17-20 digits).
+          if ! printf '%s' "${_THREAD_ID}" | grep -qE '^[0-9]{17,20}$'; then
+            echo "::warning::Discord notify: DISCORD_THREAD_ID '${_THREAD_ID}' is not a valid snowflake (expected 17-20 digits) — posting to channel root instead."
+          else
+            # Append thread_id, respecting any existing query string.
+            case "${FINAL_WEBHOOK_URL}" in
+              *\?*) FINAL_WEBHOOK_URL="${FINAL_WEBHOOK_URL}&thread_id=${_THREAD_ID}" ;;
+              *)    FINAL_WEBHOOK_URL="${FINAL_WEBHOOK_URL}?thread_id=${_THREAD_ID}" ;;
+            esac
+          fi
+        fi
+
         # ── Build JSON payload via python3 -c (no heredoc; safe quoting) ─────────
         # All Python string literals use single-quotes so the outer bash
         # double-quoted string requires no escaping.  Context values come from
@@ -131,17 +155,27 @@ runs:
             --retry-delay 3 \
             -H "Content-Type: application/json" \
             --data-binary @- \
-            "${DISCORD_WEBHOOK_URL}" > "${_CODE_FILE}" 2>"${_ERR_FILE}" || true
+            "${FINAL_WEBHOOK_URL}" > "${_CODE_FILE}" 2>"${_ERR_FILE}" || true
 
         HTTP_CODE=$(cat "${_CODE_FILE}" 2>/dev/null || echo "000")
+
+        # Destination label for diagnostics (never prints the webhook URL/token).
+        if [ -n "${_THREAD_ID}" ] && printf '%s' "${_THREAD_ID}" | grep -qE '^[0-9]{17,20}$'; then
+          _DEST="thread ${_THREAD_ID}"
+        else
+          _DEST="webhook channel"
+        fi
 
         if [ "${HTTP_CODE}" = "000" ]; then
           _ERR_MSG=$(head -1 "${_ERR_FILE}" 2>/dev/null || echo "unknown error")
           echo "::warning::Discord notify: curl failed (${_ERR_MSG}) — pipeline unaffected."
         elif [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
-          echo "Discord notification sent (HTTP ${HTTP_CODE})."
+          echo "Discord notification sent to ${_DEST} (HTTP ${HTTP_CODE})."
+        elif [ "${HTTP_CODE}" -ge 400 ] && [ "${HTTP_CODE}" -lt 500 ]; then
+          _RESP=$(head -c 200 "${_RESP_FILE}" 2>/dev/null || echo "")
+          echo "::warning::Discord notify: HTTP ${HTTP_CODE} posting to ${_DEST} — ${_RESP:-(no body)}. Check webhook URL and thread ID. Pipeline unaffected."
         else
-          echo "::warning::Discord notify: unexpected HTTP ${HTTP_CODE} — pipeline unaffected."
+          echo "::warning::Discord notify: unexpected HTTP ${HTTP_CODE} posting to ${_DEST} — pipeline unaffected."
         fi
 
         rm -f "${_RESP_FILE}" "${_CODE_FILE}" "${_ERR_FILE}"

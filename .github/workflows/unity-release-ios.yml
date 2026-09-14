@@ -208,6 +208,7 @@ jobs:
       UNITY_VERSION: ${{ needs.pre-release-checks.outputs.unity-version }}
       BUILD_VERSION: ${{ needs.pre-release-checks.outputs.build-version }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_THREAD_ID: ${{ vars.DISCORD_THREAD_ID }}
 
     steps:
       - name: Checkout

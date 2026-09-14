@@ -386,7 +386,11 @@ runs:
         # ── Step 3: Build webhook URL — thread routing ────────────────────────
         WEBHOOK_URL="${DISCORD_WEBHOOK_URL}"
         if [ -n "${INPUT_THREAD_ID:-}" ]; then
-          WEBHOOK_URL="${WEBHOOK_URL}?thread_id=${INPUT_THREAD_ID}"
+          # Append thread_id, respecting any existing query string in the URL.
+          case "${WEBHOOK_URL}" in
+            *\?*) WEBHOOK_URL="${WEBHOOK_URL}&thread_id=${INPUT_THREAD_ID}" ;;
+            *)    WEBHOOK_URL="${WEBHOOK_URL}?thread_id=${INPUT_THREAD_ID}" ;;
+          esac
         fi
 
         # ── Step 3b: Parse platform-diagnostics ──────────────────────────────

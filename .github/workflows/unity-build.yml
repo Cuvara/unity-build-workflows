@@ -544,6 +544,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_THREAD_ID: ${{ vars.DISCORD_THREAD_ID }}
     outputs:
       build-artifact-name: ${{ steps.upload-report.outputs.artifact-name }}
 

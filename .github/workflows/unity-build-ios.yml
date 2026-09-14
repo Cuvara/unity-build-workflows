@@ -121,6 +121,7 @@ jobs:
     environment: ${{ inputs.environment }}
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_THREAD_ID: ${{ vars.DISCORD_THREAD_ID }}
     outputs:
       artifact-name: ${{ steps.set-artifact-name.outputs.artifact-name }}
 
