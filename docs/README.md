@@ -52,6 +52,7 @@ drift apart quietly.
 | Document | Covers |
 |---|---|
 | [GITHUB_ACTIONS_BUILD_RUNBOOK.md](GITHUB_ACTIONS_BUILD_RUNBOOK.md) | Triggering builds, reading logs, downloading artifacts, common errors |
+| [BUILD_DIAGNOSTICS.md](BUILD_DIAGNOSTICS.md) | Why a build failed, on the commit that caused it |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause |
 | [UNITY_PERSONAL_DOCKER_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md) | The licensing setup that trips everyone up |
 | [UNITY_VERSION_UPGRADE.md](UNITY_VERSION_UPGRADE.md) | Moving the project to a new Unity version |

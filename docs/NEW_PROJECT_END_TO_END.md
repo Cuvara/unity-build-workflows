@@ -60,7 +60,7 @@ caller; if you need to override it, that is the `unity-version` dispatch input.
 ```bash
 mkdir -p .github/workflows
 BASE=https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates
-for f in 01-ci 10-build-development 11-build-release \
+for f in 01-ci 09-build-diagnostics 10-build-development 11-build-release \
          20-release-android 21-release-ios 22-release-webgl \
          23-release-windows 24-release-linux; do
   curl -fsSL "${BASE}/consumer-${f}.yml" -o ".github/workflows/${f}.yml"

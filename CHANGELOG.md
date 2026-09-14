@@ -10,6 +10,29 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+
+- **Unity's errors land on the commit that caused them.** A build cannot
+  summarise its own Unity output on the game-ci lane: Unity streams to the job
+  console and writes no `Editor.log`, and `GITHUB_TOKEN` cannot download a job
+  log while the run is in progress — the endpoint 404s until the whole run
+  completes. Both halves were proven the hard way.
+
+  `templates/consumer-09-build-diagnostics.yml` runs afterwards on
+  `workflow_run`, when the logs are readable, and posts a **check run** against
+  the build's commit. A compiler error then shows on the line that caused it,
+  in the pull request, instead of a hundred thousand lines down a console
+  nobody opens. The check is `neutral`: the build already reported whether it
+  passed, and a second red mark on the same commit for the same reason helps
+  nobody.
+
+### Fixed
+
+- **The log parser could not read a job log at all.** Every line of an
+  Actions job log carries an ISO timestamp, and some carry ANSI colour from the
+  runner's echo — both sit in front of the text the patterns anchor to, so a
+  compiler error never matched. Silently: a parser that finds nothing looks
+  exactly like a clean build. Caught by a test written before the first run.
 ---
 
 ## [5.3.0] — 2026-09-14
