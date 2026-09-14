@@ -365,6 +365,20 @@ on:
           role. Required when build-delivery is 'firebase'. Read as env var,
           never passed on a command line.
         required: false
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
+        description: >-
+          Google Play service account JSON. Required when artifact-storage is
+          'firebase' and platform is Android (Fastlane direct-to-store upload).
+        required: false
+      APP_STORE_CONNECT_KEY_ID:
+        description: App Store Connect API key ID. Required for iOS Fastlane upload.
+        required: false
+      APP_STORE_CONNECT_ISSUER_ID:
+        description: App Store Connect API issuer ID. Required for iOS Fastlane upload.
+        required: false
+      APP_STORE_CONNECT_PRIVATE_KEY:
+        description: App Store Connect API private key (.p8 content). Required for iOS Fastlane upload.
+        required: false
 
     outputs:
       result:
@@ -1614,6 +1628,64 @@ jobs:
             --file "${ARTIFACT}" \
             --key  "${KEY}" \
             --github-output
+
+      # ── Step 11a-fastlane: Direct-to-store release (firebase storage mode) ──
+      # When ARTIFACT_STORAGE=firebase and this is a release build, Fastlane
+      # uploads the binary directly to the store from the build runner. No
+      # GitHub artifact, no separate release pipeline — build once, ship once.
+      - name: Setup Fastlane (release)
+        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
+        uses: ./.toolkit/.github/actions/setup-fastlane
+        with:
+          working-directory: .toolkit
+
+      - name: Fastlane — Upload to Google Play
+        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && inputs.platform == 'Android' && steps.ios-guard.outputs.blocked != 'true' }}
+        continue-on-error: true
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
+            echo "::warning::GOOGLE_PLAY_SERVICE_ACCOUNT_JSON not set — skipping Google Play upload"
+            exit 0
+          fi
+          ARTIFACT="${{ steps.manifest.outputs.artifact-path }}"
+          EXT="${ARTIFACT##*.}"
+          cd .toolkit
+          if [ "${EXT}" = "aab" ]; then
+            bundle exec fastlane android upload_internal \
+              package_name:"${{ vars.ANDROID_PACKAGE_NAME }}" \
+              aab_path:"${GITHUB_WORKSPACE}/${ARTIFACT}" \
+              version_name:"${{ inputs.app-version }}"
+          else
+            bundle exec fastlane android upload_internal \
+              package_name:"${{ vars.ANDROID_PACKAGE_NAME }}" \
+              apk_path:"${GITHUB_WORKSPACE}/${ARTIFACT}" \
+              version_name:"${{ inputs.app-version }}"
+          fi
+
+      - name: Fastlane — Upload to TestFlight
+        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && inputs.platform == 'iOS' && inputs.sign-ios && steps.ios-guard.outputs.blocked != 'true' }}
+        continue-on-error: true
+        env:
+          APP_STORE_CONNECT_KEY_ID:      ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID:   ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ -z "${APP_STORE_CONNECT_KEY_ID:-}" ]; then
+            echo "::warning::APP_STORE_CONNECT_KEY_ID not set — skipping TestFlight upload"
+            exit 0
+          fi
+          IPA_PATH="${{ steps.ios-archive.outputs.ipa-path }}"
+          cd .toolkit
+          bundle exec fastlane ios upload_testflight \
+            ipa_path:"${GITHUB_WORKSPACE}/${IPA_PATH}" \
+            app_id:"${{ vars.IOS_APP_ID }}" \
+            wait_for_processing:true
 
       # ── Step 11b: Surface what the log says ────────────────────────────────
       # A failed Unity build used to say "Process completed with exit code 1"

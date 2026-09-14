@@ -26,6 +26,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   and reports always go to GitHub regardless. When `firebase`, validate-artifact
   and release-manifest jobs are skipped (they need the GitHub artifact).
 
+- **Fastlane release lanes for Android and iOS.** When `ARTIFACT_STORAGE=firebase`,
+  Fastlane uploads builds directly to Google Play (internal track) and TestFlight
+  from the build runner — no separate release pipeline needed. Infrastructure:
+  `Gemfile`, `fastlane/Fastfile`, `.github/actions/setup-fastlane/action.yml`.
+  Existing release pipelines remain for `ARTIFACT_STORAGE=github` mode.
+
 ---
 
 ## [6.0.0] — 2026-09-14

@@ -258,7 +258,9 @@ def publish_firebase(source, key):
         if proc.returncode != 0:
             # Strip credentials path from error output for safety.
             stderr = proc.stderr.replace(creds_path, "<credentials>")
-            return None, f"Firebase CLI failed (exit {proc.returncode}): {stderr.strip()}"
+            stdout = proc.stdout.replace(creds_path, "<credentials>")
+            detail = stderr.strip() or stdout.strip() or "(no output)"
+            return None, f"Firebase CLI failed (exit {proc.returncode}): {detail[:500]}"
 
         # Parse the testing URI from CLI output.
         # Firebase CLI prints: "✔ View this release in the Firebase console: <url>"

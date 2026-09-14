@@ -212,6 +212,20 @@ on:
           role. Used only when BUILD_DELIVERY=firebase. Optional: a project
           that does not use Firebase still builds normally.
         required: false
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
+        description: >-
+          Google Play service account JSON. Used for Fastlane direct-to-store
+          upload when ARTIFACT_STORAGE=firebase. Also used by release pipelines.
+        required: false
+      APP_STORE_CONNECT_KEY_ID:
+        description: App Store Connect API key ID for Fastlane iOS upload.
+        required: false
+      APP_STORE_CONNECT_ISSUER_ID:
+        description: App Store Connect API issuer ID for Fastlane iOS upload.
+        required: false
+      APP_STORE_CONNECT_PRIVATE_KEY:
+        description: App Store Connect API private key (.p8) for Fastlane iOS upload.
+        required: false
 
 # The pipeline's stages, declared once. Every job renders this same ladder with
 # itself marked, so the run summary grows into a progress view while the run is
@@ -1275,6 +1289,10 @@ jobs:
       IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
       FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 03b — iOS PRODUCTION SIGNING
