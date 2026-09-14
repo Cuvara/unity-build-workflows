@@ -35,18 +35,44 @@ For production builds using GitHub Environments, add the secret to the environme
 
 | Variable | Scope | Required |
 |---|---|---|
-| `DISCORD_THREAD_ID` | Repository | No (optional) |
+| `DISCORD_THREAD_ID` | Repository or Environment | No (optional) |
 
-Set this to route notifications into a specific **thread** rather than the channel root. The value must be a Discord **thread snowflake ID** — not a channel ID. Thread IDs and channel IDs look the same numerically; using a channel ID here has no effect (Discord silently ignores an invalid `thread_id`).
+Set this to route notifications into a specific **Discord thread or forum post** rather than the channel root.
 
-To find a thread ID: right-click the thread name in Discord → **Copy Thread ID** (requires Developer Mode enabled in Discord User Settings → Advanced).
+The value must be a Discord **thread snowflake ID** (a 17–20 digit number). It is:
+
+- **NOT** the parent channel ID (channel IDs look identical numerically — using one here silently fails; Discord ignores an invalid `thread_id`).
+- **NOT** the webhook ID or webhook token.
+- **NOT** a secret — store it as a repository **variable**, not a secret.
+
+To find a thread ID: enable **Developer Mode** in Discord (User Settings → Advanced), then right-click the thread or forum post name → **Copy Thread ID**.
 
 ```bash
 # Set the thread ID as a repository variable (not a secret — it is not sensitive)
 gh variable set DISCORD_THREAD_ID --repo YOUR_ORG/YOUR_REPO --body "1234567890123456789"
 ```
 
-When `DISCORD_THREAD_ID` is set, messages are posted into the thread via `?thread_id=<id>` on the webhook URL. When unset, messages go to the channel root.
+#### Routing behaviour
+
+| Configuration | Destination |
+|---|---|
+| `DISCORD_WEBHOOK_URL` only | Webhook's configured channel (root) |
+| `DISCORD_WEBHOOK_URL` + `DISCORD_THREAD_ID` | Specified thread / forum post |
+
+When `DISCORD_THREAD_ID` is set, both `discord-notify` and `discord-upload-build` append `?thread_id=<id>` to the webhook URL. When unset, messages go to the channel root — existing behaviour is unchanged.
+
+#### Example
+
+```
+DISCORD_WEBHOOK_URL = <secret — set via gh secret set>
+DISCORD_THREAD_ID   = 1234567890123456789
+```
+
+The `discord-notify` action reads `DISCORD_THREAD_ID` from the job environment (set via `vars.DISCORD_THREAD_ID` in the workflow env block). The `discord-upload-build` action receives it as the `thread-id` input.
+
+#### Validation
+
+The action validates the thread ID as a 17–20 digit numeric string (Discord snowflake format). A malformed value produces a `::warning::` annotation and the message falls back to the channel root — the pipeline is never affected.
 
 ---
 
