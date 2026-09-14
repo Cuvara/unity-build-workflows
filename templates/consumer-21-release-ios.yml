@@ -43,7 +43,6 @@ on:
         # publishes is the exact binary QA approved — a promotion cannot build,
         # export or sign, so an Xcode project here would be unpromotable.
         type: string
-        type: string
 
       start-phase:
         description: "PHASE · Where to start. Use a later phase to retry without rebuilding"
