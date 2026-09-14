@@ -1,6 +1,6 @@
 # ADR 004 — Runner selection: make the decision visible before changing it
 
-**Status:** accepted (stage 1 implemented)
+**Status:** accepted (stages 1–2 implemented)
 **Date:** 2026-09-14
 
 ## Context
@@ -85,6 +85,25 @@ warning that ships today beats a gate that ships next month.
 Wire the three per-OS label variables that already exist (finding 2) into the
 stage-03 matrix and stage 03b, so each platform gets its own `runs-on`.
 `RUNNER_LABELS` becomes an override-everything escape hatch. Closes finding 3.
+
+Implemented in 5.2.0. Three details worth keeping:
+
+- **The per-OS defaults used to disagree with each other.** Linux defaulted to
+  `ubuntu-latest` — a GitHub-hosted label — while windows and macos defaulted to
+  `self-hosted-windows` / `self-hosted-macos`, which are self-hosted label
+  *names* no GitHub-hosted runner carries. The default now follows
+  `RUNNER_TYPE`: GitHub's own labels for `github-hosted`, `self-hosted,<os>`
+  otherwise.
+- **An explicit global `RUNNER_LABELS` still wins.** One runner that does every
+  platform is a real setup, and taking its escape hatch away would break exactly
+  those projects.
+- **Unity tests and the Addressables build stopped riding the matrix labels.**
+  They always run in the Linux container, whatever the matrix is doing; on a
+  Windows-labelled self-hosted project they were being sent to a machine with no
+  Linux container on it.
+
+The stage-1 iOS warning survives, but is now reachable only by explicit
+override rather than by the default — which is when a person most needs telling.
 
 ### Stage 3 — fail fast instead of queueing (major)
 

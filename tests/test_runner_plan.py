@@ -93,12 +93,18 @@ def test_the_plan_names_the_tier_that_won(tmp_path):
 
 
 def test_ios_on_non_macos_labels_is_reported(tmp_path):
-    """The self-hosted default is `self-hosted,windows` regardless of OS, so an
-    iOS build lands on a Windows box and simply queues — GitHub does not fail a
-    job whose labels match no runner, it waits forever.
+    """iOS on labels that are not a macOS machine is still reported.
+
+    This used to be reachable by accident: the self-hosted default was
+    `self-hosted,windows` for every platform, so an iOS build landed on a
+    Windows box and simply queued — GitHub does not fail a job whose labels
+    match no runner, it waits forever. Stage 2 of ADR 004 gave each OS its own
+    labels, so reaching it now takes an explicit global override, which is
+    exactly when a person most needs telling.
     """
     plan, stderr = plan_of(tmp_path, IN_PLATFORM="iOS",
-                           IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local")
+                           IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                           IN_RUNNER_LABELS="self-hosted,windows")
     row = next(r for r in plan if r["platform"] == "iOS")
     assert row["note"], "iOS on Windows labels must carry a note"
     assert "macOS" in row["note"]
