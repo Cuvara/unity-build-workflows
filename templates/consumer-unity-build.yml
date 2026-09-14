@@ -3,7 +3,7 @@
 #
 # Copy this file to .github/workflows/unity-build.yml in your project.
 # Pinned to @v2 — the last release that had this shape. The numbered entry
-# workflows are pinned to @v5; see docs/CONSUMER_SETUP.md. Use @main
+# workflows are pinned to @v6; see docs/CONSUMER_SETUP.md. Use @main
 # for development. Keep `toolkit-ref` below on the SAME ref as `uses`.
 #
 # Required secrets (set in Settings → Secrets and variables → Actions):
