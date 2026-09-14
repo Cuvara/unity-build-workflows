@@ -56,6 +56,10 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
   A consumer whose values already agree needs no change. `@v4` is unaffected.
 
+- The entry templates pin `@v5`. `test_entry_points_pin_the_current_major`, added in
+  4.2.0 after 4.0.0 shipped templates pinned to the previous engine, caught this one
+  before it left the branch.
+
 ---
 
 ## [4.2.0] — 2026-09-14
