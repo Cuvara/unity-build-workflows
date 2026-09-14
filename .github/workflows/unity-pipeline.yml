@@ -809,6 +809,33 @@ jobs:
           fi
           echo "Project validation passed."
 
+      - name: Checkout toolkit (for check_identity_drift.py)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref:        ${{ needs.resolve-config.outputs.toolkit-ref }}
+          path:       .toolkit
+
+      # ── App identity ────────────────────────────────────────────────────
+      # A consumer shipped Android builds for weeks stamped with the URP blank
+      # template's identifier and a version one release behind, while its
+      # BuildConfig said otherwise and every build went green. Two reasons it
+      # stayed invisible: on this lane BuildConfig never reaches PlayerSettings
+      # (game-ci supplies its own builder, and `Company.BuildPipeline` runs only
+      # when `build-method` is set), and nothing compared the two. A config that
+      # is both inert and wrong looks exactly like one that is working.
+      - name: Check app identity
+        shell: bash
+        env:
+          PROJECT_PATH: ${{ needs.resolve-config.outputs.project-path }}
+          ENVIRONMENT:  ${{ needs.resolve-config.outputs.environment }}
+          IDENTITY_DRIFT: ${{ vars.IDENTITY_DRIFT || 'error' }}
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE}/.toolkit/scripts/common/check_identity_drift.py" \
+            --project-path "${PROJECT_PATH}" \
+            --environment "${ENVIRONMENT:-production}"
+
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 2.5: validate-license
   # ════════════════════════════════════════════════════════════════════════════
