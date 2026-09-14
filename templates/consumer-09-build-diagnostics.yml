@@ -1,0 +1,64 @@
+# ────────────────────────────────────────────────────────────────────────────
+# 09-build-diagnostics.yml — what Unity actually said
+#
+# On the game-ci lane Unity streams its output to the job console and writes no
+# Editor.log, so a build job has nothing on disk to parse. The output is in the
+# job's own log — but `GITHUB_TOKEN` cannot download a job log while the run is
+# still in progress: the endpoint 404s until the whole run completes. A build
+# cannot summarise itself.
+#
+# So this runs afterwards, when the logs are readable, and posts a **check run**
+# against the build's commit. A compiler error then appears on the line that
+# caused it, in the pull request, instead of a hundred thousand lines down a
+# console nobody opens.
+#
+# It never fails and never blocks: the check is `neutral`, because the build
+# already reported whether it passed and a second red mark on the same commit
+# for the same reason helps nobody.
+#
+# Numbered 09 because it belongs to the build layer but runs after it, not as
+# part of it.
+# ────────────────────────────────────────────────────────────────────────────
+
+name: Build Diagnostics
+
+on:
+  workflow_run:
+    # The build workflows. Names, not filenames — this is what GitHub matches.
+    workflows:
+      - Build / Development
+      - Build / Release
+      - CI / Validate & Test
+    types: [completed]
+
+permissions:
+  # Reading another run's job logs.
+  actions: read
+  contents: read
+  # Attaching the diagnostics to the commit.
+  checks: write
+
+concurrency:
+  group: build-diagnostics-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: 09 / Unity diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: Cuvara/unity-build-workflows
+          # Same ref the build used.
+          ref: v3
+          path: .toolkit
+
+      - name: Report what Unity said
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 .toolkit/scripts/common/unity_log_report.py \
+            --run-id   "${{ github.event.workflow_run.id }}" \
+            --head-sha "${{ github.event.workflow_run.head_sha }}"

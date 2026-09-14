@@ -75,8 +75,22 @@ IGNORE = re.compile(
 )
 
 
+# A log fetched from the Actions API is not the file Unity wrote. Every line
+# carries an ISO timestamp, and some carry ANSI colour from the runner's own
+# echo. Both sit in front of the text the patterns below anchor to, so a
+# compiler error would simply never match — silently, since a parser that finds
+# nothing looks exactly like a clean build.
+JOB_LOG_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+")
+ANSI = re.compile(r"\x1b\[[0-9;]*m|\[\d+(?:;\d+)*m")
+
+
+def strip_log_decoration(line):
+    return ANSI.sub("", JOB_LOG_PREFIX.sub("", line))
+
+
 def classify(line):
     """Return (severity, payload) for a diagnostic line, or None."""
+    line = strip_log_decoration(line)
     if IGNORE.search(line):
         return None
 
@@ -109,31 +123,40 @@ def classify(line):
     return None
 
 
+def parse_lines(lines, max_lines=400_000, seen=None, errors=None, warnings=None):
+    """Collect deduplicated diagnostics from an iterable of log lines.
+
+    Split out from `parse` so a caller holding the log as text — a job log
+    fetched from the API, say — does not have to write it to a file first.
+    """
+    errors = [] if errors is None else errors
+    warnings = [] if warnings is None else warnings
+    seen = set() if seen is None else seen
+    for count, line in enumerate(lines):
+        if count > max_lines:
+            break
+        result = classify(line.rstrip("\n"))
+        if not result:
+            continue
+        severity, payload = result
+        # A Unity log repeats the same compiler error once per assembly it
+        # tried to build. Twelve copies of one typo is not twelve problems.
+        key = (severity, payload.get("file"), payload.get("line"),
+               payload.get("message"))
+        if key in seen:
+            continue
+        seen.add(key)
+        (errors if severity == "error" else warnings).append(payload)
+    return errors, warnings
+
+
 def parse(paths, max_lines=400_000):
     """Read the logs once and collect deduplicated diagnostics in order."""
-    errors, warnings = [], []
-    seen = set()
-    scanned = 0
+    errors, warnings, seen = [], [], set()
     for path in paths:
         try:
             with open(path, "r", errors="replace") as fh:
-                for line in fh:
-                    scanned += 1
-                    if scanned > max_lines:
-                        break
-                    result = classify(line.rstrip("\n"))
-                    if not result:
-                        continue
-                    severity, payload = result
-                    # A Unity log repeats the same compiler error once per
-                    # assembly it tried to build. Twelve copies of one typo is
-                    # not twelve problems.
-                    key = (severity, payload.get("file"), payload.get("line"),
-                           payload.get("message"))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    (errors if severity == "error" else warnings).append(payload)
+                parse_lines(fh, max_lines, seen, errors, warnings)
         except OSError as exc:
             print(f"::warning::Could not read {path}: {exc}")
     return errors, warnings
