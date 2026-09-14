@@ -1895,6 +1895,10 @@ class TestRunnerEngine:
             "EVENT_NAME": "push", "REF_NAME": "develop",
             "NEW_RUNNER_TYPE": "self-hosted",
             "NEW_BUILD_ENGINE": "local",
+            # A self-hosted lane must name its machine: an empty RUNNER_LABELS
+            # falls back to github-hosted + docker, because labels that match no
+            # runner queue forever rather than failing.
+            "NEW_RUNNER_LABELS": "self-hosted,windows",
         })
         assert r.returncode == 0
         out = parse_outputs(r.stdout)
@@ -1911,6 +1915,7 @@ class TestRunnerEngine:
             "EVENT_NAME": "push", "REF_NAME": "develop",
             "NEW_RUNNER_TYPE": "self-hosted",
             "NEW_BUILD_ENGINE": "docker",
+            "NEW_RUNNER_LABELS": "self-hosted,linux",
         })
         assert r.returncode == 0
         out = parse_outputs(r.stdout)
@@ -1965,6 +1970,7 @@ class TestRunnerEngine:
             "IN_RUNNER_TYPE": "self-hosted",
             "NEW_RUNNER_TYPE": "github-hosted",
             "NEW_BUILD_ENGINE": "local",
+            "NEW_RUNNER_LABELS": "self-hosted,windows",
         }).stdout)
         assert out["runner-type"] == "self-hosted"
         assert out["runner-type-source"] == "dispatch"
@@ -1975,6 +1981,7 @@ class TestRunnerEngine:
             "IN_BUILD_ENGINE": "local",
             "NEW_BUILD_ENGINE": "docker",
             "NEW_RUNNER_TYPE": "self-hosted",
+            "NEW_RUNNER_LABELS": "self-hosted,windows",
         }).stdout)
         assert out["build-engine"] == "local"
         assert out["build-engine-source"] == "dispatch"
@@ -1985,13 +1992,22 @@ class TestRunnerEngine:
         out = parse_outputs(run_flow({"EVENT_NAME": "push", "REF_NAME": "develop"}).stdout)
         assert out["runner-labels"] == '["ubuntu-latest"]'
 
-    def test_labels_default_self_hosted(self):
+    def test_labels_empty_falls_back_to_github_hosted(self):
+        """There is no `self-hosted` default label set any more.
+
+        There used to be: `self-hosted,windows`, for every platform, whatever
+        the OS. It named a machine nobody had registered, and GitHub queues a
+        job whose labels match nothing instead of failing it. Naming no machine
+        now means using GitHub's.
+        """
         out = parse_outputs(run_flow({
             "EVENT_NAME": "push", "REF_NAME": "develop",
             "NEW_RUNNER_TYPE": "self-hosted",
             "NEW_BUILD_ENGINE": "local",
         }).stdout)
-        assert out["runner-labels"] == '["self-hosted","windows"]'
+        assert out["runner-labels"] == '["ubuntu-latest"]'
+        assert out["runner-type"] == "github-hosted"
+        assert out["build-engine"] == "docker"
 
     def test_labels_custom(self):
         out = parse_outputs(run_flow({
@@ -2036,6 +2052,7 @@ class TestRunnerEngine:
             "EVENT_NAME": "push", "REF_NAME": "develop",
             "NEW_RUNNER_TYPE": "self-hosted",
             "NEW_BUILD_ENGINE": "local",
+            "NEW_RUNNER_LABELS": "self-hosted,windows",
         }).stdout)
         assert out["activation-strategy"] == "none"
 

@@ -107,24 +107,32 @@ def test_the_docker_lane_builds_everything_but_ios_on_linux(tmp_path):
 def test_the_local_lane_builds_each_target_on_its_own_os(tmp_path):
     """No container, so the runner has to be the target's own OS."""
     outputs, _ = resolve(tmp_path, IN_PLATFORM="Android,iOS,Windows",
-                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local")
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                         RUNNER_LINUX_LABEL="farm,linux",
+                         RUNNER_WINDOWS_LABEL="farm,windows",
+                         RUNNER_MACOS_LABEL="farm,macOS")
     mapping = json.loads(outputs["runner-labels-by-platform"])
-    assert mapping["Android"] == ["self-hosted", "linux"]
-    assert mapping["Windows64"] == ["self-hosted", "windows"]
-    assert mapping["iOS"] == ["self-hosted", "macOS"]
+    # The per-OS labels name machines, so this pipeline has somewhere to go and
+    # the github-hosted fallback must not fire.
+    assert mapping["Android"] == ["farm", "linux"]
+    assert mapping["Windows64"] == ["farm", "windows"]
+    assert mapping["iOS"] == ["farm", "macOS"]
     assert len({tuple(v) for v in mapping.values()}) == 3
 
 
-def test_self_hosted_defaults_name_the_os_they_mean(tmp_path):
-    """The old default was `self-hosted,windows` for every platform, so a
-    self-hosted Linux build asked for a Windows machine and waited forever."""
+def test_a_named_machine_takes_the_whole_pipeline(tmp_path):
+    """One label, one machine, everything on it — the single-runner setup.
+
+    There is no `self-hosted,<os>` default any more. It named a machine nobody
+    had registered, and GitHub queues a job whose labels match nothing rather
+    than failing it.
+    """
     outputs, _ = resolve(tmp_path, IN_PLATFORM="Android,iOS,Windows",
-                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="docker")
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                         IN_RUNNER_LABELS="mac-build")
     mapping = json.loads(outputs["runner-labels-by-platform"])
-    # Docker lane: the container is Linux, whatever the target is.
-    assert mapping["Android"] == ["self-hosted", "linux"]
-    assert mapping["Windows64"] == ["self-hosted", "linux"]
-    assert mapping["iOS"] == ["self-hosted", "macOS"]
+    assert all(v == ["mac-build"] for v in mapping.values()), mapping
+    assert json.loads(outputs["runner-labels-linux"]) == ["mac-build"]
 
 
 def test_an_explicit_global_label_set_still_wins(tmp_path):
@@ -163,8 +171,9 @@ def test_the_unity_jobs_do_not_ride_the_build_matrix_labels(tmp_path):
     """Tests and Addressables always run in the Linux container, whatever the
     matrix is doing."""
     outputs, _ = resolve(tmp_path, IN_PLATFORM="Windows",
-                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local")
-    assert json.loads(outputs["runner-labels-linux"]) == ["self-hosted", "linux"]
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                         IN_RUNNER_LABELS="mac-build")
+    assert json.loads(outputs["runner-labels-linux"]) == ["mac-build"]
 
 
 def test_the_build_job_routes_on_the_matrix_row():
@@ -214,3 +223,88 @@ def test_runner_labels_accepts_csv_and_json(tmp_path, form):
                          IN_RUNNER_LABELS=form)
     mapping = json.loads(outputs["runner-labels-by-platform"])
     assert mapping["Android"] == ["self-hosted", "macOS"], f"{form!r} -> {mapping}"
+
+
+# ---------------------------------------------------------------------------
+# RUNNER_LABELS is the switch: no machine named, no machine used
+# ---------------------------------------------------------------------------
+
+def test_no_labels_falls_back_to_github_hosted_docker(tmp_path):
+    """An empty RUNNER_LABELS means no machine has been named.
+
+    Honouring `self-hosted` anyway produced `self-hosted,<os>` — labels that
+    match no runner unless one happens to carry exactly them — and GitHub does
+    not fail a job whose labels match nothing. It queues it, forever, with no
+    error and no timeout. Building on GitHub's runners is a worse answer than
+    the one configured and a far better one than a run that never starts.
+    """
+    outputs, stderr = resolve(tmp_path, IN_PLATFORM="Android",
+                              IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local")
+    assert outputs["runner-type"] == "github-hosted"
+    assert outputs["build-engine"] == "docker"
+    assert outputs["runner-labels-csv"] == "ubuntu-latest"
+    # Overriding an explicit setting silently is its own failure mode.
+    assert "falling back to github-hosted + docker" in stderr
+
+
+def test_labels_present_means_the_configured_runner_is_used(tmp_path):
+    outputs, stderr = resolve(tmp_path, IN_PLATFORM="Android",
+                              IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                              IN_RUNNER_LABELS="mac-build")
+    assert outputs["runner-type"] == "self-hosted"
+    assert outputs["build-engine"] == "local"
+    assert outputs["runner-labels-csv"] == "mac-build"
+    assert "falling back" not in stderr
+
+
+def test_the_default_configuration_is_unchanged(tmp_path):
+    """Nothing set at all still means GitHub-hosted in the container."""
+    outputs, stderr = resolve(tmp_path, IN_PLATFORM="Android")
+    assert outputs["runner-type"] == "github-hosted"
+    assert outputs["build-engine"] == "docker"
+    assert outputs["runner-labels-csv"] == "ubuntu-latest"
+    # No override happened, so nothing to warn about.
+    assert "falling back" not in stderr
+
+
+def test_clearing_the_labels_is_the_way_back_to_github(tmp_path):
+    """The round trip, because that is the operation a person performs."""
+    on, _ = resolve(tmp_path, IN_PLATFORM="Android", IN_RUNNER_TYPE="self-hosted",
+                    IN_BUILD_ENGINE="local", IN_RUNNER_LABELS="mac-build")
+    off, _ = resolve(tmp_path, IN_PLATFORM="Android", IN_RUNNER_TYPE="self-hosted",
+                     IN_BUILD_ENGINE="local", IN_RUNNER_LABELS="")
+    assert on["runner-labels-csv"] == "mac-build"
+    assert off["runner-labels-csv"] == "ubuntu-latest"
+    assert off["build-engine"] == "docker"
+
+
+def test_ios_signing_takes_the_ios_machine_not_the_global_list(tmp_path):
+    """Stage 03b signs the IPA and needs the Mac.
+
+    5.2.0 routed the build matrix per platform and left stage 03b reading the
+    global `runner-labels`, whose self-hosted default was `self-hosted,windows`.
+    So the build went to the right machine and the signing went to a Windows
+    box — and that PR said the iOS-on-Windows defect was closed. It was closed
+    for the build half only.
+    """
+    outputs, _ = resolve(tmp_path, IN_PLATFORM="Android,iOS",
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                         RUNNER_LINUX_LABEL="my-linux", RUNNER_MACOS_LABEL="my-mac")
+    assert json.loads(outputs["runner-labels-ios"]) == ["my-mac"]
+    assert json.loads(outputs["runner-labels-linux"]) == ["my-linux"]
+
+
+def test_stage_03b_is_wired_to_the_ios_labels():
+    text = PIPELINE.read_text(encoding="utf-8")
+    assert "outputs.runner-labels-ios" in text, (
+        "stage 03b must route on the iOS machine, not the global label list"
+    )
+
+
+def test_the_global_label_default_no_longer_names_windows_for_everyone(tmp_path):
+    """`self-hosted,windows` was the default label set for every self-hosted
+    project, whatever machines it had."""
+    outputs, _ = resolve(tmp_path, IN_PLATFORM="Android",
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                         RUNNER_LINUX_LABEL="my-linux")
+    assert "windows" not in outputs["runner-labels-csv"], outputs["runner-labels-csv"]
