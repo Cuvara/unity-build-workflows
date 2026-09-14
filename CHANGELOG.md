@@ -12,6 +12,56 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [5.0.0] — 2026-09-14
+
+### Added
+
+- **BREAKING — stage 01 fails when `BuildConfig` and `ProjectSettings.asset`
+  disagree about the app's identity.** A consumer shipped Android builds for
+  weeks stamped `com.UnityTechnologies.com.unity.template.urpblank` at version
+  `0.4.2`, while its `BuildConfig/base.json` said `com.cuvara.indierpgmmo` and
+  `0.5.0` and its changelog said `0.5.0`. Every build was green.
+
+  Two things kept it invisible. **On the Docker / game-ci lane `BuildConfig`
+  never reaches PlayerSettings** — `Company.BuildPipeline.BuildCommand.Execute`
+  runs only when `build-method` is set, and game-ci supplies its own builder,
+  which stamps whatever `ProjectSettings.asset` holds. And nothing compared the
+  two, so a config that was both inert and wrong looked exactly like one that
+  was working.
+
+  `scripts/common/check_identity_drift.py` compares `companyName`,
+  `bundleVersion` and `applicationIdentifier.Android` against the resolved
+  config and fails the build. Set the `IDENTITY_DRIFT` repository variable to
+  `warn` or `off` to soften it.
+
+  **What it does not do:** it catches *disagreement*, not wrongness. Against the
+  real case it would have caught the version and not the identifier, because the
+  production config and `ProjectSettings.asset` agreed with each other on the
+  template id — both wrong, identically. Two sources agreeing is not evidence
+  that either is right.
+
+  A suffixed identifier (`com.acme.game.dev` against `com.acme.game`) is treated
+  as a deliberate variant rather than drift — that is how a QA build installs
+  alongside production, and a gate that reddens every development build is a
+  gate that gets switched off. It is reported as a notice, which is worth having:
+  on the Docker lane the suffix is not applied either, so the development build
+  installs under the base identifier.
+
+  `productName` is excluded for the same reason — `… [DEV]` is a legitimate
+  overlay difference.
+
+  **Migrating:** run the check locally before upgrading —
+
+      python3 scripts/common/check_identity_drift.py --project-path . --environment production
+
+  A consumer whose values already agree needs no change. `@v4` is unaffected.
+
+- The entry templates pin `@v5`. `test_entry_points_pin_the_current_major`, added in
+  4.2.0 after 4.0.0 shipped templates pinned to the previous engine, caught this one
+  before it left the branch.
+
+---
+
 ## [4.2.0] — 2026-09-14
 
 ### Fixed
