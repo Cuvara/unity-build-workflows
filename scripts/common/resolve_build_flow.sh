@@ -574,6 +574,18 @@ resolve_setting "" "" \
 _labels_explicit="${_resolved_value}"
 _labels_explicit_source="${_resolved_source}"
 
+# `none` means what an empty value would mean, and exists because GitHub will not
+# store an empty one: creating a variable with "" is rejected with
+# `422 Variable value cannot be empty`. Deleting RUNNER_LABELS works, but then
+# the switch is invisible -- somebody has to already know it exists to use it.
+# `RUNNER_LABELS=none` keeps it on the settings page, saying what it does.
+case "$(printf '%s' "${_labels_explicit}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+    none|off|disabled)
+        _labels_explicit=""
+        _labels_explicit_source="default"
+        ;;
+esac
+
 # A machine counts as named by RUNNER_LABELS or by any of the per-OS labels.
 # Checking only RUNNER_LABELS would have silently disabled the per-OS routing
 # added in 5.2.0 -- the fallback below is for a pipeline with nowhere to go, not
