@@ -187,38 +187,52 @@ class TestWindows:
 
 
 # ---------------------------------------------------------------------------
-# Structural: sign-ios job in pipeline YAML is matrix-driven
+# Structural: iOS signing is folded into reusable-build-platform.yml
 # ---------------------------------------------------------------------------
 
-def test_sign_ios_job_uses_matrix_strategy():
-    """The sign-ios job must use a matrix strategy, not a static boolean gate."""
+def test_no_sign_ios_job_in_pipeline():
+    """sign-ios was removed — signing is now inside the build job."""
     from pathlib import Path
     import yaml
     pipeline = yaml.safe_load(
         (Path(__file__).parent.parent / ".github" / "workflows" / "unity-pipeline.yml")
         .read_text()
     )
-    job = pipeline["jobs"]["sign-ios"]
-    assert "strategy" in job, "sign-ios must have a strategy block"
-    assert "matrix" in job["strategy"], "sign-ios must use matrix strategy"
-    assert "include" in job["strategy"]["matrix"], "sign-ios matrix must use include"
-    # The matrix must reference the dynamically generated sign-matrix output.
-    include_expr = str(job["strategy"]["matrix"]["include"])
-    assert "sign-matrix" in include_expr, (
-        "sign-ios matrix must be driven by the sign-matrix output from resolve-config"
+    assert "sign-ios" not in pipeline["jobs"], (
+        "sign-ios job must not exist — signing is folded into reusable-build-platform"
     )
 
 
-def test_sign_ios_gate_uses_has_sign_ops():
-    """The sign-ios job must gate on has-sign-ops, not the old sign-ios boolean."""
+def test_signing_steps_in_reusable_build_platform():
+    """reusable-build-platform.yml must contain iOS signing steps."""
+    from pathlib import Path
+    import yaml
+    rbp = yaml.safe_load(
+        (Path(__file__).parent.parent / ".github" / "workflows" / "reusable-build-platform.yml")
+        .read_text()
+    )
+    # PyYAML parses bare `on:` as boolean True
+    on_block = rbp.get(True, rbp.get("on", {}))
+    inputs = on_block.get("workflow_call", {}).get("inputs", {})
+    assert "sign-ios" in inputs, "reusable-build-platform must declare sign-ios input"
+
+    steps = rbp["jobs"]["build"]["steps"]
+    uses = "\n".join(str(s.get("uses", "")) for s in steps)
+    assert "ios-archive-export" in uses
+    assert "ios-setup-signing" in uses
+    assert "ios-cleanup-signing" in uses
+
+
+def test_build_job_passes_sign_ios_to_reusable():
+    """unity-pipeline build job must pass sign-ios input to reusable-build-platform."""
     from pathlib import Path
     import yaml
     pipeline = yaml.safe_load(
         (Path(__file__).parent.parent / ".github" / "workflows" / "unity-pipeline.yml")
         .read_text()
     )
-    job = pipeline["jobs"]["sign-ios"]
-    condition = str(job.get("if", ""))
-    assert "has-sign-ops" in condition, (
-        "sign-ios job condition must reference has-sign-ops output"
+    build = pipeline["jobs"]["build"]
+    with_block = str(build.get("with", {}))
+    assert "sign-ios" in with_block, (
+        "build job must pass sign-ios input to reusable-build-platform"
     )

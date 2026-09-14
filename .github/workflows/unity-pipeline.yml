@@ -1233,6 +1233,12 @@ jobs:
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
       runner-macos-label:      ${{ needs.resolve-config.outputs.runner-macos-label }}
       runner-linux-label:      ${{ needs.resolve-config.outputs.runner-linux-label }}
+      # iOS signing — folded into the build so non-iOS builds have no
+      # signing node in the Actions graph. Only the iOS matrix row activates.
+      sign-ios:                ${{ matrix.platform == 'iOS' && needs.resolve-config.outputs.sign-ios == 'true' }}
+      ios-export-method:       ${{ inputs.ios-export-method }}
+      ios-app-name:            ${{ inputs.ios-app-name }}
+      ipa-artifact-name:       ${{ matrix.platform == 'iOS' && needs.resolve-config.outputs.sign-ios == 'true' && format('{0}-ios-ipa', needs.resolve-config.outputs.build-type) || '' }}
     secrets:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
@@ -1240,177 +1246,25 @@ jobs:
       SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+      IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
 
   # ════════════════════════════════════════════════════════════════════════════
-  # STAGE 03b — iOS PRODUCTION SIGNING  (matrix-driven, release builds only)
+  # STAGE 03b — iOS PRODUCTION SIGNING
   # ════════════════════════════════════════════════════════════════════════════
-  # Unity emits an Xcode project; the shippable iOS artifact is a signed IPA.
-  # That signing happens HERE, inside the build lane, so the IPA exists before
-  # the immutable-artifact boundary.
+  # iOS signing is now folded into the build job via reusable-build-platform.yml
+  # conditional steps (sign-ios input). The IPA is produced, manifested and
+  # uploaded in the same macOS build job that produces the Xcode project.
   #
-  # It used to happen during promotion, which quietly broke the invariant the
-  # whole design rests on: the artifact QA validated was an Xcode project, and
-  # the artifact that shipped was an IPA built from it afterwards. Those are
-  # not the same binary. A promotion must only download, verify and publish.
+  # This eliminates the separate sign-ios job node from the Actions graph,
+  # so non-iOS builds never show an iOS-related node.
   #
-  # This job is matrix-driven: the sign-matrix is populated only when iOS is
-  # selected AND the build type is release.  For every other platform the
-  # matrix is empty, making the pipeline structurally incapable of scheduling
-  # iOS signing operations for a non-iOS build.
-  #
-  # Requires a self-hosted macOS runner with Xcode. Without one the iOS build
-  # itself reports `blocked`, and this job is skipped with it.
+  # Artifact contract is unchanged:
+  #   Stage 03 produces: release-ios-xcodeproj AND release-ios-ipa
+  #   Stage 04 validates: release-ios-ipa (validator=ipa)
+  #   Stage 05 collects: release-ios-ipa into the Release Set
   # ════════════════════════════════════════════════════════════════════════════
-  sign-ios:
-    name: ${{ matrix.label }} / Sign & Export IPA
-    needs: [resolve-config, build]
-    if: >-
-      !cancelled() &&
-      needs.resolve-config.outputs.has-sign-ops == 'true' &&
-      needs.build.result == 'success'
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.resolve-config.outputs.sign-matrix) }}
-    runs-on: ${{ fromJSON(matrix.runner-labels) }}
-    steps:
-      - name: Checkout toolkit
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.toolkit-repo }}
-          ref: ${{ needs.resolve-config.outputs.toolkit-ref }}
-          path: .toolkit
-
-      - name: Download Xcode project
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.xcodeproj-artifact }}
-          path: xcode-project/
-
-      - name: Setup signing
-        id: signing
-        uses: ./.toolkit/.github/actions/ios-setup-signing
-        with:
-          certificate-base64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
-          certificate-password: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
-          provisioning-profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-          export-method: ${{ inputs.ios-export-method }}
-
-      - name: Find Xcode project
-        id: find-project
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          XCODEPROJ=$(find xcode-project/ -name '*.xcodeproj' -type d | head -1)
-          if [[ -z "${XCODEPROJ}" ]]; then
-            echo "::error::No .xcodeproj found in the build artifact"
-            exit 1
-          fi
-          echo "project-dir=$(dirname "${XCODEPROJ}")" >> "${GITHUB_OUTPUT}"
-
-      - name: Archive and export
-        id: archive
-        uses: ./.toolkit/.github/actions/ios-archive-export
-        with:
-          xcode-project-path: ${{ steps.find-project.outputs.project-dir }}
-          export-options-path: ${{ steps.signing.outputs.export-options-path }}
-          development-team: ${{ steps.signing.outputs.development-team || '' }}
-          archive-path: build-output/${{ inputs.ios-app-name }}.xcarchive
-          export-path: build-output/ipa
-
-      # The IPA is the iOS artifact a Release Set promotes, so it needs the same
-      # manifest every other platform's build leg writes. Without one the only
-      # iOS manifest in the run was the Xcode project's, and the Release Set
-      # listed a project nobody can install where the shippable binary should
-      # have been.
-      #
-      # This lane is native macOS: there is no image and no digest, so the
-      # provenance is the Unity version, the runner and the commit —
-      # `auditable`, recorded as such rather than dressed up (I-008).
-      - name: Write IPA artifact manifest
-        id: ipa-manifest
-        shell: bash
-        env:
-          IPA_PATH: ${{ steps.archive.outputs.ipa-path }}
-        run: |
-          set -Eeuo pipefail
-          MANIFEST_DIR="${RUNNER_TEMP}/ios-ipa-manifest"
-          mkdir -p "${MANIFEST_DIR}"
-          python3 .toolkit/scripts/common/artifact_manifest.py \
-            --platform        iOS \
-            --configuration   "${{ needs.resolve-config.outputs.configuration }}" \
-            --artifact-type   IPA \
-            --artifact-path   "${IPA_PATH}" \
-            --output          "${MANIFEST_DIR}/artifact-manifest.json" \
-            --version         "${{ needs.resolve-config.outputs.app-version }}" \
-            --build-number    "${{ needs.resolve-config.outputs.build-number }}" \
-            --unity-version   "${{ needs.resolve-config.outputs.unity-version }}" \
-            --commit          "${{ github.sha }}" \
-            --branch          "${{ github.ref_name }}" \
-            --artifact-name   "${{ matrix.ipa-artifact }}" \
-            --builder         local-xcode \
-            --builder-kind    native \
-            --runner          "${RUNNER_OS:-macOS}/${RUNNER_ARCH:-unknown}" \
-            > /dev/null
-          echo "dir=${MANIFEST_DIR}" >> "${GITHUB_OUTPUT}"
-
-      - name: Upload IPA artifact manifest
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.ipa-artifact }}-manifest
-          path: ${{ steps.ipa-manifest.outputs.dir }}/artifact-manifest.json
-          if-no-files-found: error
-          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
-
-      - name: Upload signed IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.ipa-artifact }}
-          path: |
-            ${{ steps.archive.outputs.ipa-path }}
-            build-output/${{ inputs.ios-app-name }}.xcarchive/dSYMs/
-          if-no-files-found: error
-          retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
-
-      # Same shape every other platform's build leg publishes, so stage 07 can
-      # report iOS without a special case.
-      - name: Record platform result
-        if: always()
-        shell: bash
-        env:
-          OUTCOME: ${{ steps.archive.outcome }}
-        run: |
-          set -Eeuo pipefail
-          mkdir -p pipeline-results
-          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"IPA","artifactName":"%s"}\n' \
-            "${{ matrix.platform }}" "${OUTCOME}" "${{ matrix.ipa-artifact }}" \
-            > pipeline-results/build-${{ matrix.platform }}.json
-
-      - name: Upload platform result
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-result-build-${{ matrix.platform }}-signed
-          path: pipeline-results/
-          retention-days: ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
-
-      - name: Cleanup signing
-        if: always()
-        uses: ./.toolkit/.github/actions/ios-cleanup-signing
-        with:
-          keychain-name: ${{ steps.signing.outputs.keychain-name || '' }}
-
-      # Where the run has got to, drawn into this job's summary.
-      - name: Progress
-        if: always()
-        continue-on-error: true
-        uses: ./.toolkit/.github/actions/pipeline-progress
-        with:
-          title: Build / ${{ needs.resolve-config.outputs.build-type == 'release' && 'Release' || 'Development' }}
-          stages: ${{ env.PIPELINE_STAGES }}
-          current: 03b Sign iOS
-          toolkit-path: .toolkit
 
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 04 — ARTIFACT VALIDATION  (one matrix job, not one job per platform)
@@ -1437,13 +1291,12 @@ jobs:
 
   validate-artifact:
     name: ${{ matrix.label }} / Validate ${{ matrix.artifact-type }}
-    # sign-ios produces the iOS release artifact, so validation waits for it.
-    # `skipped` is fine: it only runs for release builds that selected iOS.
-    needs: [resolve-config, build, sign-ios]
+    # iOS signing is now part of the build job (reusable-build-platform.yml),
+    # so the IPA artifact is ready when the build matrix completes.
+    needs: [resolve-config, build]
     if: >-
       !cancelled() &&
       needs.build.result == 'success' &&
-      (needs.sign-ios.result == 'success' || needs.sign-ios.result == 'skipped') &&
       needs.resolve-config.outputs.has-validations == 'true'
     strategy:
       fail-fast: false
@@ -1591,12 +1444,11 @@ jobs:
 
   release-manifest:
     name: Release Manifest
-    needs: [resolve-config, build, sign-ios, validate-artifact]
+    needs: [resolve-config, build, validate-artifact]
     if: >-
       !cancelled() &&
       needs.resolve-config.outputs.build-type == 'release' &&
       needs.build.result == 'success' &&
-      (needs.sign-ios.result == 'success' || needs.sign-ios.result == 'skipped') &&
       (needs.validate-artifact.result == 'success' || needs.validate-artifact.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
