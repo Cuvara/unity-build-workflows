@@ -12,6 +12,49 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [5.1.0] — 2026-09-14
+
+### Added
+
+- **A runner plan, so the machine a job lands on stops being a guess.** Eight
+  settings feed one decision — `RUNNER_TYPE`, `BUILD_ENGINE`, `RUNNER_LABELS`,
+  the three per-OS label variables, the legacy `RUNNER_DEFAULT_MODE` family and
+  the derived `runner-mode` — and nothing printed the answer. Asking "why did
+  this job land on that machine?" meant reading the resolver.
+
+  `resolve_build_flow.sh` now emits `runner-plan`: one row per platform that
+  will actually build, with `runsOn`, `engine`, `runnerType`, **the tier that
+  decided the labels**, and a note. Stage 01 renders it as a table in the run
+  summary and re-exports it as a pipeline output.
+
+  **No routing changed.** Every row shares one `runs-on`, because that is what
+  the pipeline does — stage 03 passes a single label list to every leg of the
+  matrix and stage 03b falls back to it. That is the finding, not a rendering
+  bug, and a test pins it while naming itself as the one to update when routing
+  becomes per-platform.
+
+  Two things the plan is careful about:
+
+  - **The CI lane plans nothing.** `platform: None` yields an empty plan. The
+    resolver's own platform flags still read `true` there, because on a push it
+    takes them from `*_BUILD_PLATFORMS` and never looks at the input; the
+    honouring happens later, where the matrix is built. Rows for builds that
+    will not run would be a confident answer to the wrong question.
+  - **iOS on non-macOS labels is reported.** The self-hosted default is
+    `self-hosted,windows` whatever the OS, so an iOS build lands on a Windows
+    box — and GitHub does not fail a job whose labels match no runner, it queues
+    it forever. Reported as a note and a warning, not yet enforced: enforcement
+    is breaking, and a warning that ships today beats a gate that ships next
+    month.
+
+  The full audit — including a "single source of truth" that
+  `unity-pipeline.yml` never calls, and three per-OS label variables that are
+  resolved, exported and read by nothing — is in
+  [docs/adr/004-runner-selection.md](docs/adr/004-runner-selection.md), with the
+  staged plan for fixing the routing itself.
+
+---
+
 ## [5.0.0] — 2026-09-14
 
 ### Added
