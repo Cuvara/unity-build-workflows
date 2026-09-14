@@ -16,8 +16,10 @@
 # already reported whether it passed and a second red mark on the same commit
 # for the same reason helps nobody.
 #
-# Numbered 09 because it belongs to the build layer but runs after it, not as
-# part of it.
+# The file is numbered 09 because it belongs to the build layer but runs after
+# it, not as part of it. The node itself is not: 4.0.0 took the stage number out
+# of every job name, because GitHub already prefixes each one with the caller's
+# lane and the number was the segment carrying the least.
 # ────────────────────────────────────────────────────────────────────────────
 
 name: Build Diagnostics
@@ -44,7 +46,7 @@ concurrency:
 
 jobs:
   report:
-    name: 09 / Unity diagnostics
+    name: Unity diagnostics
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit
@@ -52,7 +54,7 @@ jobs:
         with:
           repository: Cuvara/unity-build-workflows
           # Same ref the build used.
-          ref: v3
+          ref: v5
           path: .toolkit
 
       - name: Report what Unity said
