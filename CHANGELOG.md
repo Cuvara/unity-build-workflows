@@ -63,6 +63,26 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [5.5.0] — 2026-09-14
+
+### Added
+
+- **`RUNNER_LABELS=none`**, meaning what an empty value would mean. 5.3.0 made an
+  absent or empty `RUNNER_LABELS` resolve to `github-hosted` + `docker`, which
+  works — but GitHub will not *store* an empty value:
+
+      422  Variable value cannot be empty.
+
+  So the only way to say "no machine" was to delete the variable, and a deleted
+  variable is an invisible switch: somebody has to already know it exists to use
+  it. `none` (also `off`, `disabled`, any case, surrounding space ignored) keeps
+  it on the settings page saying what it does.
+
+  Only those exact words. A runner labelled `none-of-your-business` is still a
+  machine.
+
+---
+
 ## [5.3.0] — 2026-09-14
 
 ### Changed

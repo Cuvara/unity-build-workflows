@@ -308,3 +308,35 @@ def test_the_global_label_default_no_longer_names_windows_for_everyone(tmp_path)
                          IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
                          RUNNER_LINUX_LABEL="my-linux")
     assert "windows" not in outputs["runner-labels-csv"], outputs["runner-labels-csv"]
+
+
+# ---------------------------------------------------------------------------
+# `none`, because GitHub will not store an empty variable value
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("sentinel", ["none", "NONE", " none ", "off", "disabled"])
+def test_none_means_no_machine_named(tmp_path, sentinel):
+    """GitHub rejects a variable with an empty value:
+
+        422  Variable value cannot be empty.
+
+    Deleting RUNNER_LABELS works, but then the switch is invisible — somebody has
+    to already know it exists to use it. `none` keeps it on the settings page,
+    saying what it does.
+    """
+    outputs, _ = resolve(tmp_path, IN_PLATFORM="Android",
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                         IN_RUNNER_LABELS=sentinel)
+    assert outputs["runner-type"] == "github-hosted"
+    assert outputs["build-engine"] == "docker"
+    assert outputs["runner-labels-csv"] == "ubuntu-latest"
+
+
+def test_a_real_label_is_not_mistaken_for_the_sentinel(tmp_path):
+    """Only the exact words are sentinels. A machine could be labelled
+    `none-of-your-business`, and it would be a machine."""
+    outputs, _ = resolve(tmp_path, IN_PLATFORM="Android",
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                         IN_RUNNER_LABELS="none-of-your-business")
+    assert outputs["runner-labels-csv"] == "none-of-your-business"
+    assert outputs["runner-type"] == "self-hosted"
