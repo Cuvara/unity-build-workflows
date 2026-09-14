@@ -42,6 +42,20 @@ public static class PlayerBuilder
                                 ?? Environment.GetEnvironmentVariable("BUILD_OUTPUT_DIR")
                                 ?? "build";
 
+            // When the output root is relative ("build"), resolve it against
+            // GITHUB_WORKSPACE so the artifact lands where the upload step
+            // expects it — <workspace>/build/. Without this, a project-path
+            // other than "." causes Unity to write build/ inside the project
+            // subdirectory, and the pipeline's upload misses it.
+            if (!Path.IsPathRooted(outputRoot))
+            {
+                string workspace = Environment.GetEnvironmentVariable("GITHUB_WORKSPACE");
+                if (!string.IsNullOrEmpty(workspace))
+                {
+                    outputRoot = Path.Combine(workspace, outputRoot);
+                }
+            }
+
             string[] scenes = EditorBuildSettings.scenes
                 .Where(s => s.enabled)
                 .Select(s => s.path)
