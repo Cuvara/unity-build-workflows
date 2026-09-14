@@ -158,6 +158,17 @@ inputs:
     required: false
     default: ''
 
+  platform-summary:
+    description: |
+      Stage 07's per-platform summary, as JSON. The size of a built artifact is
+      taken from here (`artifactSizeBytes`) rather than re-derived, because the
+      build is the only thing that measured the artifact itself: this action
+      sees a downloaded copy, and zipping that answers a different question —
+      and answers 0 when the copy is not where it looked.
+      Example: [{"platform":"Android","artifactType":"APK","artifactSizeBytes":"70536963"}]
+    required: false
+    default: ''
+
   total-errors:
     description: |
       Total compiler/build error count across all platforms (integer string).
@@ -322,6 +333,7 @@ runs:
         INPUT_DEFINE_SYMBOLS_COUNT:  ${{ inputs.define-symbols-count }}
         INPUT_DEFINE_SYMBOLS:        ${{ inputs.define-symbols }}
         INPUT_PLATFORM_DIAGNOSTICS:  ${{ inputs.platform-diagnostics }}
+        INPUT_PLATFORM_SUMMARY:      ${{ inputs.platform-summary }}
         INPUT_TOTAL_ERRORS:          ${{ inputs.total-errors }}
         INPUT_TOTAL_WARNINGS:        ${{ inputs.total-warnings }}
         INPUT_RESULT_ANDROID:        ${{ inputs.result-android }}
@@ -398,6 +410,20 @@ runs:
           done <<< "${INPUT_PLATFORM_DIAGNOSTICS}"
         fi
 
+        # The authoritative artifact size, keyed by platform, straight from the
+        # build that produced it.
+        declare -A _PLAT_BYTES
+        if [ -n "${INPUT_PLATFORM_SUMMARY:-}" ]; then
+          _SIZES=$(printf '%s' "${INPUT_PLATFORM_SUMMARY}" \
+            | jq -r '.[]? | "\(.platform)=\(.artifactSizeBytes // "")"' 2>/dev/null) || _SIZES=""
+          while IFS='=' read -r _sp _sb; do
+            [ -z "${_sp}" ] && continue
+            # Reject anything non-numeric rather than letting it reach arithmetic.
+            case "${_sb}" in ''|*[!0-9]*) continue ;; esac
+            [ "${_sb}" -gt 0 ] && _PLAT_BYTES["${_sp}"]="${_sb}"
+          done <<< "${_SIZES}"
+        fi
+
         # ── Step 4: Artifact sizing + attach-vs-link + per-platform rows ──────
         #
         # _should_attach ZIP_MB THRESHOLD_MB
@@ -416,7 +442,7 @@ runs:
 
         FILES_ATTACH_NAMES=()   # platform names for files to attach
         FILES_ATTACH_PATHS=()   # corresponding temp zip paths
-        PLATFORM_ROWS=""        # markdown for the 📦 Platforms embed field
+        PLATFORM_ROWS=""        # markdown for the 📦 Artifacts embed field
 
         for PLAT_ENTRY in \
             "Android:${INPUT_RESULT_ANDROID:-skipped}" \
@@ -473,13 +499,25 @@ runs:
             ZIP_PATH="/tmp/unity-build-${PLAT}-$$.zip"
             ATTACHED=0
 
+            # The size the build measured, in preference to anything derived
+            # here: this job holds a downloaded copy, and `du` on a zip of that
+            # copy answers "how big is the zip", not "how big is the artifact" —
+            # and answered 0 whenever the copy was not where it looked.
+            _P_BYTES="${_PLAT_BYTES[${PLAT}]:-}"
+            if [ -n "${_P_BYTES}" ]; then
+              PLAT_SIZE_MB=$(( _P_BYTES / 1048576 ))
+              [ "${PLAT_SIZE_MB}" -eq 0 ] && PLAT_SIZE_MB=1
+            fi
+
             if [ -d "${ARTIFACT_SUBDIR}" ]; then
               zip -qr "${ZIP_PATH}" "${ARTIFACT_SUBDIR}" 2>/dev/null || true
               if [ -f "${ZIP_PATH}" ]; then
                 ZIP_KB=$(du -k "${ZIP_PATH}" 2>/dev/null | awk '{print $1}' || echo "0")
-                PLAT_SIZE_MB=$(( ${ZIP_KB:-0} / 1024 ))
-                [ "${PLAT_SIZE_MB}" -eq 0 ] && PLAT_SIZE_MB=1
-                if _should_attach "${PLAT_SIZE_MB}" "${THRESHOLD_MB}"; then
+                # Attachment is decided on what would actually be uploaded.
+                ZIP_MB=$(( ${ZIP_KB:-0} / 1024 ))
+                [ "${ZIP_MB}" -eq 0 ] && ZIP_MB=1
+                [ -z "${_P_BYTES}" ] && PLAT_SIZE_MB="${ZIP_MB}"
+                if _should_attach "${ZIP_MB}" "${THRESHOLD_MB}"; then
                   FILES_ATTACH_NAMES+=("${PLAT}")
                   FILES_ATTACH_PATHS+=("${ZIP_PATH}")
                   ATTACHED=1
@@ -490,15 +528,23 @@ runs:
             fi
 
             # Delivery: prefer explicit binary artifact download link over attached/linked
+            # "0 MB" is not a size, it is the absence of one — and it read as
+            # a successful build of nothing. Say so instead.
+            if [ "${PLAT_SIZE_MB}" -gt 0 ]; then
+              SIZE_TEXT="\`${PLAT_SIZE_MB} MB\`"
+            else
+              SIZE_TEXT="size unknown"
+            fi
+
             if [ -n "${BIN_URL}" ]; then
               # binaryArtifactId available → direct download link (most useful)
-              DELIVERY="${PLAT_SIZE_MB} MB · [⬇️ download](${BIN_URL})"
+              DELIVERY="${SIZE_TEXT} · [⬇️ download](${BIN_URL})"
             elif [ "${ATTACHED}" -eq 1 ]; then
-              DELIVERY="${PLAT_SIZE_MB} MB (attached)"
+              DELIVERY="${SIZE_TEXT} · attached"
             elif [ -n "${INPUT_RUN_URL:-}" ]; then
-              DELIVERY="${PLAT_SIZE_MB} MB ([linked](${INPUT_RUN_URL}))"
+              DELIVERY="${SIZE_TEXT} · [run](${INPUT_RUN_URL})"
             else
-              DELIVERY="${PLAT_SIZE_MB} MB (see run)"
+              DELIVERY="${SIZE_TEXT}"
             fi
 
           elif [ "${RESULT}" = "failure" ]; then
@@ -511,7 +557,10 @@ runs:
           # ── Diagnostic suffix: · ⚠️ N · ❌ N · [📄 logs](...) ─────────────
           DIAG_SUFFIX=""
           if [ -n "${_P_ERR}" ] || [ -n "${_P_WARN}" ]; then
-            # Show both counters even at 0 — consistent for all diag-covered platforms
+            # Show both counters even at 0 — consistent for all diag-covered
+            # platforms. Empty is NOT zero: the Docker lane writes no Editor.log,
+            # so there is nothing to count, and a measured 0 would be a claim
+            # nobody made.
             DIAG_SUFFIX=" · ⚠️ ${_P_WARN:-0} · ❌ ${_P_ERR:-0}"
             if [ -n "${_P_LOGID}" ] && [ -n "${RUN_ID}" ] && [ -n "${INPUT_REPOSITORY:-}" ]; then
               LOG_URL="https://github.com/${INPUT_REPOSITORY}/actions/runs/${RUN_ID}/artifacts/${_P_LOGID}"
@@ -644,40 +693,64 @@ runs:
 
         tests_emoji = emoji_map.get(tests_result, '❓')
 
-        # ── Inline fields — grouped for 3-per-row Discord layout ─────────────
-        # Group 1: Branch | Flow | Run #
-        # Group 2: Triggered by | Event | Duration
-        # Group 3: Unity | Tests | Diagnostics
+        # ── Field order: what the reader came for, then how it was made ──────
+        # The artifact and its download link used to sit last, under ten inline
+        # fields of run metadata. A build notification exists so somebody can
+        # install the build; the link goes first.
         fields = []
 
-        # Group 1
+        # ── 📦 Artifacts — first, because it is the point ─────────────────────
+        platforms_value = platform_rows.strip()
+        if platforms_value:
+            if len(platforms_value) > 1024:
+                platforms_value = platforms_value[:1023] + '…'
+            fields.append({'name': '\U0001f4e6 Artifacts',
+                           'value': platforms_value,
+                           'inline': False})
+
+        # Row 1: Branch | Trigger | Duration
         if branch:
             b = branch[:50] + ('...' if len(branch) > 50 else '')
-            fields.append({'name': 'Branch',       'value': b,            'inline': True})
-        fields.append(    {'name': 'Flow',          'value': flow_type,    'inline': True})
-        if configuration:
-            fields.append({'name': 'Configuration', 'value': configuration, 'inline': True})
-        if run_number:
-            fields.append({'name': 'Run',           'value': '#{}'.format(run_number), 'inline': True})
+            if repository:
+                b = '[{}](https://github.com/{}/tree/{})'.format(b, repository, branch)
+            fields.append({'name': 'Branch',   'value': b, 'inline': True})
 
-        # Group 2
-        if actor:
-            fields.append({'name': 'Triggered by',  'value': actor,        'inline': True})
-        if event_name:
-            fields.append({'name': 'Event',         'value': event_name,   'inline': True})
+        # `Triggered by`, `Event` and `Flow` were three fields answering one
+        # question. Actor and event fold together; flow survives only when it
+        # says something the event does not — `push-develop` does, `manual`
+        # beside `workflow_dispatch` does not.
+        trigger_parts = [x for x in (actor, event_name) if x]
+        if flow_type and flow_type not in ('manual', '') and flow_type not in (event_name or ''):
+            trigger_parts.append(flow_type)
+        if trigger_parts:
+            fields.append({'name': 'Trigger', 'value': ' · '.join(trigger_parts), 'inline': True})
+
         if build_duration:
-            fields.append({'name': 'Duration',      'value': build_duration,'inline': True})
+            fields.append({'name': 'Duration', 'value': build_duration, 'inline': True})
 
-        # Group 3
+        # Row 2: Unity | Tests | Diagnostics
         if unity_ver:
-            fields.append({'name': 'Unity',         'value': unity_ver,    'inline': True})
+            fields.append({'name': 'Unity',    'value': unity_ver, 'inline': True})
         fields.append({'name': 'Tests',
                        'value': '{} {}'.format(tests_emoji, tests_result),
                        'inline': True})
+        # Empty is not zero. When no platform produced a readable Editor.log
+        # there is nothing to count, and "0 errors · 0 warnings" would be a
+        # clean bill of health nobody issued.
         if total_errors != '' or total_warnings != '':
             diag_val = '❌ {} errors · ⚠️ {} warnings'.format(
                 total_errors or '0', total_warnings or '0')
-            fields.append({'name': 'Diagnostics',   'value': diag_val,     'inline': True})
+            fields.append({'name': 'Diagnostics', 'value': diag_val, 'inline': True})
+
+        # `Configuration` repeated the environment already in the title, and
+        # `Run #N` was a number with no link on it. Both fold into one field.
+        if run_number and repository:
+            fields.append({'name': 'Run',
+                           'value': '[#{}]({})'.format(run_number, run_url) if run_url
+                                    else '#{}'.format(run_number),
+                           'inline': True})
+        elif run_number:
+            fields.append({'name': 'Run', 'value': '#{}'.format(run_number), 'inline': True})
 
         # ── Failed stage ──────────────────────────────────────────────────────
         # "pipeline failed" sent people to open the run and read seven job logs.
@@ -734,15 +807,6 @@ runs:
                            'value': build_info_value,
                            'inline': False})
 
-        # ── 📦 Platforms block field ──────────────────────────────────────────
-        platforms_value = platform_rows.strip()
-        if platforms_value:
-            if len(platforms_value) > 1024:
-                platforms_value = platforms_value[:1023] + '…'
-            fields.append({'name': '\U0001f4e6 Platforms',
-                           'value': platforms_value,
-                           'inline': False})
-
         # ── Assemble embed ────────────────────────────────────────────────────
         embed = {
             'title': title,
@@ -760,7 +824,9 @@ runs:
             embed['footer'] = {'text': repository}
 
         # ── Discord char-limit guard (total embed ≤ 6000) ────────────────────
-        # Trim the Platforms field if the embed is near the limit.
+        # Trim the Artifacts field if the embed is near the limit. Matched by
+        # name, so renaming the field without renaming it here disables the trim
+        # silently — and Discord rejects the whole embed instead.
         def _embed_chars(e):
             chars = len(e.get('title', '')) + len(e.get('description', ''))
             for f in e.get('fields', []):
@@ -771,7 +837,7 @@ runs:
         EMBED_CHAR_LIMIT = 5800
         if _embed_chars(embed) > EMBED_CHAR_LIMIT:
             for f in embed['fields']:
-                if f['name'] == '\U0001f4e6 Platforms' and f['value']:
+                if f['name'] == '\U0001f4e6 Artifacts' and f['value']:
                     excess = _embed_chars(embed) - EMBED_CHAR_LIMIT
                     trimmed_len = max(100, len(f['value']) - excess - 1)
                     f['value'] = f['value'][:trimmed_len] + '…'
