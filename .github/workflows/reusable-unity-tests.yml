@@ -55,6 +55,36 @@ on:
         default: 'auto'
         type: string
 
+      post-test-check-run:
+        description: |
+          Let game-ci/unity-test-runner post its results as a GitHub check run.
+
+          OFF by default, and the default is the honest one: the token is
+          read-only unless a repository says otherwise, so with this on and no
+          `checks: write` the action fails with
+
+            Resource not accessible by integration - .../checks/runs#create-a-check-run
+
+          on every single run. Granting it is not free either: an explicit
+          `permissions:` block REPLACES the default set, so a caller that lists
+          only `checks: write` also revokes `packages: read` and the docker lane
+          can no longer pull its image from GHCR.
+
+          To turn it on, the CALLING workflow must grant the full set it needs:
+
+            permissions:
+              contents: read
+              packages: read
+              actions:  read
+              checks:   write
+
+          Nothing is lost by leaving it off. The job already fails on a failed
+          test, the failing test's name and file are in the job log, and the
+          NUnit XML is uploaded as `unity-tests-<mode>`.
+        required: false
+        default: false
+        type: boolean
+
       submodule-auth:
         description: >-
           How git submodules are authenticated. 'token' (the default, and the
@@ -309,7 +339,9 @@ jobs:
           unityVersion:  ${{ inputs.unity-version }}
           testMode:      EditMode
           artifactsPath: test-results/EditMode
-          githubToken:   ${{ github.token }}
+          # Empty unless asked for: supplying a token is what makes the action
+          # attempt a check run, and the attempt fails on a read-only token.
+          githubToken:   ${{ inputs.post-test-check-run && github.token || '' }}
 
       # ── 4b. Run tests — Docker lane (PlayMode) ────────────────────────────────
       # always() ensures PlayMode still runs even if EditMode tests failed.
@@ -331,7 +363,9 @@ jobs:
           unityVersion:  ${{ inputs.unity-version }}
           testMode:      PlayMode
           artifactsPath: test-results/PlayMode
-          githubToken:   ${{ github.token }}
+          # Empty unless asked for: supplying a token is what makes the action
+          # attempt a check run, and the attempt fails on a read-only token.
+          githubToken:   ${{ inputs.post-test-check-run && github.token || '' }}
 
       # ── 4c. Run tests — self-hosted-windows lane ──────────────────────────────
       # Local Unity installation (no Docker, no license secrets).

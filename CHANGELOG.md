@@ -10,6 +10,38 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+---
+
+## [5.6.0] — 2026-09-14
+
+### Fixed
+
+- **Every test run logged two `Resource not accessible by integration` errors.**
+  `game-ci/unity-test-runner` posts its results as a check run when it is given a
+  token, and it was given one unconditionally. The default `GITHUB_TOKEN` is
+  **read-only** unless a repository says otherwise — `read` on this org and all
+  three repositories — so the attempt failed on every run, once per test mode,
+  for as long as the workflow has existed.
+
+  It is now off by default and switched on with the `POST_TEST_CHECK_RUN`
+  repository variable.
+
+  Granting the permission is not free, which is why this is opt-in rather than a
+  `permissions:` block added on everyone's behalf: an explicit `permissions:`
+  block **replaces** the default set, so a caller that lists only `checks: write`
+  also revokes `packages: read` — and the docker lane can no longer pull its
+  image from GHCR. A consumer turning this on needs the whole set:
+
+      permissions:
+        contents: read
+        packages: read
+        actions:  read
+        checks:   write
+
+  Nothing is lost by leaving it off: the job already fails on a failed test, the
+  failing test's name and file are in the job log, and the NUnit XML is uploaded
+  as `unity-tests-<mode>`.
+
 ### Added
 
 - **Unity's errors land on the commit that caused them.** A build cannot
