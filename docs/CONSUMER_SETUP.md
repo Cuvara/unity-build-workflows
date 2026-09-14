@@ -296,8 +296,33 @@ gh variable set DISCORD_THREAD_ID  --repo "${REPO}" --body "1234567890123456789"
 **Build delivery** (optional) decides where a finished build is copied so
 people can download it by clicking a link. A GitHub artifact URL 404s for
 anyone not signed in with repository access, so without this the link in a
-Discord message is unusable by testers. Set `BUILD_DELIVERY` to `r2` or
-`local` — see [BUILD\_DELIVERY.md](BUILD_DELIVERY.md).
+Discord message is unusable by testers. Set `BUILD_DELIVERY` to `r2`, `local`
+or `firebase` — see [BUILD\_DELIVERY.md](BUILD_DELIVERY.md).
+
+**Firebase App Distribution** (recommended for private repos) — testers get a
+direct install link, and `ARTIFACT_STORAGE=firebase` skips the GitHub binary
+upload to save storage costs:
+
+```bash
+# Delivery — Firebase App Distribution (tester link in Discord)
+gh variable set BUILD_DELIVERY           --repo "${REPO}" --body "firebase"
+gh variable set FIREBASE_APP_ID_ANDROID  --repo "${REPO}" --body "1:123456789:android:abcdef"
+gh variable set FIREBASE_APP_ID_IOS      --repo "${REPO}" --body "1:123456789:ios:abcdef"
+gh variable set FIREBASE_TESTER_GROUPS   --repo "${REPO}" --body "internal-testers"
+gh secret  set FIREBASE_SERVICE_ACCOUNT_JSON --repo "${REPO}" < service-account.json
+
+# Storage — skip GitHub binary artifact (saves storage on private repos)
+gh variable set ARTIFACT_STORAGE         --repo "${REPO}" --body "firebase"
+
+# Fastlane direct-to-store (release builds upload to stores from build runner)
+gh variable set ANDROID_PACKAGE_NAME     --repo "${REPO}" --body "com.studio.game"
+gh variable set IOS_APP_ID               --repo "${REPO}" --body "123456789"
+gh secret  set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON --repo "${REPO}" < play-sa.json
+# iOS store secrets (if releasing iOS):
+gh secret  set APP_STORE_CONNECT_KEY_ID     --repo "${REPO}"
+gh secret  set APP_STORE_CONNECT_ISSUER_ID  --repo "${REPO}"
+gh secret  set APP_STORE_CONNECT_PRIVATE_KEY --repo "${REPO}" < AuthKey.p8
+```
 
 **Steam** (only if you ship Windows or Linux through it) is configured
 separately, because a distribution provider is not a platform capability: a
