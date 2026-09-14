@@ -172,3 +172,20 @@ def test_the_build_job_routes_on_the_matrix_row():
     text = PIPELINE.read_text(encoding="utf-8")
     assert "runner-labels:       ${{ matrix.runner-labels }}" in text
     assert text.count("runner-labels:       ${{ needs.resolve-config.outputs.runner-labels }}") == 0
+
+
+def test_the_matrix_step_does_not_depend_on_the_working_directory(tmp_path):
+    """The helper must be found from wherever the step happens to run.
+
+    The first draft resolved it against `.`, which is the repository root when
+    pytest runs from there and `tests/` on CI, where the harness runs the
+    extracted block from its own directory. It passed locally and failed on CI —
+    the cheapest possible way to learn that a green local suite is not evidence.
+    """
+    text = PIPELINE.read_text(encoding="utf-8")
+    assert '_rl_script=""' in text, "the helper path must be searched, not assumed"
+    assert "matrix_runner_labels.py not found" in text, (
+        "a missing helper must fail loudly: every matrix row would otherwise lose "
+        "its runs-on, and the run dies at expression-evaluation time"
+    )
+

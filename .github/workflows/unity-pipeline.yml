@@ -638,13 +638,26 @@ jobs:
           # One platform's runs-on, as an escaped JSON string: the row goes
           # through fromJSON into a workflow input that is itself a JSON string,
           # so the quotes have to survive one level more than they look like.
+          # Where the helper lives: `.toolkit` on a runner, the repository root
+          # under the test harness that extracts this block and runs it -- from
+          # inside tests/, which is why a bare "." is not good enough. Searching
+          # upward keeps this independent of the working directory; depending on
+          # cwd is how this passed locally and failed on CI.
+          _rl_script=""
+          for _c in "${TOOLKIT_PATH:-}/scripts/common/matrix_runner_labels.py" \
+                    "${GITHUB_WORKSPACE:-}/.toolkit/scripts/common/matrix_runner_labels.py" \
+                    "./scripts/common/matrix_runner_labels.py" \
+                    "../scripts/common/matrix_runner_labels.py" \
+                    "../../scripts/common/matrix_runner_labels.py"; do
+            if [ -f "${_c}" ]; then _rl_script="${_c}"; break; fi
+          done
+          [ -n "${_rl_script}" ] || {
+            echo "::error::matrix_runner_labels.py not found; every matrix row would lose its runs-on"
+            exit 1
+          }
+
           labels_of() {
-            # `.toolkit` on a runner, the repo root in the test harness that
-            # extracts this block and runs it. Unbound-safe: this step runs
-            # under `set -u`, where a bare ${GITHUB_WORKSPACE} is fatal.
-            local base="${TOOLKIT_PATH:-${GITHUB_WORKSPACE:-.}/.toolkit}"
-            [ -f "${base}/scripts/common/matrix_runner_labels.py" ] || base="."
-            RL_PLATFORM="$1" python3 "${base}/scripts/common/matrix_runner_labels.py"
+            RL_PLATFORM="$1" python3 "${_rl_script}"
           }
 
           add() {
