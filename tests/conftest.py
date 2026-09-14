@@ -204,8 +204,10 @@ def resolve_matrix():
 
         raw["build"] = json.loads(raw["build-matrix"])
         raw["validate"] = json.loads(raw["validate-matrix"])
+        raw["sign"] = json.loads(raw.get("sign-matrix", "[]"))
         raw["build_platforms"] = [r["platform"] for r in raw["build"]]
         raw["validate_platforms"] = [r["platform"] for r in raw["validate"]]
+        raw["sign_platforms"] = [r["platform"] for r in raw["sign"]]
         raw["artifact_names"] = [r["artifact-name"] for r in raw["build"]]
         return raw
 

@@ -184,7 +184,9 @@ def test_the_ipa_gets_its_own_artifact_manifest():
     assert manifest_steps, "stage 03b writes no artifact manifest for the IPA"
     run = str(manifest_steps[0]["run"])
     assert "--artifact-type   IPA" in run or "--artifact-type IPA" in run
-    assert "-ios-ipa" in run
+    # The artifact name comes from the sign matrix (matrix.ipa-artifact)
+    # which resolves to e.g. "release-ios-ipa" at runtime.
+    assert "-ios-ipa" in run or "ipa-artifact" in run
 
     uploads = [s for s in steps
                if "upload-artifact" in str(s.get("uses", ""))

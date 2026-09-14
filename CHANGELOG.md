@@ -30,6 +30,14 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   now uses `&thread_id=` when the webhook URL already contains a query string,
   matching the same logic added to `discord-notify`.
 
+- **iOS signing is now matrix-driven.** The `sign-ios` job in `unity-pipeline.yml`
+  is now controlled by a dynamically generated `sign-matrix` instead of a static
+  boolean gate. The matrix is populated only when iOS is selected AND the build
+  type is release; for every other platform the matrix is empty. This makes the
+  pipeline structurally incapable of scheduling iOS signing operations for a
+  non-iOS build. Downstream job dependencies (`validate-artifact`,
+  `release-manifest`) are unchanged — the job ID remains `sign-ios`.
+
 ---
 
 ## [5.7.0] — 2026-09-14

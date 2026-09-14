@@ -907,7 +907,10 @@ def test_ios_signing_happens_before_the_boundary(pipeline_jobs):
     assert "ios-archive-export" in uses
     assert "ios-setup-signing" in uses
     # Only for release builds — a development iOS build needs no distribution identity.
-    assert "sign-ios == 'true'" in str(job.get("if", ""))
+    # The job is matrix-driven: has-sign-ops gates entry, the sign-matrix
+    # is empty for non-release / non-iOS builds.
+    job_if = str(job.get("if", ""))
+    assert "has-sign-ops == 'true'" in job_if or "sign-ios == 'true'" in job_if
 
 
 def test_ios_release_artifact_is_the_ipa(resolve_matrix):
