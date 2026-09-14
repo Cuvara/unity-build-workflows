@@ -66,7 +66,7 @@ different question:
 ```bash
 mkdir -p .github/workflows
 
-for f in 01-ci 10-build-development 11-build-release \
+for f in 01-ci 09-build-diagnostics 10-build-development 11-build-release \
          20-release-android 21-release-ios 22-release-webgl \
          23-release-windows 24-release-linux; do
   cp "unity-build-workflows/templates/consumer-${f}.yml" ".github/workflows/${f}.yml"
@@ -79,6 +79,7 @@ Without the submodule, fetch the same files from
 | File | What it is | Trigger |
 |---|---|---|
 | `01-ci.yml` | Validate and test. **Builds nothing** (I-001). | push / pull_request |
+| `09-build-diagnostics.yml` | After a build: puts Unity's errors on the commit that caused them. See [BUILD\_DIAGNOSTICS.md](BUILD_DIAGNOSTICS.md) | automatic |
 | `10-build-development.yml` | Disposable builds for the team. | manual |
 | `11-build-release.yml` | Produces the immutable Release Set. | manual |
 | `20-release-android.yml` | Promote an Android AAB to Google Play. | manual |

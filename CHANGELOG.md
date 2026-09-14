@@ -10,6 +10,57 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+
+- **Unity's errors land on the commit that caused them.** A build cannot
+  summarise its own Unity output on the game-ci lane: Unity streams to the job
+  console and writes no `Editor.log`, and `GITHUB_TOKEN` cannot download a job
+  log while the run is in progress — the endpoint 404s until the whole run
+  completes. Both halves were proven the hard way.
+
+  `templates/consumer-09-build-diagnostics.yml` runs afterwards on
+  `workflow_run`, when the logs are readable, and posts a **check run** against
+  the build's commit. A compiler error then shows on the line that caused it,
+  in the pull request, instead of a hundred thousand lines down a console
+  nobody opens. The check is `neutral`: the build already reported whether it
+  passed, and a second red mark on the same commit for the same reason helps
+  nobody.
+
+### Fixed
+
+- **The log parser could not read a job log at all.** Every line of an
+  Actions job log carries an ISO timestamp, and some carry ANSI colour from the
+  runner's echo — both sit in front of the text the patterns anchor to, so a
+  compiler error never matched. Silently: a parser that finds nothing looks
+  exactly like a clean build. Caught by a test written before the first run.
+---
+
+## [5.4.0] — 2026-09-14
+
+### Fixed
+
+- **A release Android build on a self-hosted runner produced an APK named
+  `release-android-aab`.** Only the docker lane exported `ANDROID_APP_BUNDLE`.
+  `PlayerBuilder.Build` — the default `-executeMethod` on both local lanes —
+  reads it to choose the artifact, and **defaults to APK when it is absent**, so
+  the wrong thing came out wearing the right label with nothing said. Both local
+  lanes now export it.
+
+- **The macOS lane mapped three platforms and hard-errored on the rest.** A Mac
+  with the modules installed builds the standalone targets too; only the mapping
+  said otherwise, so a project with `Windows64` in `RELEASE_BUILD_PLATFORMS`
+  broke the moment its runner became a Mac. `Windows64`, `Linux64` and
+  `LinuxServer` now map to the same targets the docker resolver uses, including
+  `-standaloneBuildSubtarget Server` — dropping that flag builds a desktop player
+  under a server artifact's name.
+
+### Added
+
+- `tests/test_local_lane_contract.py` — what the self-hosted lanes hand to
+  `PlayerBuilder`. Anything a lane does not export, the builder cannot know, and
+  PlayerBuilder's defaults are silent: a missing variable yields a plausible
+  wrong artifact rather than an error.
+
 ---
 
 ## [5.3.0] — 2026-09-14

@@ -110,3 +110,19 @@ def test_the_build_lane_runs_it():
             / "reusable-build-platform.yml").read_text()
     assert "summarise_unity_log.py" in lane
     assert "always()" in lane.split("Summarise the Unity log")[1][:200]
+
+
+def test_a_job_log_line_is_not_hidden_by_its_timestamp(tmp_path):
+    """A log fetched from the Actions API prefixes every line with an ISO
+    timestamp, and the runner echoes some lines with ANSI colour. Both sit in
+    front of the text the patterns anchor to, so without stripping them a
+    compiler error never matches — silently, because a parser that finds
+    nothing looks exactly like a clean build."""
+    text = (
+        "2026-01-01T00:00:01.1234567Z Assets/A.cs(1,2): error CS0103: nope\n"
+        "2026-01-01T00:00:02Z \x1b[36;1mAssets/B.cs(3,4): warning CS0168: unused\x1b[0m\n"
+    )
+    _, data = run(tmp_path, text)
+    assert data["errorCount"] == 1
+    assert data["warningCount"] == 1
+    assert data["errors"][0]["file"] == "Assets/A.cs"

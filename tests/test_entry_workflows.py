@@ -291,6 +291,45 @@ def test_all_entry_points_agree_on_the_engine_ref():
     assert len(set(refs.values())) == 1, f"entry points disagree on the engine ref: {refs}"
 
 
+# consumer-unity-build.yml is the legacy single-caller shape and pins @v2
+# deliberately: v2 is the last release that had it.
+LEGACY_TEMPLATES = {"consumer-unity-build.yml"}
+
+
+def test_every_template_pins_the_current_major():
+    """Not just the entry points — every template that names an engine ref.
+
+    `test_entry_points_pin_the_current_major` covers ENTRY_POINTS, which is the
+    three build entry points. It did not cover
+    `consumer-09-build-diagnostics.yml`, which pinned `ref: v3` through two
+    majors without anything noticing. A currency check that only looks at the
+    files it already knows about will keep missing the next one.
+    """
+    expected = _current_major()
+    stale = {}
+    for path in sorted(TEMPLATES.glob("consumer-*.yml")):
+        if path.name in LEGACY_TEMPLATES:
+            continue
+        text = path.read_text(encoding="utf-8")
+        # Only refs that point at THIS repository. A bare `@v\d+` also matches
+        # `actions/checkout@v4`, which is an action's version and has nothing to
+        # do with the engine — the first draft of this test failed on exactly
+        # that, which is the difference between a currency check and a grep.
+        patterns = (
+            r"uses:\s*\S*unity-build-workflows\S*@(v\d+)\b",
+            r"toolkit-ref:\s*['\"]?(v\d+)\b",
+            r"^\s*ref:\s*(v\d+)\b",
+        )
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.M):
+                if match.group(1) != expected:
+                    stale.setdefault(path.name, set()).add(match.group(1))
+    assert not stale, (
+        f"templates pin an engine ref older than the current major ({expected}): "
+        f"{ {k: sorted(v) for k, v in stale.items()} }"
+    )
+
+
 def test_entry_points_pin_the_current_major():
     """Agreement is not currency.
 

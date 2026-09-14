@@ -1090,6 +1090,13 @@ jobs:
           :: Output dir consumed by PlayerBuilder; matches the upload path (build/).
           set "BUILD_OUTPUT_DIR=build"
 
+          :: APK or AAB. Only the docker lane used to export this, so a release
+          :: build on a self-hosted runner produced an APK while the artifact was
+          :: named `release-android-aab` -- the wrong thing wearing the right
+          :: label. PlayerBuilder defaults to APK when the variable is absent,
+          :: which is why nothing said so.
+          if "${{ inputs.android-export-type }}"=="aab" set "ANDROID_APP_BUNDLE=1"
+
           "!UNITY_EXE!" ^
             -batchmode -nographics -quit ^
             -projectPath "!PROJECT!" ^
@@ -1133,10 +1140,19 @@ jobs:
           fi
 
           # Map platform to -buildTarget
+          # A Mac with the right modules installed builds the standalone
+          # targets as well; only this mapping said otherwise, and a project
+          # whose RELEASE_BUILD_PLATFORMS contains Windows64 hit a hard error
+          # the moment its runner became a Mac. Same target names as the docker
+          # lane resolver, so the two cannot drift.
           case "${{ inputs.platform }}" in
-            iOS)     BUILD_TARGET="iOS";              EXTRA_PARAMS="" ;;
-            Android) BUILD_TARGET="Android";          EXTRA_PARAMS="" ;;
-            WebGL)   BUILD_TARGET="WebGL";            EXTRA_PARAMS="" ;;
+            iOS)         BUILD_TARGET="iOS";                EXTRA_PARAMS="" ;;
+            Android)     BUILD_TARGET="Android";            EXTRA_PARAMS="" ;;
+            WebGL)       BUILD_TARGET="WebGL";              EXTRA_PARAMS="" ;;
+            Windows64)   BUILD_TARGET="StandaloneWindows64"; EXTRA_PARAMS="" ;;
+            Linux64)     BUILD_TARGET="StandaloneLinux64";   EXTRA_PARAMS="" ;;
+            LinuxServer) BUILD_TARGET="StandaloneLinux64"
+                         EXTRA_PARAMS="-standaloneBuildSubtarget Server" ;;
             *)       echo "::error::Unsupported platform for macOS lane: ${{ inputs.platform }}"; exit 1 ;;
           esac
 
@@ -1149,6 +1165,15 @@ jobs:
 
           # Output dir consumed by PlayerBuilder; matches the upload path (build/).
           export BUILD_OUTPUT_DIR="build"
+
+          # APK or AAB. Only the docker lane used to export this, so a release
+          # build on a self-hosted runner produced an APK while the artifact was
+          # named `release-android-aab` -- the wrong thing wearing the right
+          # label. PlayerBuilder defaults to APK when the variable is absent,
+          # which is why it was silent.
+          if [ "${{ inputs.android-export-type }}" = "aab" ]; then
+            export ANDROID_APP_BUNDLE=1
+          fi
 
           "$UNITY_BIN" \
             -batchmode -nographics -quit \
