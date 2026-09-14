@@ -12,6 +12,60 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [5.2.0] — 2026-09-14
+
+### Fixed
+
+- **Each platform now builds on a runner its OS actually has.** Stage 03 handed
+  one `runner-labels` list to every leg of the build matrix and stage 03b fell
+  back to the same one, so a project on a self-hosted Windows runner sent its
+  **iOS signing job to the Windows box** — and GitHub does not fail a job whose
+  labels match no runner, it queues it forever.
+
+  The three per-OS variables that fix this (`RUNNER_LINUX_LABEL`,
+  `RUNNER_WINDOWS_LABEL`, `RUNNER_MACOS_LABEL`) were already resolved, emitted
+  and re-exported as pipeline outputs, and read by nothing. They are now what
+  the matrix routes on. Stage 2 of
+  [ADR 004](docs/adr/004-runner-selection.md).
+
+- **The per-OS defaults disagreed with each other.** Linux defaulted to
+  `ubuntu-latest`, a GitHub-hosted label; windows and macos defaulted to
+  `self-hosted-windows` / `self-hosted-macos`, which are self-hosted label
+  *names* that no GitHub-hosted runner carries. A github-hosted project asking
+  for Windows therefore got a label set matching no runner. The default now
+  follows `RUNNER_TYPE`.
+
+- **Unity tests and the Addressables build no longer ride the build matrix's
+  labels.** They always run in the Linux container, whatever the matrix is
+  doing, and took `runner-labels-linux` for it.
+
+### Note
+
+Labels follow the **executor**, not the target platform's OS. Under
+`BUILD_ENGINE=docker` every platform but iOS builds in the Linux container —
+including `Windows64`, which Unity cross-compiles from there. Only
+`BUILD_ENGINE=local` routes a target to a runner of its own OS. For a
+github-hosted docker project, which is what both consumer repositories run, the
+only thing this release moves is iOS: from a Linux runner with no Xcode on it to
+a macOS one.
+
+`RUNNER_TYPE` and `BUILD_ENGINE` remain single switches for the whole run, so an
+org with both GitHub-hosted runners and its own machine still cannot split the
+work between them. That gap, and the per-platform executor that closes it, are
+stage 2b in [ADR 004](docs/adr/004-runner-selection.md).
+
+### Changed
+
+- An explicit `RUNNER_LABELS` still overrides everything, for the project whose
+  one runner does every platform.
+- `scripts/common/matrix_runner_labels.py` builds a matrix row's `runs-on`. It
+  is a script rather than a `jq` one-liner because the escaping has to survive
+  two JSON levels, and getting it wrong kills the run at expression-evaluation
+  time — before any step, with no log to read. A script can be run in a test;
+  that one is `test_the_row_survives_both_json_levels`.
+
+---
+
 ## [5.1.0] — 2026-09-14
 
 ### Added
