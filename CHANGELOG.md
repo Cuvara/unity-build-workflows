@@ -39,6 +39,21 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   labels.** They always run in the Linux container, whatever the matrix is
   doing, and took `runner-labels-linux` for it.
 
+### Note
+
+Labels follow the **executor**, not the target platform's OS. Under
+`BUILD_ENGINE=docker` every platform but iOS builds in the Linux container —
+including `Windows64`, which Unity cross-compiles from there. Only
+`BUILD_ENGINE=local` routes a target to a runner of its own OS. For a
+github-hosted docker project, which is what both consumer repositories run, the
+only thing this release moves is iOS: from a Linux runner with no Xcode on it to
+a macOS one.
+
+`RUNNER_TYPE` and `BUILD_ENGINE` remain single switches for the whole run, so an
+org with both GitHub-hosted runners and its own machine still cannot split the
+work between them. That gap, and the per-platform executor that closes it, are
+stage 2b in [ADR 004](docs/adr/004-runner-selection.md).
+
 ### Changed
 
 - An explicit `RUNNER_LABELS` still overrides everything, for the project whose

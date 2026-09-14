@@ -83,24 +83,47 @@ def test_a_broken_mapping_does_not_take_the_run_down():
 # Routing
 # ---------------------------------------------------------------------------
 
-def test_each_os_gets_its_own_runner(tmp_path):
+def test_the_docker_lane_builds_everything_but_ios_on_linux(tmp_path):
+    """Labels follow the EXECUTOR, not the target platform's OS.
+
+    Under `BUILD_ENGINE=docker` Unity cross-compiles a Windows player from
+    inside the Linux container, which is how every Windows build this toolkit
+    has ever produced was made. Routing Windows64 to a Windows runner because
+    the target is Windows sends it to a machine that cannot run the container
+    at all — the obvious reading, and the wrong one.
+
+    iOS is the exception in both engines: Xcode exists only on macOS.
+    """
     outputs, _ = resolve(tmp_path, IN_PLATFORM="Android,iOS,Windows")
     mapping = json.loads(outputs["runner-labels-by-platform"])
     assert mapping["Android"] == ["ubuntu-latest"]
-    assert mapping["Windows64"] == ["windows-latest"]
+    assert mapping["Windows64"] == ["ubuntu-latest"], (
+        "Windows under docker builds in the Linux container; sending it to a "
+        "Windows runner breaks every Windows build that works today"
+    )
     assert mapping["iOS"] == ["macos-latest"]
-    # The whole point: they must not all be the same list any more.
+
+
+def test_the_local_lane_builds_each_target_on_its_own_os(tmp_path):
+    """No container, so the runner has to be the target's own OS."""
+    outputs, _ = resolve(tmp_path, IN_PLATFORM="Android,iOS,Windows",
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local")
+    mapping = json.loads(outputs["runner-labels-by-platform"])
+    assert mapping["Android"] == ["self-hosted", "linux"]
+    assert mapping["Windows64"] == ["self-hosted", "windows"]
+    assert mapping["iOS"] == ["self-hosted", "macOS"]
     assert len({tuple(v) for v in mapping.values()}) == 3
 
 
 def test_self_hosted_defaults_name_the_os_they_mean(tmp_path):
     """The old default was `self-hosted,windows` for every platform, so a
-    self-hosted Linux build asked for a Windows machine and waited."""
+    self-hosted Linux build asked for a Windows machine and waited forever."""
     outputs, _ = resolve(tmp_path, IN_PLATFORM="Android,iOS,Windows",
                          IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="docker")
     mapping = json.loads(outputs["runner-labels-by-platform"])
+    # Docker lane: the container is Linux, whatever the target is.
     assert mapping["Android"] == ["self-hosted", "linux"]
-    assert mapping["Windows64"] == ["self-hosted", "windows"]
+    assert mapping["Windows64"] == ["self-hosted", "linux"]
     assert mapping["iOS"] == ["self-hosted", "macOS"]
 
 
@@ -122,11 +145,25 @@ def test_ios_is_no_longer_flagged_when_it_gets_its_own_macos_runner(tmp_path):
     assert "Xcode only exists on macOS" not in stderr
 
 
+def test_a_github_hosted_docker_project_is_unaffected_except_for_ios(tmp_path):
+    """The configuration both consumer repositories actually run.
+
+    Everything already landed on ubuntu-latest and must keep doing so; the only
+    thing this change moves for them is iOS, which was being routed to a Linux
+    runner that has no Xcode.
+    """
+    outputs, _ = resolve(tmp_path, IN_PLATFORM="Android,WebGL,Windows,iOS")
+    mapping = json.loads(outputs["runner-labels-by-platform"])
+    for platform in ("Android", "WebGL", "Windows64"):
+        assert mapping[platform] == ["ubuntu-latest"], f"{platform} moved: {mapping}"
+    assert mapping["iOS"] == ["macos-latest"]
+
+
 def test_the_unity_jobs_do_not_ride_the_build_matrix_labels(tmp_path):
     """Tests and Addressables always run in the Linux container, whatever the
     matrix is doing."""
     outputs, _ = resolve(tmp_path, IN_PLATFORM="Windows",
-                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="docker")
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local")
     assert json.loads(outputs["runner-labels-linux"]) == ["self-hosted", "linux"]
 
 

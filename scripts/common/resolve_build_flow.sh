@@ -716,21 +716,46 @@ resolve_setting "${_default_linux_label}" "" \
 runner_linux_label="${_resolved_value}"
 runner_linux_label_source="${_resolved_source}"
 
-# Which OS each build target needs. Android, WebGL and both Linux targets build
-# in the Linux Unity container; Windows needs Windows; iOS needs Xcode, which
-# exists only on macOS.
+# Labels follow the EXECUTOR, not the target platform's OS.
+#
+# Getting this backwards is the obvious mistake, and it is wrong in the one
+# place it matters: under BUILD_ENGINE=docker, Unity cross-compiles a Windows
+# player from inside the Linux container, which is how every Windows build in
+# this toolkit has ever been produced. Routing Windows64 to a Windows runner
+# because the target is Windows sends it to a machine that cannot run the Linux
+# container at all.
+#
+# So: docker builds everything on Linux. The one exception is iOS, which has no
+# docker path in either engine -- Xcode exists only on macOS.
+#
+# Under BUILD_ENGINE=local there is no container, so the runner must be the
+# target's own OS.
 _labels_for_platform() {
+    if [[ "$1" == "iOS" ]]; then
+        printf '%s' "${runner_macos_label}"
+        return
+    fi
+    if [[ "${build_engine}" == "docker" ]]; then
+        printf '%s' "${runner_linux_label}"
+        return
+    fi
     case "$1" in
         Windows64) printf '%s' "${runner_windows_label}" ;;
-        iOS)       printf '%s' "${runner_macos_label}" ;;
         *)         printf '%s' "${runner_linux_label}" ;;
     esac
 }
 
 _label_source_for_platform() {
+    if [[ "$1" == "iOS" ]]; then
+        printf '%s' "${runner_macos_label_source}"
+        return
+    fi
+    if [[ "${build_engine}" == "docker" ]]; then
+        printf '%s' "${runner_linux_label_source}"
+        return
+    fi
     case "$1" in
         Windows64) printf '%s' "${runner_windows_label_source}" ;;
-        iOS)       printf '%s' "${runner_macos_label_source}" ;;
         *)         printf '%s' "${runner_linux_label_source}" ;;
     esac
 }
