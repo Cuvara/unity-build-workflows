@@ -667,14 +667,13 @@ jobs:
           }
 
           # Sanitize a product name for use in artifact filenames:
-          # lowercase, replace non-alphanumeric with underscore, collapse
-          # runs, strip leading/trailing underscores.
+          # preserve original casing, strip spaces and filesystem-unsafe
+          # characters, collapse runs of underscores.
           sanitize_name() {
-            printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
-              | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//'
+            printf '%s' "$1" | sed 's/ //g; s/[^A-Za-z0-9._-]/_/g; s/__*/_/g; s/^_//; s/_$//'
           }
 
-          PRODUCT_SLUG=$(sanitize_name "${PRODUCT_NAME:-unknown}")
+          PRODUCT_SLUG=$(sanitize_name "${PRODUCT_NAME:-Unknown}")
           _APP_VER="${APP_VERSION:-0.0.0}"
 
           add() {

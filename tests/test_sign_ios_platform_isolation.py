@@ -83,7 +83,7 @@ class TestiOSRelease:
         assert row["xcodeproj-artifact"].endswith("_release_ios_xcodeproj")
         assert row["ipa-artifact"].endswith("_release_ios_ipa")
         # Product name and version are encoded in the artifact name
-        assert row["ipa-artifact"].startswith("testgame_")
+        assert row["ipa-artifact"].startswith("TestGame_")
 
     def test_sign_matrix_has_runner_labels(self, resolve_matrix):
         out = resolve_matrix(["iOS"], build_type="release")
