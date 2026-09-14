@@ -12,6 +12,25 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [4.2.0] — 2026-09-14
+
+### Fixed
+
+- **4.0.0 renamed every node and shipped the templates still pinned to `@v3`.**
+  `templates/consumer-*.yml` carried the new caller name (`name: Dev`) against the
+  old engine, so a consumer copying the reference files got `Dev / 03 / Android /
+  APK` — half of the rename, from the files that are supposed to *be* the
+  reference. All eight now pin `@v4`, `uses:` and `toolkit-ref:` together.
+
+- **The test that should have caught it asked the wrong question.**
+  `test_all_entry_points_agree_on_the_engine_ref` asserts the entry points agree,
+  and all eight agreed — on the stale ref. Agreement is not currency.
+  `test_entry_points_pin_the_current_major` now reads the major out of
+  `CHANGELOG.md` and fails when the templates lag it. Verified against the stale
+  tree: it fails there and passes here.
+
+---
+
 ## [4.1.0] — 2026-09-14
 
 ### Fixed
