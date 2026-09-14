@@ -10,6 +10,10 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+---
+
+## [4.0.0] — 2026-09-14
+
 ### Changed
 
 - **BREAKING — node names no longer carry the stage number.** `03 / Android /
