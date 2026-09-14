@@ -135,7 +135,7 @@ jobs:
   # same build number, same SHA-256. It fails closed — a promotion that cannot
   # prove what it is holding must not publish it.
   verify-artifact:
-    name: 04 / Android / Verify Release Identity
+    name: Android / Verify Release Identity
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit
@@ -207,7 +207,7 @@ jobs:
   # ─── VALIDATE AAB ───────────────────────────────────────────────────────────
 
   validate-aab:
-    name: 04 / Android / Validate AAB
+    name: Android / Validate AAB
     needs: [verify-artifact]
     if: |
       !cancelled() &&
@@ -294,7 +294,7 @@ jobs:
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
 
   release-notes:
-    name: 04 / Android / Release Notes
+    name: Android / Release Notes
     needs: [verify-artifact]
     if: |
       !cancelled() &&
@@ -343,7 +343,7 @@ jobs:
   # ─── PHASE 1: INTERNAL TESTING ──────────────────────────────────────────────
 
   internal-testing:
-    name: 05 / Android / Publish — Internal Testing
+    name: Android / Publish — Internal Testing
     needs: [verify-artifact, validate-aab, release-notes]
     if: |
       !cancelled() &&
@@ -440,7 +440,7 @@ jobs:
   # ─── PHASE 2: EXTERNAL TESTING ─────────────────────────────────────────────
 
   external-testing:
-    name: 06 / Android / Release — External Testing
+    name: Android / Release — External Testing
     needs: [verify-artifact, internal-testing]
     if: |
       !cancelled() &&
@@ -486,7 +486,7 @@ jobs:
   # ─── PHASE 3: PRODUCTION ───────────────────────────────────────────────────
 
   production-release:
-    name: 06 / Android / Release — Production
+    name: Android / Release — Production
     needs: [verify-artifact, internal-testing, external-testing, release-notes]
     if: |
       !cancelled() &&
@@ -590,7 +590,7 @@ jobs:
   # to Discord.
 
   report:
-    name: 07 / Android / Report & Notify
+    name: Android / Report & Notify
     needs: [verify-artifact, validate-aab, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest

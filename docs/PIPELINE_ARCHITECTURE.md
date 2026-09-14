@@ -33,34 +33,34 @@ node — not six greyed-out platforms nobody asked for.
 
 ```
 01 PREPARE
-   01 / Resolve Build Config
+   Resolve Build Config
         ↓
-   01 / Validate Unity Project ──┐
-   01 / Validate Unity License ──┤
+   Validate Unity Project ──┐
+   Validate Unity License ──┤
                                  ↓
 02 QUALITY GATE
-   02 / Unity Tests
+   Unity Tests
         ↓
-   02 / Quality Gate  ◀── everything below waits on this single node
+   Quality Gate  ◀── everything below waits on this single node
         ↓
 03 BUILD ARTIFACTS          (fan-out, mutually independent)
-   03 / Addressables
+   Addressables
         ↓
-   03 / Android / Production / AAB
-   03 / iOS / Production / Xcode Project
-   03 / WebGL / Production / WebGL
-   03 / Linux64 / Production / Linux64
-   03 / LinuxServer / Production / LinuxServer
-   03 / Windows64 / Production / Windows64
+   Android / Production / AAB
+   iOS / Production / Xcode Project
+   WebGL / Production / WebGL
+   Linux64 / Production / Linux64
+   LinuxServer / Production / LinuxServer
+   Windows64 / Production / Windows64
         ↓
 04 ARTIFACT VALIDATION      (one edge each, no cross-platform coupling)
-   04 / Android / Validate AAB
-   04 / iOS / Validate Xcode Project
-   04 / WebGL / Validate
+   Android / Validate AAB
+   iOS / Validate Xcode Project
+   WebGL / Validate
         ↓
-07 / Final Report
+Final Report
         ↓
-08 / Notify Discord
+Notify Discord
 ```
 
 Stages 05 and 06 do not exist in the build pipeline — they live in the release
@@ -271,12 +271,12 @@ reader opening it.
 ```
 <stage> / <platform> / <configuration> / <artifact type>
 
-03 / Android / Production / AAB
-03 / iOS / Staging / IPA
-03 / WebGL / Development / WebGL
-04 / Android / Validate AAB
-05 / Android / Publish — Internal Testing
-06 / iOS / Release — App Store
+Android / Production / AAB
+iOS / Staging / IPA
+WebGL / Development / WebGL
+Android / Validate AAB
+Android / Publish — Internal Testing
+iOS / Release — App Store
 ```
 
 Job **ids** are internal and unchanged (`build-android`, `validate-artifact-ios`,
@@ -291,18 +291,18 @@ half; `reusable-build-platform.yml` takes a `node-label` input for the rest:
 
 ```yaml
 build-android:
-  name: 03 / Android                      # caller half
+  name: Android                      # caller half
   uses: ./.github/workflows/reusable-build-platform.yml
   with:
     node-label: Production / AAB          # inner half
-# renders as: 03 / Android / Production / AAB
+# renders as: Android / Production / AAB
 ```
 
 `node-label` defaults to the previous `Build <platform>`, so a caller that does
 not set it keeps its old node name.
 
 The casing (`Production`, not `production`) and the artifact type (`AAB`, not
-`aab`) are resolved **once**, in `01 / Resolve Build Config`, and exported as
+`aab`) are resolved **once**, in `Resolve Build Config`, and exported as
 `configuration`, `android-artifact-type` and `label-<platform>`. GitHub
 expressions have no `upper()`, so deriving them per job would mean seven copies
 of the same `tr`.
@@ -361,7 +361,7 @@ failing a release over.
 
 ## 3. The quality gate
 
-`02 / Quality Gate` is a cheap ubuntu job that every stage-03 build depends on.
+`Quality Gate` is a cheap ubuntu job that every stage-03 build depends on.
 
 Before it existed the builds depended only on stage 01, so Unity Tests ran
 *beside* Android, WebGL and Windows: a red test suite still paid for a full
@@ -371,9 +371,9 @@ matrix of builds before anyone was told.
 
 | Node | Skipped when | Gate verdict |
 |---|---|---|
-| `01 / Validate Unity Project` | never | must succeed |
-| `01 / Validate Unity License` | `build-engine != docker` | pass |
-| `02 / Unity Tests` | `run-tests` resolves false | pass |
+| `Validate Unity Project` | never | must succeed |
+| `Validate Unity License` | `build-engine != docker` | pass |
+| `Unity Tests` | `run-tests` resolves false | pass |
 
 Anything else — `failure`, `cancelled`, `timed_out`, or an empty result from a
 job that never reported — closes the gate, and the gate names the node it closed
@@ -595,9 +595,9 @@ The artifact is fetched from artifact storage, so re-publishing publishes the
   type, size and duration instead of a hardcoded table.
 * **A skipped matrix job shows its name uninterpolated.** On a run where no
   platform builds — a PR to `develop`, which is validation-only — the graph
-  renders `03 / ${{ matrix.platform }}` rather than a resolved name, because
+  renders `${{ matrix.platform }}` rather than a resolved name, because
   GitHub does not evaluate the `matrix` context for a job it never expanded.
-  The alternative is a static name such as `03 / Build`, which would cost the
+  The alternative is a static name such as `Build`, which would cost the
   per-platform node names on every run that *does* build. The trade is
   deliberate: the ugly text appears only when there is nothing to look at.
 * **Stage 04 waits for the whole build matrix.** `needs: [build]` cannot depend
@@ -621,12 +621,12 @@ the node waits for a human.
 
 | Pipeline | Node | Environment |
 |---|---|---|
-| Android | `06 / Android / Release — Production` | `production` |
-| Android | `05 / Android / Publish — Internal Testing` | `internal-testing` |
-| Android | `06 / Android / Release — External Testing` | `external-testing` |
-| iOS | `06 / iOS / Release — App Store` | `production` |
-| WebGL | `05 / WebGL / Deploy — Staging` | `staging` |
-| WebGL | `06 / WebGL / Deploy — Production` | `production` |
+| Android | `Android / Release — Production` | `production` |
+| Android | `Android / Publish — Internal Testing` | `internal-testing` |
+| Android | `Android / Release — External Testing` | `external-testing` |
+| iOS | `iOS / Release — App Store` | `production` |
+| WebGL | `WebGL / Deploy — Staging` | `staging` |
+| WebGL | `WebGL / Deploy — Production` | `production` |
 
 Development and staging stay automated. See
 [GITHUB_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md) for creating them; a repository
@@ -697,7 +697,7 @@ node:
 
 ```
 02 — QUALITY GATE
-   ❌ 02 / Unity Tests
+   ❌ Unity Tests
    ⛔ Gate closed at 02 QUALITY GATE / Unity Tests — no stage 03 build was started.
 ```
 
