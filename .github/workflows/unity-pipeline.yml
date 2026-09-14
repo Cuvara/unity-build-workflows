@@ -990,6 +990,10 @@ jobs:
       unity-version:       ${{ needs.resolve-config.outputs.unity-version }}
       test-mode:           ${{ needs.resolve-config.outputs.test-mode }}
       project-path:        ${{ needs.resolve-config.outputs.project-path }}
+      # Off unless the repository says it granted `checks: write`. Supplying a
+      # token is what makes game-ci attempt a check run, and on a read-only
+      # token that attempt fails on every run.
+      post-test-check-run: ${{ vars.POST_TEST_CHECK_RUN == 'true' }}
       runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
       runner-labels:       ${{ needs.resolve-config.outputs.runner-labels-linux }}
       build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
