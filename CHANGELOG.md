@@ -35,6 +35,34 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   exactly like a clean build. Caught by a test written before the first run.
 ---
 
+## [5.4.0] — 2026-09-14
+
+### Fixed
+
+- **A release Android build on a self-hosted runner produced an APK named
+  `release-android-aab`.** Only the docker lane exported `ANDROID_APP_BUNDLE`.
+  `PlayerBuilder.Build` — the default `-executeMethod` on both local lanes —
+  reads it to choose the artifact, and **defaults to APK when it is absent**, so
+  the wrong thing came out wearing the right label with nothing said. Both local
+  lanes now export it.
+
+- **The macOS lane mapped three platforms and hard-errored on the rest.** A Mac
+  with the modules installed builds the standalone targets too; only the mapping
+  said otherwise, so a project with `Windows64` in `RELEASE_BUILD_PLATFORMS`
+  broke the moment its runner became a Mac. `Windows64`, `Linux64` and
+  `LinuxServer` now map to the same targets the docker resolver uses, including
+  `-standaloneBuildSubtarget Server` — dropping that flag builds a desktop player
+  under a server artifact's name.
+
+### Added
+
+- `tests/test_local_lane_contract.py` — what the self-hosted lanes hand to
+  `PlayerBuilder`. Anything a lane does not export, the builder cannot know, and
+  PlayerBuilder's defaults are silent: a missing variable yields a plausible
+  wrong artifact rather than an error.
+
+---
+
 ## [5.3.0] — 2026-09-14
 
 ### Changed
