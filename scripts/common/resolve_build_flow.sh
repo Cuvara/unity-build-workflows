@@ -524,7 +524,14 @@ validate_build_engine() {
 # normalize_runner_labels CSV — trim/split/dedupe, print one label per line
 normalize_runner_labels() {
     local csv="$1" normalized label seen existing
-    normalized="${csv//,/ }"
+    # Accept the JSON form as well as the CSV one. The dispatch input has always
+    # described itself as "Runner labels as a JSON array", and passing one
+    # produced labels like `["self-hosted"` and `"macOS"]` -- which match no
+    # runner, so the job queues forever rather than failing. Either the
+    # description or the parser had to be wrong; the description is the one
+    # people read.
+    normalized="${csv//[\[\]\"]/}"
+    normalized="${normalized//,/ }"
     local -a result=()
     for label in ${normalized}; do
         label="$(echo "${label}" | tr -d '[:space:]')"

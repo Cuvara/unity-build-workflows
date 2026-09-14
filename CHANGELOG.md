@@ -12,6 +12,28 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [5.2.1] — 2026-09-14
+
+### Fixed
+
+- **`runner-labels` rejected the form its own description promised.** The
+  dispatch input is described as *"Runner labels as a JSON array"*, and passing
+  one produced labels of `["self-hosted"` and `"macOS"]` — which match no runner,
+  so the job **queued forever instead of failing**. Only the CSV form worked.
+
+  Either the description or the parser was wrong. The description is the one
+  people read before typing, so the parser now accepts both, with or without
+  spaces:
+
+  ```
+  self-hosted,macOS
+  ["self-hosted","macOS"]
+  self-hosted macOS
+  [ "self-hosted" , "macOS" ]
+  ```
+
+---
+
 ## [5.2.0] — 2026-09-14
 
 ### Fixed
