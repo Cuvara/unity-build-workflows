@@ -197,6 +197,18 @@ on:
         default: none
         type: string
 
+      artifact-storage:
+        description: >-
+          Where the build binary is stored: `github` (GitHub Actions artifacts,
+          default) or `firebase` (Firebase App Distribution only — skips the
+          GitHub binary upload to save storage on private repos). Logs,
+          manifests and reports always go to GitHub regardless of this setting.
+          When `firebase`, validate-artifact and promotion jobs are not
+          available because they need the GitHub artifact to download.
+        required: false
+        default: 'github'
+        type: string
+
       log-retention-days:
         description: >-
           Days to retain logs and per-platform result files. Diagnostics for
@@ -1421,7 +1433,7 @@ jobs:
       # if-no-files-found: warn — missing binary is a build failure already caught by exit code.
       - name: Upload build artifact
         id: upload
-        if: ${{ inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' }}
+        if: ${{ inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' && inputs.artifact-storage != 'firebase' }}
         # On self-hosted runners the build output already persists on the
         # operator's own machine (build/), so a failed upload (e.g. GitHub
         # Actions artifact storage quota) must not fail an otherwise-green build.
@@ -1511,7 +1523,7 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
 
       - name: iOS — Upload signed IPA
-        if: ${{ inputs.sign-ios && inputs.platform == 'iOS' && steps.ios-guard.outputs.blocked != 'true' }}
+        if: ${{ inputs.sign-ios && inputs.platform == 'iOS' && steps.ios-guard.outputs.blocked != 'true' && inputs.artifact-storage != 'firebase' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.ipa-artifact-name }}
@@ -1534,7 +1546,7 @@ jobs:
       # using only local groups otherwise ships an artifact with no bundles
       # in it, and the empty upload still reports success.
       - name: Upload Addressables artifact
-        if: ${{ inputs.platform == 'Addressables' && steps.ios-guard.outputs.blocked != 'true' }}
+        if: ${{ inputs.platform == 'Addressables' && steps.ios-guard.outputs.blocked != 'true' && inputs.artifact-storage != 'firebase' }}
         # Self-hosted output persists locally — don't fail on upload quota.
         continue-on-error: ${{ contains(inputs.runner-labels, 'self-hosted') }}
         uses: actions/upload-artifact@v4

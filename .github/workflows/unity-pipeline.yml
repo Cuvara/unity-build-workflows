@@ -1180,6 +1180,7 @@ jobs:
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
       log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
       build-delivery:          ${{ vars.BUILD_DELIVERY || 'none' }}
+      artifact-storage:        ${{ vars.ARTIFACT_STORAGE || 'github' }}
       artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
       build-method:            ${{ needs.resolve-config.outputs.build-method }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
@@ -1251,6 +1252,7 @@ jobs:
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
       log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
       build-delivery:          ${{ vars.BUILD_DELIVERY || 'none' }}
+      artifact-storage:        ${{ vars.ARTIFACT_STORAGE || 'github' }}
       artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
       build-method:            ${{ needs.resolve-config.outputs.build-method }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
@@ -1321,7 +1323,8 @@ jobs:
     if: >-
       !cancelled() &&
       needs.build.result == 'success' &&
-      needs.resolve-config.outputs.has-validations == 'true'
+      needs.resolve-config.outputs.has-validations == 'true' &&
+      (vars.ARTIFACT_STORAGE || 'github') != 'firebase'
     strategy:
       fail-fast: false
       matrix:
@@ -1473,7 +1476,8 @@ jobs:
       !cancelled() &&
       needs.resolve-config.outputs.build-type == 'release' &&
       needs.build.result == 'success' &&
-      (needs.validate-artifact.result == 'success' || needs.validate-artifact.result == 'skipped')
+      (needs.validate-artifact.result == 'success' || needs.validate-artifact.result == 'skipped') &&
+      (vars.ARTIFACT_STORAGE || 'github') != 'firebase'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit

@@ -19,6 +19,13 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   secret and `FIREBASE_APP_ID_ANDROID` / `FIREBASE_APP_ID_IOS` variables.
   Existing `r2` and `local` providers are unchanged. See `docs/BUILD_DELIVERY.md`.
 
+- **`ARTIFACT_STORAGE` variable controls where build binaries are stored.**
+  `github` (default) uploads to GitHub Actions artifacts as before. `firebase`
+  skips the GitHub binary upload entirely — the build goes to Firebase App
+  Distribution only, saving storage costs on private repos. Logs, manifests
+  and reports always go to GitHub regardless. When `firebase`, validate-artifact
+  and release-manifest jobs are skipped (they need the GitHub artifact).
+
 ---
 
 ## [6.0.0] — 2026-09-14
