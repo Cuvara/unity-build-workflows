@@ -565,6 +565,27 @@ resolve_setting "" "" \
 _be_explicit="${_resolved_value}"
 _be_explicit_source="${_resolved_source}"
 
+# Labels are resolved before the runner type, not after, because they are the
+# switch: they name the machine, and a machine that is not named cannot be used.
+resolve_setting "" "" \
+    dispatch "${IN_RUNNER_LABELS}" \
+    variable-new "${NEW_RUNNER_LABELS:-}" \
+    variable-new "${RUNNER_LABELS:-}"
+_labels_explicit="${_resolved_value}"
+_labels_explicit_source="${_resolved_source}"
+
+# A machine counts as named by RUNNER_LABELS or by any of the per-OS labels.
+# Checking only RUNNER_LABELS would have silently disabled the per-OS routing
+# added in 5.2.0 -- the fallback below is for a pipeline with nowhere to go, not
+# for one that is configured differently from how this rule expects.
+_machine_named="false"
+for _lbl in "${_labels_explicit}" \
+            "${NEW_RUNNER_LINUX_LABEL:-}"   "${RUNNER_LINUX_LABEL:-}" \
+            "${NEW_RUNNER_WINDOWS_LABEL:-}" "${RUNNER_WINDOWS_LABEL:-}" \
+            "${NEW_RUNNER_MACOS_LABEL:-}"   "${RUNNER_MACOS_LABEL:-}"; do
+    [[ -n "${_lbl}" ]] && { _machine_named="true"; break; }
+done
+
 # --- legacy RUNNER_DEFAULT_MODE raw value (no mapping/default applied yet) --
 resolve_setting "" "" \
     variable-new "${NEW_RUNNER_DEFAULT_MODE:-}" \
@@ -597,6 +618,36 @@ if [[ -z "${_rt_explicit}" && -z "${_be_explicit}" && -n "${_legacy_mode_raw}" ]
     runner_type_source="variable-legacy"
     build_engine_source="variable-legacy"
     log_warn "Legacy variable RUNNER_DEFAULT_MODE='${_legacy_mode_raw}' in use; please migrate to repository variables RUNNER_TYPE/BUILD_ENGINE."
+elif [[ "${_machine_named}" == "false" ]]; then
+    # The contradiction is still a hard error, checked on what was actually
+    # asked for rather than on what the fallback below would leave behind.
+    # Repairing `github-hosted + local` silently would take away the one message
+    # that tells somebody their configuration cannot mean what they typed.
+    if [[ "${_rt_explicit}" == "github-hosted" && "${_be_explicit}" == "local" ]]; then
+        log_error "GitHub-hosted runners have no local Unity install; use BUILD_ENGINE=docker or RUNNER_TYPE=self-hosted."
+        exit 1
+    fi
+    # RUNNER_LABELS is empty: no machine has been named, so there is no
+    # self-hosted runner to send anything to. Fall back to GitHub's runners and
+    # the container.
+    #
+    # This overrides RUNNER_TYPE and BUILD_ENGINE on purpose. Honouring
+    # `self-hosted` with no labels produced `self-hosted,<os>` -- labels that
+    # match no runner unless one happens to carry exactly them -- and GitHub
+    # does not fail a job whose labels match nothing. It queues it, forever,
+    # with no error and no timeout. A build on GitHub's runners is a worse
+    # answer than the one you configured, and a far better one than a run that
+    # never starts.
+    #
+    # Clearing RUNNER_LABELS is therefore the way back to GitHub-hosted, which
+    # is what makes it a switch rather than one setting among three.
+    runner_type="github-hosted"; runner_type_source="default"
+    build_engine="docker";       build_engine_source="default"
+    _labels_forced_github="true"
+    if [[ -n "${_rt_explicit}" && "${_rt_explicit}" != "github-hosted" ]] \
+       || [[ -n "${_be_explicit}" && "${_be_explicit}" != "docker" ]]; then
+        log_warn "RUNNER_LABELS is empty, so no runner is named: falling back to github-hosted + docker (RUNNER_TYPE='${_rt_explicit:-unset}', BUILD_ENGINE='${_be_explicit:-unset}' ignored). Set RUNNER_LABELS to the label your machine carries."
+    fi
 else
     if [[ -n "${_rt_explicit}" ]]; then
         runner_type="${_rt_explicit}"; runner_type_source="${_rt_explicit_source}"
@@ -618,14 +669,7 @@ if [[ "${runner_type}" == "github-hosted" && "${build_engine}" == "local" ]]; th
     exit 1
 fi
 
-# --- runner labels -----------------------------------------------------------
-resolve_setting "" "" \
-    dispatch "${IN_RUNNER_LABELS}" \
-    variable-new "${NEW_RUNNER_LABELS:-}" \
-    variable-new "${RUNNER_LABELS:-}"
-_labels_explicit="${_resolved_value}"
-_labels_explicit_source="${_resolved_source}"
-
+# --- runner labels (already resolved above, before the runner type) ----------
 if [[ -n "${_labels_explicit}" ]]; then
     runner_labels_raw="${_labels_explicit}"
     runner_labels_source="${_labels_explicit_source}"
@@ -633,7 +677,11 @@ elif [[ -n "${_legacy_default_labels}" ]]; then
     runner_labels_raw="${_legacy_default_labels}"
     runner_labels_source="variable-legacy"
 elif [[ "${runner_type}" == "self-hosted" ]]; then
-    runner_labels_raw="self-hosted,windows"
+    # The Linux machine, read straight from its variable: the per-OS block runs
+    # after this one, so `runner_linux_label` does not exist yet. The old
+    # default was a literal `self-hosted,windows` for every project, whatever
+    # machines it actually had.
+    runner_labels_raw="${NEW_RUNNER_LINUX_LABEL:-${RUNNER_LINUX_LABEL:-self-hosted,linux}}"
     runner_labels_source="default"
 else
     runner_labels_raw="ubuntu-latest"
@@ -697,6 +745,11 @@ runner_mode_source="${runner_type_source}"
 #
 # The default now follows RUNNER_TYPE, because that is the thing that decides
 # which labels can possibly exist.
+# With no RUNNER_LABELS there is no self-hosted machine in play at all, so the
+# per-OS overrides are ignored too. Honouring RUNNER_MACOS_LABEL here would send
+# iOS to a Mac while the engine had already been forced to docker -- a Mac runs
+# no Linux container, so that job cannot start. Splitting platforms across two
+# runner pools is stage 2b of ADR 004, not something to half-do here.
 if [[ "${runner_type}" == "github-hosted" ]]; then
     _default_linux_label="ubuntu-latest"
     _default_windows_label="windows-latest"
@@ -1307,6 +1360,11 @@ emit "runner-labels-by-platform" "${platform_labels_json}"
 # the build matrix, which on a Windows-labelled self-hosted project sent them
 # to a machine with no Linux container on it.
 emit "runner-labels-linux"     "$(_labels_json_for_platform "Android")"
+# Stage 03b signs the IPA, so it needs the macOS machine -- not the global
+# list, which defaulted to `self-hosted,windows` and sent iOS signing to a
+# Windows box. 5.2.0 routed the build matrix per platform and left this one
+# behind; the PR claimed the whole defect was closed and it was not.
+emit "runner-labels-ios"       "$(_labels_json_for_platform "iOS")"
 emit "cache-library"           "${cache_library}"
 emit "cache-gradle"            "${cache_gradle}"
 emit "cache-addressables"      "${cache_addressables}"

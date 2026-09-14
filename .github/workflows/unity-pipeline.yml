@@ -272,6 +272,7 @@ jobs:
       runner-plan:             ${{ steps.flow.outputs.runner-plan }}
       runner-labels-by-platform: ${{ steps.flow.outputs.runner-labels-by-platform }}
       runner-labels-linux:     ${{ steps.flow.outputs.runner-labels-linux }}
+      runner-labels-ios:       ${{ steps.flow.outputs.runner-labels-ios }}
       activation-strategy:     ${{ steps.flow.outputs.activation-strategy }}
       cache-library:           ${{ steps.flow.outputs.cache-library }}
       cache-gradle:            ${{ steps.flow.outputs.cache-gradle }}
@@ -1242,7 +1243,10 @@ jobs:
       !cancelled() &&
       needs.resolve-config.outputs.sign-ios == 'true' &&
       needs.build.result == 'success'
-    runs-on: ${{ fromJSON(needs.resolve-config.outputs.runner-labels != '' && needs.resolve-config.outputs.runner-labels || '["self-hosted","macOS"]') }}
+    # The iOS machine, not the global list. That list defaulted to
+    # `self-hosted,windows`, so signing an IPA was dispatched to a Windows box —
+    # and a job whose labels match no runner queues rather than fails.
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.runner-labels-ios != '' && needs.resolve-config.outputs.runner-labels-ios || '["self-hosted","macOS"]') }}
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@v4
