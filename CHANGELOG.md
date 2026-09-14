@@ -8,7 +8,7 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
-## [Unreleased]
+## [5.8.0] — 2026-09-14
 
 ### Added
 
