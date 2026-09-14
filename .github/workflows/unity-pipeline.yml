@@ -1481,7 +1481,7 @@ jobs:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: ${{ needs.resolve-config.outputs.build-type }}-*
+          pattern: '*_${{ needs.resolve-config.outputs.build-type }}_*'
           path: artifacts
 
       - name: Generate release manifest
@@ -1906,7 +1906,7 @@ jobs:
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          pattern: ${{ needs.resolve-config.outputs.build-type }}-*
+          pattern: '*_${{ needs.resolve-config.outputs.build-type }}_*'
           path: ./artifacts
 
       - name: Download platform results
