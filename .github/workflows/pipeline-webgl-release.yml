@@ -138,7 +138,7 @@ jobs:
   # same build number, same SHA-256. It fails closed — a promotion that cannot
   # prove what it is holding must not publish it.
   verify-artifact:
-    name: 04 / WebGL / Verify Release Identity
+    name: WebGL / Verify Release Identity
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit
@@ -188,7 +188,7 @@ jobs:
   # ─── 04 — ARTIFACT VALIDATION ───────────────────────────────────────────────
 
   validate-webgl:
-    name: 04 / WebGL / Validate
+    name: WebGL / Validate
     needs: [verify-artifact]
     if: |
       !cancelled() &&
@@ -277,7 +277,7 @@ jobs:
   # as stage 04 is green. It downloads the stored artifact; it never rebuilds.
 
   deploy-staging:
-    name: 05 / WebGL / Deploy — Staging
+    name: WebGL / Deploy — Staging
     needs: [verify-artifact, validate-webgl]
     if: |
       !cancelled() &&
@@ -385,7 +385,7 @@ jobs:
   # successful build is never sufficient reason to publish production.
 
   deploy-production:
-    name: 06 / WebGL / Deploy — Production
+    name: WebGL / Deploy — Production
     needs: [verify-artifact, deploy-staging]
     if: |
       !cancelled() &&
@@ -479,7 +479,7 @@ jobs:
   # to Discord.
 
   report:
-    name: 07 / WebGL / Report & Notify
+    name: WebGL / Report & Notify
     needs: [verify-artifact, validate-webgl, deploy-staging, deploy-production]
     if: always()
     runs-on: ubuntu-latest

@@ -116,7 +116,7 @@ jobs:
   # fails closed — a promotion that cannot prove what it is holding must not
   # publish it.
   verify-artifact:
-    name: 04 / Windows / Verify Release Identity
+    name: Windows / Verify Release Identity
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit
@@ -170,7 +170,7 @@ jobs:
   # sound, this proves the download is.
 
   validate-artifact:
-    name: 04 / Windows / Validate
+    name: Windows / Validate
     needs: [verify-artifact]
     if: |
       !cancelled() &&
@@ -249,7 +249,7 @@ jobs:
   # human here only has to add a reviewer to `steam-internal`.
 
   steam-internal:
-    name: 05 / Windows / Steam — Internal
+    name: Windows / Steam — Internal
     needs: [verify-artifact, validate-artifact]
     if: |
       !cancelled() &&
@@ -362,7 +362,7 @@ jobs:
   # but skipping is an explicit input, never a silent default.
 
   steam-external:
-    name: 06 / Windows / Steam — External / Beta
+    name: Windows / Steam — External / Beta
     needs: [verify-artifact, steam-internal]
     if: |
       !cancelled() &&
@@ -477,7 +477,7 @@ jobs:
   # never on its own a reason to publish to players.
 
   steam-production:
-    name: 06 / Windows / Steam — Production
+    name: Windows / Steam — Production
     needs: [verify-artifact, steam-internal, steam-external]
     if: |
       !cancelled() &&
@@ -591,7 +591,7 @@ jobs:
   # like an App Store one: the progress ladder, the phase table, and the
   # Discord notification all come from one implementation rather than five.
   report:
-    name: 07 / Windows / Report
+    name: Windows / Report
     needs: [verify-artifact, validate-artifact, steam-internal, steam-external, steam-production]
     if: always()
     runs-on: ubuntu-latest

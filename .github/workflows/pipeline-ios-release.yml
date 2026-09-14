@@ -125,7 +125,7 @@ jobs:
   # same build number, same SHA-256. It fails closed — a promotion that cannot
   # prove what it is holding must not publish it.
   verify-artifact:
-    name: 04 / iOS / Verify Release Identity
+    name: iOS / Verify Release Identity
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit
@@ -180,7 +180,7 @@ jobs:
   # App Store Connect, which rejects a bad binary only after consuming a build
   # number.
   validate-ipa:
-    name: 04 / iOS / Validate IPA
+    name: iOS / Validate IPA
     needs: [verify-artifact]
     if: |
       !cancelled() &&
@@ -252,7 +252,7 @@ jobs:
   # ─── RELEASE NOTES ──────────────────────────────────────────────────────────
 
   release-notes:
-    name: 04 / iOS / Release Notes
+    name: iOS / Release Notes
     needs: [verify-artifact]
     if: |
       !cancelled() &&
@@ -301,7 +301,7 @@ jobs:
   # ─── PHASE 1: TESTFLIGHT INTERNAL ──────────────────────────────────────────
 
   internal-testing:
-    name: 05 / iOS / Publish — TestFlight Internal
+    name: iOS / Publish — TestFlight Internal
     needs: [verify-artifact, validate-ipa, release-notes]
     if: |
       !cancelled() &&
@@ -395,7 +395,7 @@ jobs:
   # ─── PHASE 2: TESTFLIGHT EXTERNAL ──────────────────────────────────────────
 
   external-testing:
-    name: 06 / iOS / Release — TestFlight External
+    name: iOS / Release — TestFlight External
     needs: [verify-artifact, internal-testing]
     if: |
       !cancelled() &&
@@ -443,7 +443,7 @@ jobs:
 
 
   production-release:
-    name: 06 / iOS / Release — App Store
+    name: iOS / Release — App Store
     needs: [verify-artifact, internal-testing, external-testing, release-notes]
     if: |
       !cancelled() &&
@@ -542,7 +542,7 @@ jobs:
   # to Discord.
 
   report:
-    name: 07 / iOS / Report & Notify
+    name: iOS / Report & Notify
     needs: [verify-artifact, validate-ipa, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest

@@ -10,6 +10,53 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — node names no longer carry the stage number.** `03 / Android /
+  APK` is now `Android / APK`, across `unity-pipeline.yml` and all five release
+  pipelines (43 job names). The consumer template for development builds also
+  shortens its caller job from `Development` to `Dev`, so the node a person
+  actually reads goes from
+
+      Development / 04 / Android / Validate APK
+
+  to
+
+      Dev / Android / Validate APK
+
+  GitHub prefixes every called job with the *caller's* job name and offers no
+  way to suppress it, so the lane is always there. The stage number was
+  competing with the platform and the artifact type for the width left over —
+  and it was the segment carrying the least, because the graph's edges already
+  say what runs after what.
+
+  **Stage order did not live in the names and still does not.** It lives in
+  `PIPELINE_STAGES`, declared once per workflow, and each job announces its
+  position through `current:`. The progress ladder renders from that and is
+  unchanged.
+
+  **What a consumer must do.** If any of these names is a *required status
+  check* on a protected branch, update it in the same change as the version
+  bump. A renamed required context is never reported again, so the branch
+  protection does not fail loudly — it blocks every pull request from then on,
+  with the check sitting in "Expected" forever. Check
+  `Settings → Branches → <branch> → Require status checks`, or:
+
+      gh api repos/<OWNER>/<REPO>/branches/<BRANCH>/protection/required_status_checks --jq '.contexts[]'
+
+  **Why this is a major rather than a 3.3.0.** `@v3` is a floating tag that
+  gets repointed at each 3.x release. Shipping this as a minor would rename
+  every consumer's status checks the moment the tag moved, with no action on
+  their part and no error to read. `@v3` therefore stays at 3.2.0 and this
+  goes out as `@v4`, so the rename happens when a consumer asks for it.
+
+- `tests/test_pipeline_stages.py` no longer derives stage coverage from
+  `name[:2]`. Reading structure out of a display label meant shortening a label
+  looked, to the test, exactly like deleting a stage; it now reads the `current:`
+  values that feed the progress ladder, which is where stage identity is. The
+  contract test that required an `NN / ` prefix is inverted: it now fails if one
+  comes back.
+
 Nothing yet.
 
 ---
