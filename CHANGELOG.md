@@ -12,6 +12,60 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [4.1.0] — 2026-09-14
+
+### Fixed
+
+- **A 67 MB APK was posted to Discord as `0 MB (linked)`, with no download
+  link.** Three faults in a row, each invisible on its own.
+
+  The per-platform diagnostics step skipped any platform whose `Editor.log` it
+  could not find:
+
+      LOG=$(find ./artifacts -path "*${ART}-logs*Editor.log" ...)
+      [ -z "${LOG}" ] && continue
+
+  The Docker / game-ci lane streams Unity to the job console and writes no
+  `Editor.log` at all, so that `find` comes back empty on *every* successful
+  build. `continue` then threw away the platform's artifact **name** and
+  artifact **id** as well as its counters. The Discord action fell back to the
+  pre-build-type directory `./artifacts/unity-build-Android`, which has not
+  existed since artifacts gained a build-type prefix, measured nothing, and
+  reported `0`. The row is now emitted either way; only the counters depend on
+  a log.
+
+  The size itself no longer comes from zipping a downloaded copy. Stage 07
+  already carries `artifactSizeBytes`, measured by the build that produced the
+  artifact, and it is passed through as `platform-summary`. Zipping still
+  happens — it decides whether the file is small enough to attach, which is a
+  question about the upload, not about the build.
+
+  A size nobody established now reads `size unknown` rather than `0 MB`. Zero
+  is a measurement; the absence of one is not, and `success — 0 MB` read as a
+  build that produced nothing.
+
+- **`0 errors · 0 warnings` on a run where nothing was counted.** Same root
+  cause: no `Editor.log`, nothing parsed, and the totals defaulted to zero. The
+  pipeline now reports empty totals when no platform yielded a readable log,
+  and the embed omits the Diagnostics field rather than issuing a clean bill of
+  health nobody signed.
+
+### Changed
+
+- **The Discord embed leads with the artifact.** The download link sat last,
+  under ten inline fields of run metadata, in a notification whose purpose is to
+  get a build onto somebody's device. `📦 Platforms` is now `📦 Artifacts` and
+  comes first.
+
+  `Triggered by`, `Event` and `Flow` were three fields answering one question
+  and fold into one `Trigger`; `flow-type` survives only when it says something
+  the event does not, so `push-develop` shows and `manual` beside
+  `workflow_dispatch` does not. `Configuration` repeated the environment already
+  in the title and is gone. `Run` carries a link instead of a bare number, and
+  `Branch` links to the branch.
+
+---
+
 ## [4.0.0] — 2026-09-14
 
 ### Changed
