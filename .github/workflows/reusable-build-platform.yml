@@ -1560,6 +1560,19 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
 
+      # ── Step 11a-pre: Install Firebase CLI (only when needed) ──────────────
+      - name: Install Firebase CLI
+        if: ${{ inputs.build-delivery == 'firebase' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
+        shell: bash
+        run: |
+          if ! command -v firebase &>/dev/null; then
+            echo "Installing firebase-tools..."
+            npm install -g firebase-tools --silent 2>/dev/null
+            firebase --version
+          else
+            echo "Firebase CLI already available: $(firebase --version)"
+          fi
+
       # ── Step 11a: Publish the build where a person can download it ─────────
       # A GitHub artifact link 404s for anyone not signed in with repository
       # access — on a public repo too — so the link in a Discord message is
