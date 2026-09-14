@@ -128,6 +128,8 @@ class TestActionStructure:
             "build-duration",
             # Diagnostics (error/warning counts + log links)
             "platform-diagnostics",
+            # Artifact size, as measured by the build rather than re-derived here
+            "platform-summary",
             "total-errors",
             "total-warnings",
             # Build info (project metadata)
@@ -422,3 +424,42 @@ def test_the_pipeline_supplies_the_artifact_name():
     """Both halves, or the parse finds an empty field and falls back forever."""
     body = (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text()
     assert '${logsid},${binid},${ART}' in body
+
+
+# ---------------------------------------------------------------------------
+# Artifact size — measured by the build, never re-derived from a downloaded copy
+# ---------------------------------------------------------------------------
+
+ACTION_TEXT = ACTION_FILE.read_text(encoding="utf-8")
+
+
+def test_size_comes_from_the_build_not_from_zipping_a_download():
+    """A 67 MB APK was posted to Discord as `0 MB (linked)`.
+
+    The size was derived by zipping `./artifacts/<name>/` and running `du` on the
+    result — which answers a different question (how big is a zip of the
+    artifact), and answers 0 when the directory is not where it looked. Stage 07
+    already carries `artifactSizeBytes`, measured by the build itself.
+    """
+    assert "artifactSizeBytes" in ACTION_TEXT, (
+        "the action must read the size the build measured"
+    )
+    assert "_PLAT_BYTES" in ACTION_TEXT
+
+
+def test_an_unknown_size_does_not_render_as_zero_mb():
+    """`0 MB` is not a size, it is the absence of one — and it reads as a
+    successful build of nothing."""
+    assert "size unknown" in ACTION_TEXT, (
+        "an unmeasured size must say so rather than render as 0 MB"
+    )
+    assert 'DELIVERY="${PLAT_SIZE_MB} MB' not in ACTION_TEXT, (
+        "size is formatted through SIZE_TEXT, which guards the zero case"
+    )
+
+
+def test_the_zip_measurement_only_decides_attachment():
+    """Zipping is still worth doing — it is what would actually be uploaded — but
+    it answers the attachment question, not the size question."""
+    assert "_should_attach \"${ZIP_MB}\"" in ACTION_TEXT
+

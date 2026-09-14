@@ -2079,6 +2079,10 @@ jobs:
           DIAG=""
           TOTAL_ERRORS=0
           TOTAL_WARNINGS=0
+          # Whether anything was actually counted. Without it, a run where no
+          # platform produced a readable Editor.log reports "0 errors ·
+          # 0 warnings" — a clean bill of health nobody issued.
+          ANY_LOG=0
 
           # ── Build name→id map from artifacts API ──────────────────────────
           ARTIFACT_MAP=$(gh api \
@@ -2099,13 +2103,28 @@ jobs:
             LOG=$(find ./artifacts -path "*${ART}-logs*Editor.log" \
               -print 2>/dev/null | head -1) || true
 
-            # Skip platforms with no log file — nothing to report
-            [ -z "${LOG}" ] && continue
-
-            errors=$(grep -cE '\): error |Aborting batchmode|BuildFailedException' \
-              "${LOG}" 2>/dev/null) || errors=0
-            warnings=$(grep -cE '\): warning ' \
-              "${LOG}" 2>/dev/null) || warnings=0
+            # A missing log is not a missing platform. The Docker / game-ci
+            # lane streams Unity to the job console and writes no Editor.log at
+            # all, so this `find` comes back empty on every successful Android
+            # build — and skipping the platform here threw away its artifact
+            # NAME and its artifact ID along with the counters. The Discord
+            # embed then looked for the pre-build-type directory
+            # `./artifacts/unity-build-Android`, found nothing, and posted a
+            # 67 MB APK as "0 MB (linked)" with no download link. The row is
+            # emitted either way; only the counters depend on a log.
+            if [ -n "${LOG}" ]; then
+              errors=$(grep -cE '\): error |Aborting batchmode|BuildFailedException' \
+                "${LOG}" 2>/dev/null) || errors=0
+              warnings=$(grep -cE '\): warning ' \
+                "${LOG}" 2>/dev/null) || warnings=0
+              ANY_LOG=1
+            else
+              # Empty, not 0. "We did not read a log" and "the log said zero"
+              # are different claims, and a 0/0 nobody measured is the more
+              # expensive of the two to believe.
+              errors=""
+              warnings=""
+            fi
 
             # Look up the artifact ids from the map
             logsid=$(printf '%s\n' "${ARTIFACT_MAP}" \
@@ -2130,8 +2149,8 @@ jobs:
               | python3 -c 'import json,sys; print(json.load(sys.stdin).get("downloadUrl",""))' 2>/dev/null) || DL=""
 
             DIAG="${DIAG}${P}=${errors},${warnings},${logsid},${binid},${ART},${DL}"$'\n'
-            TOTAL_ERRORS=$(( TOTAL_ERRORS + errors ))
-            TOTAL_WARNINGS=$(( TOTAL_WARNINGS + warnings ))
+            TOTAL_ERRORS=$(( TOTAL_ERRORS + ${errors:-0} ))
+            TOTAL_WARNINGS=$(( TOTAL_WARNINGS + ${warnings:-0} ))
           done
 
           # ── Emit outputs ──────────────────────────────────────────────────
@@ -2140,8 +2159,14 @@ jobs:
             printf '%s' "${DIAG}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          echo "total-errors=${TOTAL_ERRORS}"   >> "$GITHUB_OUTPUT"
-          echo "total-warnings=${TOTAL_WARNINGS}" >> "$GITHUB_OUTPUT"
+          if [ "${ANY_LOG}" -eq 1 ]; then
+            echo "total-errors=${TOTAL_ERRORS}"   >> "$GITHUB_OUTPUT"
+            echo "total-warnings=${TOTAL_WARNINGS}" >> "$GITHUB_OUTPUT"
+          else
+            # Empty, so the embed omits the field instead of claiming a zero.
+            echo "total-errors="   >> "$GITHUB_OUTPUT"
+            echo "total-warnings=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Post build to Discord thread
         uses: ./.toolkit/.github/actions/discord-upload-build
@@ -2182,6 +2207,11 @@ jobs:
           commit-author:       ${{ steps.ctx.outputs.commit-author }}
           build-duration:      ${{ steps.ctx.outputs.build-duration }}
           platform-diagnostics: ${{ steps.diag.outputs.platform-diagnostics }}
+          # The size the build itself measured. Discord used to re-derive it by
+          # zipping a downloaded directory, which answers a different question
+          # (how big is a zip of the artifact) and answers 0 when the directory
+          # is not where it looked.
+          platform-summary:     ${{ needs.final-report.outputs.platform-summary }}
           total-errors:        ${{ steps.diag.outputs.total-errors }}
           total-warnings:      ${{ steps.diag.outputs.total-warnings }}
           product-name:        ${{ needs.resolve-config.outputs.product-name }}
