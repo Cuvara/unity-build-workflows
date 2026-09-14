@@ -164,10 +164,13 @@ def resolve_matrix():
     def run(platforms, environment="production", android_export="aab",
             build_type="", platform_input="All", run_number=42,
             build_number_offset=0, retention_days=30,
-            retention_source="default"):
+            retention_source="default",
+            product_name="TestGame", app_version="1.0.0"):
         env = dict(os.environ)
         env["ENVIRONMENT"] = environment
         env["ANDROID_TYPE"] = android_export
+        env["PRODUCT_NAME"] = product_name
+        env["APP_VERSION"] = app_version
         # The resolver owns the lifecycle now and hands the matrix step the
         # answer, so the fixture mirrors what it would have emitted.
         env["BUILD_TYPE_IN"] = build_type or (

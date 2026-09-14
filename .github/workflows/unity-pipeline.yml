@@ -295,6 +295,7 @@ jobs:
       configuration:          ${{ steps.matrix.outputs.configuration }}
       build-number:           ${{ steps.matrix.outputs.build-number }}
       sign-ios:               ${{ steps.matrix.outputs.sign-ios }}
+      ipa-artifact-name:      ${{ steps.matrix.outputs.ipa-artifact-name }}
       build-type:             ${{ steps.matrix.outputs.build-type }}
       build-type-label:       ${{ steps.matrix.outputs.build-type-label }}
       android-artifact-type:  ${{ steps.matrix.outputs.android-artifact-type }}
@@ -484,6 +485,8 @@ jobs:
           IN_PLATFORM:   ${{ inputs.platform }}
           RUN_NUMBER:    ${{ github.run_number }}
           BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET || '0' }}
+          PRODUCT_NAME:  ${{ steps.meta.outputs.product-name }}
+          APP_VERSION:   ${{ steps.meta.outputs.app-version }}
           RETENTION_DAYS:   ${{ steps.flow.outputs.artifact-retention-days }}
           RETENTION_SOURCE: ${{ steps.flow.outputs.artifact-retention-source }}
           # Per-platform runs-on, resolved by the same helper the runner plan
@@ -663,6 +666,16 @@ jobs:
             RL_PLATFORM="$1" python3 "${_rl_script}"
           }
 
+          # Sanitize a product name for use in artifact filenames:
+          # preserve original casing, strip spaces and filesystem-unsafe
+          # characters, collapse runs of underscores.
+          sanitize_name() {
+            printf '%s' "$1" | sed 's/ //g; s/[^A-Za-z0-9._-]/_/g; s/__*/_/g; s/^_//; s/_$//'
+          }
+
+          PRODUCT_SLUG=$(sanitize_name "${PRODUCT_NAME:-Unknown}")
+          _APP_VER="${APP_VERSION:-0.0.0}"
+
           add() {
             [ "$1" = "true" ] || return 0
             local platform="$2" artifact="$3" suffix="$4" validator="$5"
@@ -671,9 +684,12 @@ jobs:
             label=$(label_of "${platform}")
             labels=$(labels_of "${platform}")
             lower_artifact=$(printf '%s' "${artifact}" | tr '[:upper:]' '[:lower:]')
+            # Artifact naming: {product}_{version}_{build}_{env}_{platform}_{type}
+            # The type suffix is appended only where it distinguishes two real
+            # outputs (Android: APK vs AAB, iOS: xcodeproj vs IPA).
             case "${platform}" in
-              Android|iOS) name="${BUILD_TYPE}-${slug}-${lower_artifact}" ;;
-              *)           name="${BUILD_TYPE}-${slug}" ;;
+              Android|iOS) name="${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_${slug}_${lower_artifact}" ;;
+              *)           name="${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_${slug}" ;;
             esac
             BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\",\"runner-labels\":\"${labels}\"},"
             if [ -n "${validator}" ]; then
@@ -696,7 +712,7 @@ jobs:
           if [ "${SEL_IOS}" = "true" ] && [ "${BUILD_TYPE}" = "release" ]; then
             # Replace the iOS validation row: validate the IPA, not the project.
             VALIDATE_ROWS=$(printf '%s' "${VALIDATE_ROWS}" | sed 's/{"platform":"iOS"[^}]*},//')
-            VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"iOS\",\"label\":\"iOS\",\"artifact-type\":\"IPA\",\"artifact-name\":\"${BUILD_TYPE}-ios-ipa\",\"validator\":\"ipa\",\"node\":\"IPA\"},"
+            VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"iOS\",\"label\":\"iOS\",\"artifact-type\":\"IPA\",\"artifact-name\":\"${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_ios_ipa\",\"validator\":\"ipa\",\"node\":\"IPA\"},"
           fi
           add "${SEL_WEBGL}"       WebGL       WEBGL                 "WebGL"               webgl
           # Desktop players had no stage-04 leg at all, so a Windows or Linux
@@ -716,7 +732,7 @@ jobs:
           SIGN_ROWS=""
           if [ "${SEL_IOS}" = "true" ] && [ "${BUILD_TYPE}" = "release" ]; then
             _IOS_LABELS=$(labels_of "iOS")
-            SIGN_ROWS="{\"platform\":\"iOS\",\"label\":\"iOS\",\"runner-labels\":\"${_IOS_LABELS}\",\"xcodeproj-artifact\":\"${BUILD_TYPE}-ios-xcodeproj\",\"ipa-artifact\":\"${BUILD_TYPE}-ios-ipa\"},"
+            SIGN_ROWS="{\"platform\":\"iOS\",\"label\":\"iOS\",\"runner-labels\":\"${_IOS_LABELS}\",\"xcodeproj-artifact\":\"${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_ios_xcodeproj\",\"ipa-artifact\":\"${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_ios_ipa\"},"
           fi
           SIGN_MATRIX="[${SIGN_ROWS%,}]"
 
@@ -726,6 +742,7 @@ jobs:
             echo "configuration=${CONFIG}"
             echo "build-number=${BUILD_NUMBER}"
             echo "sign-ios=$([ "${SIGN_MATRIX}" = "[]" ] && echo false || echo true)"
+            echo "ipa-artifact-name=$([ "${SIGN_MATRIX}" != "[]" ] && echo "${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_ios_ipa" || echo "")"
             echo "build-type=${BUILD_TYPE}"
             echo "build-type-label=${BUILD_TYPE_LABEL}"
             echo "android-artifact-type=${ANDROID_ARTIFACT}"
@@ -1238,7 +1255,7 @@ jobs:
       sign-ios:                ${{ matrix.platform == 'iOS' && needs.resolve-config.outputs.sign-ios == 'true' }}
       ios-export-method:       ${{ inputs.ios-export-method }}
       ios-app-name:            ${{ inputs.ios-app-name }}
-      ipa-artifact-name:       ${{ matrix.platform == 'iOS' && needs.resolve-config.outputs.sign-ios == 'true' && format('{0}-ios-ipa', needs.resolve-config.outputs.build-type) || '' }}
+      ipa-artifact-name:       ${{ matrix.platform == 'iOS' && needs.resolve-config.outputs.ipa-artifact-name || '' }}
     secrets:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}

@@ -546,19 +546,19 @@ def test_declared_platforms_reach_the_matrix_intact(resolve_matrix, declared,
     assert len(out["artifact_names"]) == len(set(out["artifact_names"]))
 
 
-@pytest.mark.parametrize("platform,artifact", [
-    ("Android", "release-android-aab"),
-    ("WebGL", "release-webgl"),
-    ("Windows64", "release-windows"),
-    ("Linux64", "release-linux"),
+@pytest.mark.parametrize("platform,suffix", [
+    ("Android", "_release_android_aab"),
+    ("WebGL", "_release_webgl"),
+    ("Windows64", "_release_windows"),
+    ("Linux64", "_release_linux"),
     # The pair most likely to collide: two Linux targets, one artifact type.
-    ("LinuxServer", "release-linux-server"),
+    ("LinuxServer", "_release_linux-server"),
 ])
-def test_release_artifact_names_are_platform_unique(resolve_matrix, platform, artifact):
+def test_release_artifact_names_are_platform_unique(resolve_matrix, platform, suffix):
     """Artifact naming is what promotion addresses; a collision between two
     platforms or two build types would promote the wrong binary."""
     out = resolve_matrix([platform], build_type="release")
-    assert out["artifact_names"] == [artifact], out["artifact_names"]
+    assert out["artifact_names"][0].endswith(suffix), out["artifact_names"]
     dev = resolve_matrix([platform], build_type="development")
     assert dev["artifact_names"] != out["artifact_names"], (
         "a development and a release build share an artifact name"

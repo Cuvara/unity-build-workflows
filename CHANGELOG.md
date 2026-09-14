@@ -8,6 +8,21 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Artifact naming includes product name, version and build number.** Build
+  artifacts are now named `{product}_{version}_{build}_{environment}_{platform}_{type}`
+  (e.g. `NDCGame_1.4.2_42_release_android_aab`) instead of the old
+  `{environment}-{platform}-{type}` pattern. The product name is read from
+  Unity's `ProjectSettings.asset` and sanitized for filenames. Consumer
+  release templates now require the artifact name as input (no static default)
+  because the name varies per build. **BREAKING** for promotion workflows that
+  hardcode old artifact names — update the `artifact-name` dispatch input.
+
+---
+
 ## [5.8.0] — 2026-09-14
 
 ### Added

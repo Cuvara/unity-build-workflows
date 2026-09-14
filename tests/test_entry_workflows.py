@@ -449,8 +449,11 @@ def test_release_entry_point_promotes_a_stored_artifact(key, path):
     """Release must never rebuild: the binary QA approved is the binary that ships."""
     inputs = dispatch_inputs(load(path))
     assert "artifact-name" in inputs, f"{key}: cannot name the artifact to promote"
-    assert inputs["artifact-name"]["default"].startswith("release-"), (
-        f"{key}: defaults to something other than a Build / Release artifact"
+    # Artifact names now include product/version/build, so the input is
+    # required (no static default) or has a release- prefix default.
+    an = inputs["artifact-name"]
+    assert an.get("required") is True or str(an.get("default", "")).startswith("release-"), (
+        f"{key}: artifact-name must be required or default to a release- prefix"
     )
     assert "start-phase" in inputs
     assert inputs["start-phase"]["default"] != "build", (
@@ -481,7 +484,8 @@ def test_desktop_release_entry_points_promote_to_steam(key, artifact):
     body = RELEASE_ENTRY_POINTS[key].read_text()
     assert f"pipeline-{key}-release.yml" in body
     inputs = dispatch_inputs(load(RELEASE_ENTRY_POINTS[key]))
-    assert inputs["artifact-name"]["default"] == artifact
+    an = inputs["artifact-name"]
+    assert an.get("required") is True or an.get("default") == artifact
     assert inputs["source-run-id"]["required"] is True
 
 

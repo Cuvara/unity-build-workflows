@@ -207,7 +207,7 @@ def test_the_ipa_is_validated_before_it_becomes_immutable(resolve_matrix):
     release = {r["platform"]: r for r in
                resolve_matrix(["iOS"], build_type="release")["validate"]}
     assert release["iOS"]["artifact-type"] == "IPA"
-    assert release["iOS"]["artifact-name"] == "release-ios-ipa"
+    assert release["iOS"]["artifact-name"].endswith("_release_ios_ipa")
     assert release["iOS"]["validator"] == "ipa"
 
     # A development build has no IPA — nothing signs it — so the project is
@@ -236,7 +236,9 @@ def test_the_promotion_default_is_the_ipa():
     template = yaml.safe_load(
         (TEMPLATES / "consumer-21-release-ios.yml").read_text())
     inputs = (template.get("on") or template[True])["workflow_dispatch"]["inputs"]
-    assert inputs["artifact-name"]["default"] == "release-ios-ipa"
+    # artifact-name is now required (no default) because the name includes
+    # product, version, and build number which vary per run.
+    assert inputs["artifact-name"].get("required") is True
 
 
 def test_nothing_anywhere_still_points_at_the_xcode_project():

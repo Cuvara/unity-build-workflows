@@ -925,7 +925,7 @@ def test_ios_release_artifact_is_the_ipa(resolve_matrix):
     not the Xcode project it was built from."""
     release = {r["platform"]: r for r in resolve_matrix(["iOS"], build_type="release")["validate"]}
     assert release["iOS"]["validator"] == "ipa"
-    assert release["iOS"]["artifact-name"] == "release-ios-ipa"
+    assert release["iOS"]["artifact-name"].endswith("_release_ios_ipa")
 
     dev = {r["platform"]: r for r in resolve_matrix(["iOS"], build_type="development")["validate"]}
     assert dev["iOS"]["validator"] == "ios", "a development build has no IPA to validate"
