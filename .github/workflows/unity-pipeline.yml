@@ -270,6 +270,8 @@ jobs:
       runner-labels-csv:       ${{ steps.flow.outputs.runner-labels-csv }}
       # One row per selected platform: where it lands and which tier decided.
       runner-plan:             ${{ steps.flow.outputs.runner-plan }}
+      runner-labels-by-platform: ${{ steps.flow.outputs.runner-labels-by-platform }}
+      runner-labels-linux:     ${{ steps.flow.outputs.runner-labels-linux }}
       activation-strategy:     ${{ steps.flow.outputs.activation-strategy }}
       cache-library:           ${{ steps.flow.outputs.cache-library }}
       cache-gradle:            ${{ steps.flow.outputs.cache-gradle }}
@@ -481,6 +483,9 @@ jobs:
           BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET || '0' }}
           RETENTION_DAYS:   ${{ steps.flow.outputs.artifact-retention-days }}
           RETENTION_SOURCE: ${{ steps.flow.outputs.artifact-retention-source }}
+          # Per-platform runs-on, resolved by the same helper the runner plan
+          # prints, so the table and the routing cannot disagree.
+          RUNNER_LABELS_BY_PLATFORM: ${{ steps.flow.outputs.runner-labels-by-platform }}
           SEL_ANDROID:     ${{ steps.flow.outputs.build-android }}
           SEL_WEBGL:       ${{ steps.flow.outputs.build-webgl }}
           SEL_LINUX64:     ${{ steps.flow.outputs.build-linux64 }}
@@ -630,18 +635,44 @@ jobs:
             esac
           }
 
+          # One platform's runs-on, as an escaped JSON string: the row goes
+          # through fromJSON into a workflow input that is itself a JSON string,
+          # so the quotes have to survive one level more than they look like.
+          # Where the helper lives: `.toolkit` on a runner, the repository root
+          # under the test harness that extracts this block and runs it -- from
+          # inside tests/, which is why a bare "." is not good enough. Searching
+          # upward keeps this independent of the working directory; depending on
+          # cwd is how this passed locally and failed on CI.
+          _rl_script=""
+          for _c in "${TOOLKIT_PATH:-}/scripts/common/matrix_runner_labels.py" \
+                    "${GITHUB_WORKSPACE:-}/.toolkit/scripts/common/matrix_runner_labels.py" \
+                    "./scripts/common/matrix_runner_labels.py" \
+                    "../scripts/common/matrix_runner_labels.py" \
+                    "../../scripts/common/matrix_runner_labels.py"; do
+            if [ -f "${_c}" ]; then _rl_script="${_c}"; break; fi
+          done
+          [ -n "${_rl_script}" ] || {
+            echo "::error::matrix_runner_labels.py not found; every matrix row would lose its runs-on"
+            exit 1
+          }
+
+          labels_of() {
+            RL_PLATFORM="$1" python3 "${_rl_script}"
+          }
+
           add() {
             [ "$1" = "true" ] || return 0
             local platform="$2" artifact="$3" suffix="$4" validator="$5"
-            local slug lower_artifact name label
+            local slug lower_artifact name label labels
             slug=$(slug_of "${platform}")
             label=$(label_of "${platform}")
+            labels=$(labels_of "${platform}")
             lower_artifact=$(printf '%s' "${artifact}" | tr '[:upper:]' '[:lower:]')
             case "${platform}" in
               Android|iOS) name="${BUILD_TYPE}-${slug}-${lower_artifact}" ;;
               *)           name="${BUILD_TYPE}-${slug}" ;;
             esac
-            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\"},"
+            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\",\"runner-labels\":\"${labels}\"},"
             if [ -n "${validator}" ]; then
               VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"validator\":\"${validator}\",\"node\":\"${suffix}\"},"
             fi
@@ -959,7 +990,7 @@ jobs:
       test-mode:           ${{ needs.resolve-config.outputs.test-mode }}
       project-path:        ${{ needs.resolve-config.outputs.project-path }}
       runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels }}
+      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels-linux }}
       build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
       activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
@@ -1089,7 +1120,7 @@ jobs:
       project-path:        ${{ needs.resolve-config.outputs.project-path }}
       environment:         ${{ needs.resolve-config.outputs.environment }}
       runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels }}
+      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels-linux }}
       build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
       activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
@@ -1157,7 +1188,9 @@ jobs:
       project-path:        ${{ needs.resolve-config.outputs.project-path }}
       environment:         ${{ needs.resolve-config.outputs.environment }}
       runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels }}
+      # Per platform, not one list for the whole matrix: a single shared
+      # runs-on sent Android to the machine iOS needed, and back again.
+      runner-labels:       ${{ matrix.runner-labels }}
       build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
       activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}

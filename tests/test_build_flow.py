@@ -1436,8 +1436,19 @@ class TestGroupedConfigDefaults:
         assert self.out["artifact-compression"] == "zip"
 
     def test_runner_labels_default(self):
-        assert self.out["runner-windows-label"] == "self-hosted-windows"
-        assert self.out["runner-macos-label"] == "self-hosted-macos"
+        """The per-OS defaults follow RUNNER_TYPE, which is the thing that
+        decides which labels can exist at all.
+
+        They used to disagree with each other: linux defaulted to
+        `ubuntu-latest`, a GitHub-hosted label, while windows and macos
+        defaulted to `self-hosted-windows` / `self-hosted-macos` — self-hosted
+        label NAMES that no GitHub-hosted runner carries. A github-hosted
+        project asking for Windows got a label set matching no runner, and
+        GitHub queues such a job rather than failing it. This context is
+        github-hosted, so the defaults are GitHub's own labels.
+        """
+        assert self.out["runner-windows-label"] == "windows-latest"
+        assert self.out["runner-macos-label"] == "macos-latest"
         assert self.out["runner-linux-label"] == "ubuntu-latest"
 
     def test_test_toggles_default_true(self):

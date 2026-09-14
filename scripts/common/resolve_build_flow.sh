@@ -676,18 +676,120 @@ case "${runner_type}:${build_engine}" in
 esac
 runner_mode_source="${runner_type_source}"
 
-resolve_setting "self-hosted-windows" "" \
+# --- per-OS runner labels ----------------------------------------------------
+# These three were resolved, emitted and re-exported as pipeline outputs, and
+# read by nothing, while every platform shared one runs-on. They are now what
+# stage 03 routes on.
+#
+# Their defaults used to disagree with each other: linux defaulted to
+# `ubuntu-latest` (a GitHub-hosted label) while windows and macos defaulted to
+# `self-hosted-windows` / `self-hosted-macos` (self-hosted label NAMES, which
+# are not labels any GitHub-hosted runner carries). A github-hosted project
+# asking for Windows therefore got a label set that matches no runner, and
+# GitHub queues such a job rather than failing it.
+#
+# The default now follows RUNNER_TYPE, because that is the thing that decides
+# which labels can possibly exist.
+if [[ "${runner_type}" == "github-hosted" ]]; then
+    _default_linux_label="ubuntu-latest"
+    _default_windows_label="windows-latest"
+    _default_macos_label="macos-latest"
+else
+    _default_linux_label="self-hosted,linux"
+    _default_windows_label="self-hosted,windows"
+    _default_macos_label="self-hosted,macOS"
+fi
+
+resolve_setting "${_default_windows_label}" "" \
     variable-new "${NEW_RUNNER_WINDOWS_LABEL:-}" \
     variable-new "${RUNNER_WINDOWS_LABEL:-}"
 runner_windows_label="${_resolved_value}"
-resolve_setting "self-hosted-macos" "" \
+runner_windows_label_source="${_resolved_source}"
+resolve_setting "${_default_macos_label}" "" \
     variable-new "${NEW_RUNNER_MACOS_LABEL:-}" \
     variable-new "${RUNNER_MACOS_LABEL:-}"
 runner_macos_label="${_resolved_value}"
-resolve_setting "ubuntu-latest" "" \
+runner_macos_label_source="${_resolved_source}"
+resolve_setting "${_default_linux_label}" "" \
     variable-new "${NEW_RUNNER_LINUX_LABEL:-}" \
     variable-new "${RUNNER_LINUX_LABEL:-}"
 runner_linux_label="${_resolved_value}"
+runner_linux_label_source="${_resolved_source}"
+
+# Labels follow the EXECUTOR, not the target platform's OS.
+#
+# Getting this backwards is the obvious mistake, and it is wrong in the one
+# place it matters: under BUILD_ENGINE=docker, Unity cross-compiles a Windows
+# player from inside the Linux container, which is how every Windows build in
+# this toolkit has ever been produced. Routing Windows64 to a Windows runner
+# because the target is Windows sends it to a machine that cannot run the Linux
+# container at all.
+#
+# So: docker builds everything on Linux. The one exception is iOS, which has no
+# docker path in either engine -- Xcode exists only on macOS.
+#
+# Under BUILD_ENGINE=local there is no container, so the runner must be the
+# target's own OS.
+_labels_for_platform() {
+    if [[ "$1" == "iOS" ]]; then
+        printf '%s' "${runner_macos_label}"
+        return
+    fi
+    if [[ "${build_engine}" == "docker" ]]; then
+        printf '%s' "${runner_linux_label}"
+        return
+    fi
+    case "$1" in
+        Windows64) printf '%s' "${runner_windows_label}" ;;
+        *)         printf '%s' "${runner_linux_label}" ;;
+    esac
+}
+
+_label_source_for_platform() {
+    if [[ "$1" == "iOS" ]]; then
+        printf '%s' "${runner_macos_label_source}"
+        return
+    fi
+    if [[ "${build_engine}" == "docker" ]]; then
+        printf '%s' "${runner_linux_label_source}"
+        return
+    fi
+    case "$1" in
+        Windows64) printf '%s' "${runner_windows_label_source}" ;;
+        *)         printf '%s' "${runner_linux_label_source}" ;;
+    esac
+}
+
+# An explicit global RUNNER_LABELS still wins over everything. It is the escape
+# hatch for a project whose one runner does every platform, and removing it
+# would break exactly those projects.
+_labels_csv_for_platform() {
+    if [[ "${runner_labels_source}" != "default" ]]; then
+        printf '%s' "${runner_labels_csv}"
+    else
+        _labels_for_platform "$1"
+    fi
+}
+
+_labels_source_for_platform() {
+    if [[ "${runner_labels_source}" != "default" ]]; then
+        printf '%s' "${runner_labels_source}"
+    else
+        _label_source_for_platform "$1"
+    fi
+}
+
+_labels_json_for_platform() {
+    local csv json="[" first="true" label
+    csv="$(_labels_csv_for_platform "$1")"
+    while IFS= read -r label; do
+        [[ -z "${label}" ]] && continue
+        if [[ "${first}" == "true" ]]; then first="false"; else json+=","; fi
+        json+="\"${label}\""
+    done < <(normalize_runner_labels "${csv}")
+    json+="]"
+    printf '%s' "${json}"
+}
 
 # ---------------------------------------------------------------------------
 # Group: CACHE (all default true)
@@ -1036,18 +1138,27 @@ _source_label() {
 
 runner_plan_rows=()
 runner_plan_json="["
+PLATFORM_LABELS_MAP=""
 _rp_first="true"
 
 _runner_plan_add() {
     local platform="$1" note="$2"
-    local labels_json="${runner_labels_json}"
-    local labels_csv="${runner_labels_csv}"
+    # Not named runner_labels_source: a local of that name would shadow the
+    # global the helpers read, and under `set -u` the helper then dies on an
+    # unbound variable it can see but not use.
+    local labels_json labels_csv labels_source
+    labels_json="$(_labels_json_for_platform "${platform}")"
+    labels_csv="$(_labels_csv_for_platform "${platform}")"
+    labels_source="$(_labels_source_for_platform "${platform}")"
+    # The matrix routes on this, so the plan and the routing cannot drift apart:
+    # both read the same function.
+    PLATFORM_LABELS_MAP+="\"${platform}\":${labels_json},"
 
     if [[ "${_rp_first}" == "true" ]]; then _rp_first="false"; else runner_plan_json+=","; fi
     runner_plan_json+="{\"platform\":\"${platform}\",\"runsOn\":${labels_json}"
     runner_plan_json+=",\"engine\":\"${build_engine}\",\"runnerType\":\"${runner_type}\""
-    runner_plan_json+=",\"labelsSource\":\"${runner_labels_source}\",\"note\":\"${note}\"}"
-    runner_plan_rows+=("${platform}|${labels_csv}|${build_engine}|$(_source_label "${runner_labels_source}")|${note}")
+    runner_plan_json+=",\"labelsSource\":\"${labels_source}\",\"note\":\"${note}\"}"
+    runner_plan_rows+=("${platform}|${labels_csv}|${build_engine}|$(_source_label "${labels_source}")|${note}")
 }
 
 # iOS is the one requirement that is unambiguous and already documented: Xcode
@@ -1056,11 +1167,12 @@ _runner_plan_add() {
 # that ships next month.
 _ios_note=""
 if [[ "${build_ios}" == "true" ]]; then
-    case ",${runner_labels_csv}," in
+    _ios_labels_csv="$(_labels_csv_for_platform "iOS")"
+    case ",${_ios_labels_csv}," in
         *,macOS,*|*,macos,*|*,macos-latest,*|*,macOS-latest,*) : ;;
         *)
             _ios_note="iOS needs a macOS runner; these labels are not one"
-            log_warn "iOS is selected but runner labels are '${runner_labels_csv}'. Xcode only exists on macOS, so stage 03b will queue against a runner that cannot sign."
+            log_warn "iOS is selected but its runner labels are '${_ios_labels_csv}'. Xcode only exists on macOS, so stage 03b will queue against a runner that cannot sign."
             ;;
     esac
 fi
@@ -1085,6 +1197,7 @@ fi
 [[ "${build_ios}" == "true" ]]         && _runner_plan_add "iOS" "${_ios_note}"
 
 runner_plan_json+="]"
+platform_labels_json="{${PLATFORM_LABELS_MAP%,}}"
 
 {
     echo ""
@@ -1181,6 +1294,12 @@ emit "runner-type-source"      "${runner_type_source}"
 emit "build-engine-source"     "${build_engine_source}"
 emit "runner-labels-source"    "${runner_labels_source}"
 emit "runner-plan"             "${runner_plan_json}"
+emit "runner-labels-by-platform" "${platform_labels_json}"
+# Unity tests and the Addressables build always run in the Linux container,
+# whatever else the matrix is doing. They used to take the same global list as
+# the build matrix, which on a Windows-labelled self-hosted project sent them
+# to a machine with no Linux container on it.
+emit "runner-labels-linux"     "$(_labels_json_for_platform "Android")"
 emit "cache-library"           "${cache_library}"
 emit "cache-gradle"            "${cache_gradle}"
 emit "cache-addressables"      "${cache_addressables}"

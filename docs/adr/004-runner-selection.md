@@ -1,6 +1,6 @@
 # ADR 004 — Runner selection: make the decision visible before changing it
 
-**Status:** accepted (stage 1 implemented)
+**Status:** accepted (stages 1–2 implemented)
 **Date:** 2026-09-14
 
 ## Context
@@ -85,6 +85,67 @@ warning that ships today beats a gate that ships next month.
 Wire the three per-OS label variables that already exist (finding 2) into the
 stage-03 matrix and stage 03b, so each platform gets its own `runs-on`.
 `RUNNER_LABELS` becomes an override-everything escape hatch. Closes finding 3.
+
+Implemented in 5.2.0. Three details worth keeping:
+
+- **The per-OS defaults used to disagree with each other.** Linux defaulted to
+  `ubuntu-latest` — a GitHub-hosted label — while windows and macos defaulted to
+  `self-hosted-windows` / `self-hosted-macos`, which are self-hosted label
+  *names* no GitHub-hosted runner carries. The default now follows
+  `RUNNER_TYPE`: GitHub's own labels for `github-hosted`, `self-hosted,<os>`
+  otherwise.
+- **An explicit global `RUNNER_LABELS` still wins.** One runner that does every
+  platform is a real setup, and taking its escape hatch away would break exactly
+  those projects.
+- **Unity tests and the Addressables build stopped riding the matrix labels.**
+  They always run in the Linux container, whatever the matrix is doing; on a
+  Windows-labelled self-hosted project they were being sent to a machine with no
+  Linux container on it.
+
+The stage-1 iOS warning survives, but is now reachable only by explicit
+override rather than by the default — which is when a person most needs telling.
+
+**Labels follow the executor, not the target platform's OS.** This is the
+obvious thing to get backwards, and it is wrong exactly where it matters: under
+`BUILD_ENGINE=docker`, Unity cross-compiles a Windows player from inside the
+Linux container, which is how every Windows build this toolkit has produced was
+made. Routing `Windows64` to a Windows runner because the target is Windows
+sends it to a machine that cannot run the container at all. The first draft of
+stage 2 did precisely that, in a change whose own ADR warns about a disconnected
+platform→executor map.
+
+| | `docker` | `local` |
+|---|---|---|
+| Android / WebGL / Linux / **Windows64** | linux labels | target's own OS |
+| iOS | macOS labels — no docker path exists | macOS labels |
+
+### Stage 2b — one runner pool is not always the whole answer (minor)
+
+`RUNNER_TYPE` and `BUILD_ENGINE` are single switches for the whole run, so an
+org with both GitHub-hosted runners **and** its own machine cannot express
+"Android on GitHub, Windows on my box". Measured, not assumed:
+
+| Attempt | Result |
+|---|---|
+| `github-hosted` + `docker`, `RUNNER_WINDOWS_LABEL=self-hosted,windows` | override ignored — under docker, Windows routes on the linux labels |
+| `github-hosted` + `BUILD_ENGINE=local` | rejected: *"GitHub-hosted runners have no local Unity install"* |
+| `self-hosted` + `local` | everything moves, including Unity tests and Addressables |
+
+The fix is to make the executor a **per-platform** decision — each platform
+carrying its own `{labels, engine}`, defaulted from the global pair and
+overridable per OS:
+
+```
+RUNNER_TYPE=github-hosted        # the default for everything else
+BUILD_ENGINE=docker
+RUNNER_MACOS_LABEL=self-hosted,macOS
+BUILD_ENGINE_MACOS=local         # a Mac runs no Linux container
+RUNNER_WINDOWS_LABEL=self-hosted,windows
+BUILD_ENGINE_WINDOWS=local
+```
+
+The `github-hosted + local` rejection has to become per-platform rather than
+disappear: it is still true for the platforms left on GitHub's runners.
 
 ### Stage 3 — fail fast instead of queueing (major)
 
