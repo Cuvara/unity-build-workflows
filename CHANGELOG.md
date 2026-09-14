@@ -12,6 +12,47 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [5.3.0] — 2026-09-14
+
+### Changed
+
+- **Naming no machine means using GitHub's.** `RUNNER_LABELS` is the switch: when
+  it is empty — and no per-OS label is set either — the pipeline resolves to
+  `github-hosted` + `docker`, overriding `RUNNER_TYPE` and `BUILD_ENGINE` and
+  saying so in a warning.
+
+  `self-hosted` with no labels used to resolve to `self-hosted,<os>`, labels no
+  runner carries unless one happens to be registered with exactly them. GitHub
+  does not fail a job whose labels match nothing; it **queues it forever**, with
+  no error and no timeout. A build on GitHub's runners is a worse answer than the
+  one configured and a much better one than a run that never starts.
+
+  Clearing `RUNNER_LABELS` is therefore the way back to GitHub-hosted, which is
+  what makes it a switch rather than one setting among three.
+
+  A machine counts as named by `RUNNER_LABELS` **or** by any of
+  `RUNNER_LINUX_LABEL` / `RUNNER_WINDOWS_LABEL` / `RUNNER_MACOS_LABEL`, so the
+  per-platform routing added in 5.2.0 still works without a global label.
+
+  `github-hosted` + `local` is still a hard error, checked on what was asked for
+  rather than on what the fallback leaves behind — repairing it silently would
+  remove the one message that says the configuration cannot mean what it says.
+
+### Fixed
+
+- **iOS signing still went to a Windows machine.** 5.2.0 routed the build matrix
+  per platform and left stage 03b — the IPA signing job — reading the global
+  `runner-labels`, whose self-hosted default was `self-hosted,windows`. The build
+  landed on the right machine and the signing did not, and that release said the
+  defect was closed. It was closed for the build half only. Stage 03b now takes
+  `runner-labels-ios`.
+
+- **The global label default named Windows for every self-hosted project**,
+  whatever machines it had. It now follows the Linux label, which is where most
+  of the pipeline runs.
+
+---
+
 ## [5.2.1] — 2026-09-14
 
 ### Fixed
