@@ -36,13 +36,13 @@ on:
         type: string
 
       artifact-name:
-        description: "ARTIFACT · Signed IPA from a Build / Release run to promote"
-        required: false
+        description: "ARTIFACT · Signed IPA artifact name from Build / Release (e.g. MyGame_1.0.0_42_release_ios_ipa)"
+        required: true
         # The signed IPA, not the Xcode project. Stage 03b of Build / Release
         # signs and exports before the immutable boundary, so what a promotion
         # publishes is the exact binary QA approved — a promotion cannot build,
         # export or sign, so an Xcode project here would be unpromotable.
-        default: 'release-ios-ipa'
+        type: string
         type: string
 
       start-phase:

@@ -416,8 +416,8 @@ def test_android_artifact_type_follows_the_export_setting(resolve_matrix):
     apk = resolve_matrix(["Android"], android_export="apk", build_type="development")["build"][0]
     assert aab["artifact-type"] == "AAB" and aab["node"] == "AAB"
     assert apk["artifact-type"] == "APK" and apk["node"] == "APK"
-    assert aab["artifact-name"] == "release-android-aab"
-    assert apk["artifact-name"] == "development-android-apk"
+    assert aab["artifact-name"].endswith("_release_android_aab")
+    assert apk["artifact-name"].endswith("_development_android_apk")
 
 
 def test_android_export_does_not_touch_other_platforms(resolve_matrix):
@@ -469,7 +469,7 @@ def test_build_type_is_its_own_axis(resolve_matrix, build_type, label):
     out = resolve_matrix(["Android"], build_type=build_type)
     assert out["build-type"] == build_type
     assert out["build-type-label"] == label
-    assert out["artifact_names"][0].startswith(f"{build_type}-android-")
+    assert f"_{build_type}_android_" in out["artifact_names"][0]
 
 
 @pytest.mark.parametrize("environment,expected", [
@@ -489,8 +489,8 @@ def test_artifact_names_never_collide_between_build_types(resolve_matrix):
     rel = set(resolve_matrix(PLATFORM_BUILD_PLATFORMS, environment="production",
                              android_export="aab", build_type="release")["artifact_names"])
     assert not dev & rel, f"development and release share artifact names: {sorted(dev & rel)}"
-    assert all(n.startswith("development-") for n in dev)
-    assert all(n.startswith("release-") for n in rel)
+    assert all("_development_" in n for n in dev)
+    assert all("_release_" in n for n in rel)
 
 
 def test_ci_lane_builds_nothing(resolve_matrix):
@@ -512,7 +512,7 @@ def test_artifact_slug_is_the_human_platform_name(resolve_matrix, platform, slug
     """Artifacts are named for the platform a person would say, not the Unity
     target id — `release-windows`, not `release-windows64-exe`."""
     out = resolve_matrix([platform], build_type="release")
-    assert out["artifact_names"][0].startswith(f"release-{slug}")
+    assert f"_release_{slug}" in out["artifact_names"][0]
 
 
 # ---------------------------------------------------------------------------

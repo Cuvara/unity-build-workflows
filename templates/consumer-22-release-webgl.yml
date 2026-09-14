@@ -35,9 +35,8 @@ on:
         type: string
 
       artifact-name:
-        description: "ARTIFACT · Artifact from a Build / Release run to promote"
-        required: false
-        default: 'release-webgl'
+        description: "ARTIFACT · Artifact name from Build / Release (e.g. MyGame_1.0.0_42_release_webgl)"
+        required: true
         type: string
 
       start-phase:
