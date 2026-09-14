@@ -227,7 +227,7 @@ jobs:
   # JOB 1: resolve-config
   # ════════════════════════════════════════════════════════════════════════════
   resolve-config:
-    name: 01 / Resolve Build Config
+    name: Resolve Build Config
     runs-on: ubuntu-latest
     outputs:
       # ── Unity / project ────────────────────────────────────────────────────
@@ -771,7 +771,7 @@ jobs:
   # JOB 2: validate-project
   # ════════════════════════════════════════════════════════════════════════════
   validate-project:
-    name: 01 / Validate Unity Project
+    name: Validate Unity Project
     needs: [resolve-config]
     if: needs.resolve-config.result == 'success'
     runs-on: ubuntu-latest
@@ -817,7 +817,7 @@ jobs:
   # the project's Unity version. Fails fast with clear regeneration instructions
   # when the license is missing, malformed, or version-mismatched.
   validate-license:
-    name: 01 / Validate Unity License
+    name: Validate Unity License
     needs: [resolve-config]
     if: >-
       needs.resolve-config.result == 'success' &&
@@ -902,7 +902,7 @@ jobs:
   # JOB 3: unity-tests
   # ════════════════════════════════════════════════════════════════════════════
   unity-tests:
-    name: 02 / Unity Tests
+    name: Unity Tests
     needs: [resolve-config, validate-project, validate-license]
     if: >-
       !cancelled() &&
@@ -954,7 +954,7 @@ jobs:
   # Anything else (failure, cancelled, timed_out, or an empty result from a job
   # that never reported) closes the gate.
   quality-gate:
-    name: 02 / Quality Gate
+    name: Quality Gate
     needs: [resolve-config, validate-project, validate-license, unity-tests]
     if: always()
     runs-on: ubuntu-latest
@@ -1026,7 +1026,7 @@ jobs:
 
 
   build-addressables:
-    name: 03 / Addressables
+    name: Addressables
     needs: [resolve-config, quality-gate]
     if: >-
       !cancelled() &&
@@ -1089,7 +1089,7 @@ jobs:
   # failed iOS leg must not cancel a running Android leg.
   # ════════════════════════════════════════════════════════════════════════════
   build:
-    name: 03 / ${{ matrix.label }}
+    name: ${{ matrix.label }}
     needs: [resolve-config, quality-gate, build-addressables]
     if: >-
       !cancelled() &&
@@ -1160,7 +1160,7 @@ jobs:
   # itself reports `blocked`, and this job is skipped with it.
   # ════════════════════════════════════════════════════════════════════════════
   sign-ios:
-    name: 03b / iOS / Sign & Export IPA
+    name: iOS / Sign & Export IPA
     needs: [resolve-config, build]
     if: >-
       !cancelled() &&
@@ -1330,7 +1330,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
 
   validate-artifact:
-    name: 04 / ${{ matrix.label }} / Validate ${{ matrix.artifact-type }}
+    name: ${{ matrix.label }} / Validate ${{ matrix.artifact-type }}
     # sign-ios produces the iOS release artifact, so validation waits for it.
     # `skipped` is fine: it only runs for release builds that selected iOS.
     needs: [resolve-config, build, sign-ios]
@@ -1484,7 +1484,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
 
   release-manifest:
-    name: 05 / Release Manifest
+    name: Release Manifest
     needs: [resolve-config, build, sign-ios, validate-artifact]
     if: >-
       !cancelled() &&
@@ -1573,7 +1573,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
 
   final-report:
-    name: 07 / Final Report
+    name: Final Report
     needs:
       - resolve-config
       - validate-project
@@ -1914,7 +1914,7 @@ jobs:
   # JOB 12: notify-discord
   # ════════════════════════════════════════════════════════════════════════════
   notify-discord:
-    name: 08 / Notify Discord
+    name: Notify Discord
     needs:
       - resolve-config
       - validate-project

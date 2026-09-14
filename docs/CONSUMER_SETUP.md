@@ -462,10 +462,11 @@ gh run list --repo "${REPO}" --workflow 10-build-development.yml --limit 5
 gh run watch --repo "${REPO}" $(gh run list --repo "${REPO}" --workflow 10-build-development.yml --limit 1 --json databaseId --jq '.[0].databaseId')
 ```
 
-In the Actions UI you should see stage-numbered nodes — `01 / Resolve Build
-Config`, `02 / Unity Tests`, `03 / Android`, `04 / Android / Validate APK`,
-`07 / Final Report` — each independently coloured, plus a progress ladder in
-every job's summary showing how far the run has got.
+In the Actions UI you should see one node per step of the run — `Resolve Build
+Config`, `Unity Tests`, `Android`, `Android / Validate APK`, `Final Report` —
+each independently coloured, and each prefixed by the lane that called it
+(`CI / …`, `Dev / …`, `Release / …`). The stage order is not in the names; it
+is the progress ladder every job draws into its summary.
 
 Download the build artifact:
 
@@ -504,7 +505,7 @@ After setup, the pipeline provides:
 | **Platform capability** | `PLATFORMS` decides what the project can build; a disabled platform creates no job and no artifact |
 | **Branch-based CI** | Push to `develop`/`staging`/`release-*` runs the branch's configured platform set; PRs run tests only, with no binary builds and no environment secrets |
 | **Progress ladder** | Every job draws how far the run has got into its summary, so the graph's shape is not the only clue |
-| **Per-platform jobs** | One independently-retryable node per platform, named for people (`03 / Windows`, not `03 / Windows64`) |
+| **Per-platform jobs** | One independently-retryable node per platform, named for people (`Windows`, not `Windows64`) |
 | **Discord notifications** | Build and release embeds with status, platform and artifact links (when `DISCORD_WEBHOOK_URL` is set) |
 | **GitHub Environments** | Deployment records per run; every publishing phase behind an Environment you can put a reviewer on |
 | **Addressables support** | `build-addressables` runs before the platform builds; the catalog is available to all of them |

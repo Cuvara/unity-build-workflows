@@ -4,7 +4,8 @@ Pipeline stage architecture contract.
 These tests pin the orchestration properties the pipeline graph is supposed to
 have, independent of what any individual job does:
 
-  * every user-visible node is named `NN / …` so the graph reads as stages
+  * no user-visible node repeats the stage number — the graph is read left
+    to right from the caller's lane, and `PIPELINE_STAGES` carries the order
   * the quality gate (02) is on the path from every expensive stage-03 build
   * platform builds fan out — none depends on another platform
   * stage 04 validates each artifact independently of the other platforms
@@ -45,8 +46,12 @@ VALIDATED_PLATFORMS = ["Android", "WebGL", "iOS"]
 # Expensive jobs that must sit behind the quality gate.
 GATED_JOBS = [BUILD_JOB, "build-addressables"]
 
-# `03b` is a sub-stage: iOS production signing sits between the Unity build
-# and artifact validation, inside stage 03.
+# Node names used to open with the stage number (`03 / Android / APK`).
+# GitHub already prefixes every called job with the caller's lane, so the number
+# was a third segment competing for the width a reader actually needs -- the
+# platform and the artifact. Stage order now lives only in `PIPELINE_STAGES`,
+# which the progress ladder renders, and this pattern exists to keep the prefix
+# from creeping back in.
 STAGE_PREFIX = re.compile(r"^\d{2}[a-z]? / ")
 
 
@@ -94,16 +99,22 @@ def pipeline_jobs(pipeline):
 # Node naming — platform, configuration and artifact type must be visible
 # ---------------------------------------------------------------------------
 
-def test_every_pipeline_job_is_stage_numbered(pipeline_jobs):
-    """Every node in unity-pipeline.yml announces its stage."""
-    unnumbered = {
+def test_no_pipeline_job_name_repeats_the_stage_number(pipeline_jobs):
+    """A node is `Dev / Android / APK`, never `Dev / 03 / Android / APK`.
+
+    The stage number told the reader nothing the graph's own edges did not
+    already say, and it cost a segment in a name GitHub had already prefixed
+    with the caller's lane. Stage order is `PIPELINE_STAGES`, rendered as the
+    progress ladder; it is not the node name's job.
+    """
+    numbered = {
         job_id: job.get("name")
         for job_id, job in pipeline_jobs.items()
-        if not STAGE_PREFIX.match(str(job.get("name", "")))
+        if STAGE_PREFIX.match(str(job.get("name", "")))
     }
-    assert not unnumbered, (
-        "these nodes render without a stage number, so the graph cannot be read "
-        f"as stages: {unnumbered}"
+    assert not numbered, (
+        "these nodes still open with a stage number, which the caller's lane "
+        f"prefix already pushes off the readable width: {numbered}"
     )
 
 
@@ -141,7 +152,6 @@ def test_build_node_name_carries_the_platform(pipeline_jobs):
     assert "matrix.label" in name, (
         f"the build node must name its platform from the matrix, got {name!r}"
     )
-    assert name.startswith("03 / ")
 
 
 def test_build_node_name_does_not_repeat_the_node_label(pipeline_jobs):
@@ -159,13 +169,12 @@ def test_build_node_name_does_not_repeat_the_node_label(pipeline_jobs):
 def test_validate_node_name_carries_the_platform(pipeline_jobs):
     name = str(pipeline_jobs[VALIDATE_JOB]["name"])
     assert "matrix.label" in name
-    assert name.startswith("04 / ")
 
 
 def test_build_matrix_supplies_configuration_and_artifact_type(pipeline_jobs):
     """The second half of the node name (node-label) and the artifact type come
-    from the matrix row, so `03 / Android` + `Production / AAB` renders
-    `03 / Android / Production / AAB`."""
+    from the matrix row, so `Android` + `Production / AAB` renders
+    `Android / Production / AAB`."""
     with_block = pipeline_jobs[BUILD_JOB]["with"]
     assert with_block["platform"] == "${{ matrix.platform }}"
     assert with_block["node-label"] == "${{ matrix.node }}"
@@ -175,7 +184,7 @@ def test_build_matrix_supplies_configuration_and_artifact_type(pipeline_jobs):
 
 def test_addressables_node_is_named_and_configured(pipeline_jobs):
     job = pipeline_jobs["build-addressables"]
-    assert str(job["name"]).startswith("03 / ")
+    assert str(job["name"]) == "Addressables"
     assert "node-label" in job["with"]
     assert "configuration" in job["with"]
 
@@ -270,9 +279,9 @@ def test_build_matrix_is_guarded_against_being_empty(pipeline_jobs):
 # Stage 04 — artifact validation is explicit and independent
 # ---------------------------------------------------------------------------
 
-def test_validation_job_exists_and_is_stage_04(pipeline_jobs):
+def test_validation_job_exists(pipeline_jobs):
     assert VALIDATE_JOB in pipeline_jobs
-    assert str(pipeline_jobs[VALIDATE_JOB]["name"]).startswith("04 / ")
+    assert "Validate" in str(pipeline_jobs[VALIDATE_JOB]["name"])
 
 
 def test_validation_matrix_comes_from_resolved_config(pipeline_jobs):
@@ -597,8 +606,8 @@ def test_development_report_says_it_cannot_be_published(pipeline_jobs):
 def test_stage_04_node_names_the_artifact_it_validates(pipeline_jobs):
     name = str(pipeline_jobs[VALIDATE_JOB]["name"])
     assert "matrix.artifact-type" in name, (
-        f"'{name}' does not say what it validates — '04 / Android / Validate AAB' "
-        "tells the reader more than '04 / Android / Validate'"
+        f"'{name}' does not say what it validates — 'Android / Validate AAB' "
+        "tells the reader more than 'Android / Validate'"
     )
 
 
@@ -613,18 +622,40 @@ RELEASE_PIPELINES = {
 }
 
 
+def _declared_stages(jobs):
+    """Which stages a pipeline covers, read from the progress ladder rather than
+    from the node names.
+
+    The node names used to carry the number and this test read `name[:2]`. That
+    made the graph's labels load-bearing for a structural claim, so shortening a
+    label looked like deleting a stage. The ladder is where stage identity
+    actually lives: `PIPELINE_STAGES` declares the list once and every job
+    announces its position through `current:`.
+    """
+    stages = set()
+    for job in jobs.values():
+        for step in job.get("steps") or []:
+            current = str((step.get("with") or {}).get("current", "")).strip()
+            if current[:2].isdigit():
+                stages.add(current[:2])
+    return stages
+
+
 @pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))
 def test_release_pipeline_reaches_stage_07(key, spec):
     """The pipelines ended at stage 06, so a release run produced no report at
     all — the only way to see how far a promotion got was to read the graph."""
     path, _ = spec
     jobs = load(path)["jobs"]
-    stages = {str(j.get("name", ""))[:2] for j in jobs.values()}
+    stages = _declared_stages(jobs)
     # No stage 03: a release pipeline never builds. iOS keeps an IPA export
     # because signing an archive needs the distribution certificate, which
     # belongs to the release layer, not the build layer.
-    for stage in ("04", "05", "06", "07"):
+    for stage in ("04", "05", "06"):
         assert stage in stages, f"{path.name} has no stage {stage}: {sorted(stages)}"
+    # Stage 07 is the report itself: it renders the ladder rather than stepping
+    # it, so it declares no `current:` of its own.
+    assert "report" in jobs, f"{path.name} has no stage 07 report job"
 
 
 @pytest.mark.parametrize("key,spec", sorted(RELEASE_PIPELINES.items()))

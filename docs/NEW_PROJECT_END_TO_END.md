@@ -148,10 +148,11 @@ gh run watch --repo "$REPO" \
   "$(gh run list --repo "$REPO" --workflow 10-build-development.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-Jobs you should see, in stage order: `01 / Resolve Build Config`,
-`01 / Validate Unity Project`, `01 / Validate Unity License`, optionally
-`02 / Unity Tests`, `02 / Quality Gate`, `03 / Android`,
-`04 / Android / Validate APK`, `07 / Final Report`. Every job's summary carries
+Jobs you should see, in stage order: `Resolve Build Config`,
+`Validate Unity Project`, `Validate Unity License`, optionally
+`Unity Tests`, `Quality Gate`, `Android`,
+`Android / Validate APK`, `Final Report` — each rendered under its lane, so a
+development build reads `Dev / Android`. Every job's summary carries
 a progress ladder showing how far the run has got.
 
 `platform` takes one name, a comma-separated list (`Android,WebGL`), `Desktop`

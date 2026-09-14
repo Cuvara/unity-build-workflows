@@ -122,7 +122,7 @@ concurrency:
 
 jobs:
   build:
-    name: Development
+    name: Dev
     uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v3
     secrets: inherit
     with:
