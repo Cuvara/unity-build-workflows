@@ -412,8 +412,16 @@ runs:
 
         # The authoritative artifact size, keyed by platform, straight from the
         # build that produced it.
-        declare -A _PLAT_BYTES
+        declare -A _PLAT_BYTES _PLAT_TYPE
         if [ -n "${INPUT_PLATFORM_SUMMARY:-}" ]; then
+          # The artifact type distinguishes "we could not measure it" from
+          # "it was built and it is empty" further down.
+          _TYPES=$(printf '%s' "${INPUT_PLATFORM_SUMMARY}" \
+            | jq -r '.[]? | "\(.platform)=\(.artifactType // "")"' 2>/dev/null) || _TYPES=""
+          while IFS='=' read -r _tp _tv; do
+            [ -z "${_tp}" ] && continue
+            _PLAT_TYPE["${_tp}"]="${_tv}"
+          done <<< "${_TYPES}"
           _SIZES=$(printf '%s' "${INPUT_PLATFORM_SUMMARY}" \
             | jq -r '.[]? | "\(.platform)=\(.artifactSizeBytes // "")"' 2>/dev/null) || _SIZES=""
           while IFS='=' read -r _sp _sb; do
@@ -532,6 +540,11 @@ runs:
             # a successful build of nothing. Say so instead.
             if [ "${PLAT_SIZE_MB}" -gt 0 ]; then
               SIZE_TEXT="\`${PLAT_SIZE_MB} MB\`"
+            elif [ "${_PLAT_TYPE[${PLAT}]:-}" = "ADDRESSABLES" ]; then
+              # A content build that shipped no bundles is not an unmeasured
+              # build — it is an empty one, and it had been reading as a
+              # successful Addressables stage for every run.
+              SIZE_TEXT="**no content built**"
             else
               SIZE_TEXT="size unknown"
             fi

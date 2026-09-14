@@ -48,7 +48,10 @@ ARTIFACT_PATTERNS = {
     "WEBGL": ["index.html"],
     "EXE": ["*.exe"],
     "LINUX": ["*.x86_64"],
-    "ADDRESSABLES": ["catalog*.json", "*.bundle"],
+    # Addressables 2.x writes catalog.bin by default and only emits
+    # catalog.json when "Build Remote Catalog" is on, so a json-only glob
+    # matches nothing on a default project.
+    "ADDRESSABLES": ["catalog*.json", "catalog*.bin", "*.bundle"],
 }
 
 # Artifact types that are a step on the way to a shippable artifact, never the
@@ -58,6 +61,11 @@ ARTIFACT_PATTERNS = {
 # can install. Marking them here keeps the judgement in one place instead of
 # spread across the workflows that happen to know about iOS.
 INTERMEDIATE_ARTIFACT_TYPES = {"XCODEPROJ"}
+
+# Artifact types whose artifact is a directory tree rather than a single
+# file. Their size is the sum of the tree, and a single member file is
+# never the artifact.
+TREE_ARTIFACT_TYPES = {"ADDRESSABLES"}
 
 
 # Platform → the artifact type a build produces when the caller does not say.
@@ -86,35 +94,59 @@ def run_git(args, cwd):
     return ""
 
 
-def discover_artifact(search_root, artifact_type):
-    """Return the artifact path inside search_root for artifact_type, or None.
-
-    A directory is walked breadth-first so that a top-level match beats a
-    nested one — Unity leaves intermediate copies in subdirectories and the
-    shallowest hit is the shipped artifact.
-    """
-    root = Path(search_root)
-    if root.is_file():
-        return root
-
-    patterns = ARTIFACT_PATTERNS.get(str(artifact_type).upper())
-    if not patterns or not root.is_dir():
-        return None
-
-    candidates = []
+def _matches_in(root, patterns):
+    """Every path under root whose name matches one of patterns."""
+    hits = []
     for path in root.rglob("*"):
         name = path.name
         for pattern in patterns:
             if fnmatch.fnmatch(name, pattern):
-                candidates.append(path)
+                hits.append(path)
                 break
+    return hits
 
-    if not candidates:
-        return None
 
-    # Shallowest first, then alphabetical, so the result is deterministic.
-    candidates.sort(key=lambda p: (len(p.relative_to(root).parts), str(p)))
-    return candidates[0]
+def discover_artifact(search_root, artifact_type):
+    """Return the artifact path for artifact_type, or None.
+
+    `search_root` is one directory/file or an iterable of them. Roots are tried
+    in order and the first that yields a match wins, so the caller states its
+    own precedence rather than having one guessed here.
+
+    A directory is walked breadth-first so that a top-level match beats a
+    nested one — Unity leaves intermediate copies in subdirectories and the
+    shallowest hit is the shipped artifact.
+
+    ADDRESSABLES is the exception: a content build is a tree of bundles plus a
+    catalog, and no single file in it is "the artifact". Returning one bundle
+    would report that bundle's size as the build's size. The containing
+    DIRECTORY is returned instead, so `size_of` sums the whole tree.
+    """
+    roots = [search_root] if isinstance(search_root, (str, Path)) else list(search_root)
+    patterns = ARTIFACT_PATTERNS.get(str(artifact_type).upper())
+    is_tree = str(artifact_type).upper() in TREE_ARTIFACT_TYPES
+
+    for entry in roots:
+        root = Path(entry)
+        if root.is_file():
+            return root
+        if not patterns or not root.is_dir():
+            continue
+
+        candidates = _matches_in(root, patterns)
+        if not candidates:
+            continue
+
+        # Shallowest first, then alphabetical, so the result is deterministic.
+        candidates.sort(key=lambda p: (len(p.relative_to(root).parts), str(p)))
+        if is_tree:
+            # The catalog sits at the top of the content tree; its parent is
+            # the tree. Never return the search root's parent.
+            parent = candidates[0].parent
+            return root if parent == root.parent else parent
+        return candidates[0]
+
+    return None
 
 
 def sha256_of(path, chunk_size=1024 * 1024):
@@ -335,8 +367,11 @@ def main(argv=None):
     )
     parser.add_argument(
         "--search-root",
-        default="build",
-        help="Directory (or file) the artifact is discovered in",
+        action="append",
+        default=None,
+        help="Directory (or file) the artifact is discovered in. Repeatable: "
+        "roots are tried in order and the first with a match wins. Addressables "
+        "needs this because local and remote groups build to different trees.",
     )
     parser.add_argument("--artifact-path", default="", help="Skip discovery, use this path")
     parser.add_argument("--project-path", default=".")
@@ -373,15 +408,17 @@ def main(argv=None):
 
     artifact_type = args.artifact_type or DEFAULT_ARTIFACT_TYPE.get(args.platform, "ZIP")
 
+    search_roots = args.search_root or ["build"]
+
     artifact_path = args.artifact_path or None
     if artifact_path is None:
-        found = discover_artifact(args.search_root, artifact_type)
+        found = discover_artifact(search_roots, artifact_type)
         artifact_path = str(found) if found else None
 
     if artifact_path is None:
         print(
             f"[artifact_manifest] WARNING: no {artifact_type} artifact found under "
-            f"{args.search_root} — writing an empty manifest",
+            f"{', '.join(str(r) for r in search_roots)} — writing an empty manifest",
             file=sys.stderr,
         )
 
@@ -407,7 +444,7 @@ def main(argv=None):
         intermediate=args.intermediate,
     )
 
-    output = Path(args.output) if args.output else Path(args.search_root) / MANIFEST_FILENAME
+    output = Path(args.output) if args.output else Path(search_roots[0]) / MANIFEST_FILENAME
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(manifest, indent=2))
     print(f"[artifact_manifest] Written: {output}", file=sys.stderr)
