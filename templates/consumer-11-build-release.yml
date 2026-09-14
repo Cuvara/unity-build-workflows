@@ -121,11 +121,11 @@ concurrency:
 jobs:
   build:
     name: Release
-    uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v6
+    uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@v5
     secrets: inherit
     with:
       project-path: '.'
-      toolkit-ref: 'v6'
+      toolkit-ref: 'v5'
       build-type: release
       platform: ${{ inputs.platform }}
       environment: production

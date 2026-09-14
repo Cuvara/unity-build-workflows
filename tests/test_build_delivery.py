@@ -101,92 +101,7 @@ def test_local_without_a_base_url_fails(tmp_path):
 def test_an_unknown_provider_fails(tmp_path):
     proc = run(tmp_path, BUILD_DELIVERY="dropbox")
     assert proc.returncode == 1
-    assert "Valid: r2, local, firebase, none" in proc.stderr
-
-
-# ---------------------------------------------------------------------------
-# Firebase App Distribution
-# ---------------------------------------------------------------------------
-
-def test_firebase_without_credentials_fails_rather_than_skipping(tmp_path):
-    """Asking for firebase without a service account is misconfiguration."""
-    proc = run(tmp_path, BUILD_DELIVERY="firebase")
-    assert proc.returncode == 1
-    assert "FIREBASE_SERVICE_ACCOUNT_JSON" in proc.stderr
-    assert "BUILD_DELIVERY=none" in proc.stderr
-
-
-def test_firebase_without_app_id_fails(tmp_path):
-    proc = run(tmp_path, BUILD_DELIVERY="firebase",
-               FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account"}')
-    assert proc.returncode == 1
-    assert "FIREBASE_APP_ID" in proc.stderr
-
-
-def test_firebase_unsupported_file_type_fails(tmp_path):
-    """Firebase only accepts APK, AAB and IPA."""
-    source = tmp_path / "game.zip"
-    source.write_bytes(b"ZIP" * 100)
-    environment = {k: v for k, v in os.environ.items()
-                   if not k.startswith(("R2_", "BUILD_", "CLOUDFLARE_", "FIREBASE_"))}
-    environment.update({
-        "BUILD_DELIVERY": "firebase",
-        "FIREBASE_SERVICE_ACCOUNT_JSON": '{"type":"service_account"}',
-        "FIREBASE_APP_ID": "1:123:android:abc",
-    })
-    proc = subprocess.run(
-        ["python3", str(SCRIPT), "--file", str(source), "--key", "k"],
-        capture_output=True, text=True, env=environment)
-    assert proc.returncode == 1
-    assert "does not support .zip" in proc.stderr
-
-
-def test_firebase_cli_not_installed(tmp_path, monkeypatch):
-    """When firebase CLI is missing, report clearly."""
-    import publish_build
-
-    monkeypatch.setenv("FIREBASE_SERVICE_ACCOUNT_JSON", '{"type":"service_account"}')
-    monkeypatch.setenv("FIREBASE_APP_ID", "1:123:android:abc")
-    monkeypatch.setenv("FIREBASE_TESTER_GROUPS", "")
-    monkeypatch.setenv("FIREBASE_RELEASE_NOTES", "")
-
-    # Make subprocess.run raise FileNotFoundError (simulating missing CLI)
-    original_run = subprocess.run
-    def fake_run(cmd, **kwargs):
-        if cmd[0] == "firebase":
-            raise FileNotFoundError("firebase not found")
-        return original_run(cmd, **kwargs)
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    source = tmp_path / "game.apk"
-    source.write_bytes(b"APK" * 100)
-    url, problem = publish_build.publish_firebase(source, "k")
-    assert url is None
-    assert "firebase-tools" in problem
-
-
-def test_firebase_parse_testing_uri():
-    """The tester link is extracted from Firebase CLI output."""
-    import publish_build
-
-    stdout = (
-        "i  uploading binary...\n"
-        "✔  uploaded binary successfully\n"
-        "i  View this release in the Firebase console: "
-        "https://console.firebase.google.com/project/my-project/appdistribution\n"
-        "i  Share this release with testers who have access: "
-        "https://appdistribution.firebase.google.com/testerapps/1:123:android:abc/releases/abc123\n"
-    )
-    uri = publish_build._parse_firebase_testing_uri(stdout)
-    assert uri == "https://appdistribution.firebase.google.com/testerapps/1:123:android:abc/releases/abc123"
-
-
-def test_firebase_parse_testing_uri_missing():
-    """When no testing URI is found, return None."""
-    import publish_build
-
-    uri = publish_build._parse_firebase_testing_uri("some random output\n")
-    assert uri is None
+    assert "Valid: r2, local, none" in proc.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -292,8 +207,7 @@ def test_the_credentials_are_optional_on_the_interface():
         workflow = yaml.safe_load(path.read_text())
         secrets = ((workflow.get("on") or workflow[True])["workflow_call"]
                    .get("secrets") or {})
-        for name in ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-                     "FIREBASE_SERVICE_ACCOUNT_JSON"):
+        for name in ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
             assert secrets[name].get("required") is False, f"{path.name}:{name}"
 
 

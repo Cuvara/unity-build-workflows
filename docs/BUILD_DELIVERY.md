@@ -31,7 +31,6 @@ One repository variable, `BUILD_DELIVERY`:
 | `none` | **Default.** Nowhere. The Discord link stays the GitHub artifact URL. |
 | `r2` | Cloudflare R2, over the S3 API. |
 | `local` | A directory on your self-hosted runner, served by your own web server. |
-| `firebase` | Firebase App Distribution — testers get a direct install link. |
 
 ```bash
 gh variable set BUILD_DELIVERY --body "r2"
@@ -111,57 +110,6 @@ will be wrong and nothing here can tell.
 **This only works on the self-hosted lane.** The file has to be on the machine
 that serves it, and a GitHub-hosted runner is a fresh VM that disappears. Set
 `RUNNER_TYPE=self-hosted` if you use `local`.
-
-## `firebase` — Firebase App Distribution
-
-Testers get a direct install link — no GitHub login, no server to run. Firebase
-manages tester access and supports APK, AAB and IPA. AAB files are converted to
-APKs server-side for tester devices.
-
-**Setup**
-
-1. Create a Firebase project (or use an existing one).
-2. Enable **App Distribution** in the Firebase console.
-3. Register your Android and/or iOS app in the Firebase project.
-4. Create a **service account** in Google Cloud (IAM → Service Accounts) with the
-   `Firebase App Distribution Admin` role.
-5. Download the JSON key.
-6. Install **Firebase CLI** on your runner: `npm install -g firebase-tools`.
-   (GitHub-hosted runners have Node.js; self-hosted runners need it pre-installed.)
-
-**Variables** (public ids, not secrets):
-
-| Variable | Example | Required |
-|---|---|---|
-| `FIREBASE_APP_ID_ANDROID` | `1:123456789:android:abcdef0123` | When building Android |
-| `FIREBASE_APP_ID_IOS` | `1:123456789:ios:abcdef0123` | When building iOS |
-| `FIREBASE_TESTER_GROUPS` | `internal-testers,qa` | No — omit to skip group assignment |
-
-```bash
-gh variable set FIREBASE_APP_ID_ANDROID --body "1:123456789:android:abcdef"
-gh variable set FIREBASE_APP_ID_IOS --body "1:123456789:ios:abcdef"
-gh variable set FIREBASE_TESTER_GROUPS --body "internal-testers"
-```
-
-**Secrets**:
-
-| Secret | |
-|---|---|
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | The full JSON key file contents (not base64) |
-
-```bash
-gh secret set FIREBASE_SERVICE_ACCOUNT_JSON < /path/to/service-account-key.json
-```
-
-**How the tester link works.** The Discord notification receives a `testingUri` —
-a stable URL on `appdistribution.firebase.google.com`. Testers who have been
-invited to the Firebase project (or a tester group) can open it to install the
-build. Uninvited people see an access error, which is a feature: builds are not
-accidentally public.
-
-**Platforms.** Only Android (APK/AAB) and iOS (IPA) are supported. WebGL, Linux
-and Windows builds skip Firebase delivery with a warning — use `r2` or `local`
-for those platforms.
 
 ## What the layout looks like
 

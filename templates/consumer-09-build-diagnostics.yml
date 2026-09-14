@@ -54,7 +54,7 @@ jobs:
         with:
           repository: Cuvara/unity-build-workflows
           # Same ref the build used.
-          ref: v6
+          ref: v5
           path: .toolkit
 
       - name: Report what Unity said
