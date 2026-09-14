@@ -10,6 +10,34 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Addressables stage shipped no bundles, and said `size unknown` instead of
+  saying so.** Discord reported `✅ Addressables: success — size unknown · run`
+  on every content build. Three defects stacked up, each invisible on its own:
+
+  1. `artifact_manifest.py` matched `catalog*.json` only. Addressables 2.x writes
+     a **binary** `catalog.bin` unless "Build Remote Catalog" is on, so the glob
+     matched nothing and the manifest came out empty — `artifactSizeBytes=0`,
+     which Discord renders as `size unknown`.
+  2. The manifest and the upload both looked only in `ServerData`. That is the
+     **remote** build path; the Unity default is a **local** group, which builds
+     to `Library/com.unity.addressables/aa`. A project with no remote group
+     therefore uploaded an artifact containing the settings folder and nothing
+     else — 16 KB of `.asset` files, no bundles — and still reported success.
+     (Observed on IndieRPGMMOAdventure run 34833428560.) Both trees are now
+     searched and uploaded, remote first so projects that use it are unaffected.
+  3. For `ADDRESSABLES`, discovery returned a single bundle, whose size would
+     have been reported as the size of the whole content build. Content builds
+     are trees: the containing directory is returned and the tree is summed.
+
+  `--search-root` is now repeatable; roots are tried in order and the first with
+  a match wins. A single `--search-root` behaves exactly as before.
+
+- **A content build with zero bundles now says `no content built`** rather than
+  `size unknown`. The two are different facts and only one of them is a defect;
+  they had been rendering identically.
+
 ---
 
 ## [5.6.0] — 2026-09-14

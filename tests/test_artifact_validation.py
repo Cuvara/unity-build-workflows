@@ -231,6 +231,73 @@ class TestArtifactManifest:
         found = artifact_manifest.discover_artifact(build, "APK")
         assert found.name == "shipped.apk"
 
+    # ── Addressables: a content build is a tree, in one of two places ──────
+    #
+    # Observed 2026-09-14 on IndieRPGMMOAdventure run 34833428560: the stage
+    # reported success, Discord printed "size unknown", and the uploaded
+    # artifact contained the settings folder and nothing else. Two causes, both
+    # covered below.
+
+    def _addressables_tree(self, root, catalog_name):
+        """A content build: two bundles plus a catalog, as Unity lays it out."""
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "group_assets_all_abc.bundle").write_bytes(b"a" * 5000)
+        (root / "group_scenes_all_def.bundle").write_bytes(b"b" * 3000)
+        (root / catalog_name).write_bytes(b"c" * 200)
+        return 5000 + 3000 + 200
+
+    def test_addressables_finds_a_binary_catalog(self, tmp_path):
+        # Addressables 2.x writes catalog.bin; the json-only glob matched
+        # nothing, which is why the manifest came out empty.
+        content = tmp_path / "ServerData" / "StandaloneLinux64"
+        self._addressables_tree(content, "catalog.bin")
+        found = artifact_manifest.discover_artifact(tmp_path / "ServerData", "ADDRESSABLES")
+        assert found is not None, "a catalog.bin content build must be discoverable"
+
+    def test_addressables_reports_the_tree_not_one_bundle(self, tmp_path):
+        # Returning a single bundle would report that bundle's size as the
+        # size of the whole content build.
+        content = tmp_path / "ServerData" / "StandaloneLinux64"
+        total = self._addressables_tree(content, "catalog.bin")
+        found = artifact_manifest.discover_artifact(tmp_path / "ServerData", "ADDRESSABLES")
+        assert found.is_dir()
+        assert artifact_manifest.size_of(found) == total
+
+    def test_addressables_falls_back_to_the_local_build_path(self, tmp_path):
+        # The Unity default is a LOCAL group, which never writes ServerData.
+        # Searching ServerData alone reported every default project as empty.
+        (tmp_path / "ServerData").mkdir()
+        local = tmp_path / "Library" / "com.unity.addressables" / "aa" / "Linux"
+        total = self._addressables_tree(local, "catalog.bin")
+        found = artifact_manifest.discover_artifact(
+            [tmp_path / "ServerData", tmp_path / "Library" / "com.unity.addressables" / "aa"],
+            "ADDRESSABLES",
+        )
+        assert found is not None, "local-group content must be found"
+        assert artifact_manifest.size_of(found) == total
+
+    def test_addressables_prefers_remote_over_local(self, tmp_path):
+        # Roots are tried in order: a project that does use remote groups must
+        # keep reporting the remote tree, not the local staging copy.
+        remote = tmp_path / "ServerData" / "StandaloneLinux64"
+        remote_total = self._addressables_tree(remote, "catalog_2026.json")
+        local = tmp_path / "Library" / "com.unity.addressables" / "aa" / "Linux"
+        self._addressables_tree(local, "catalog.bin")
+        found = artifact_manifest.discover_artifact(
+            [tmp_path / "ServerData", tmp_path / "Library" / "com.unity.addressables" / "aa"],
+            "ADDRESSABLES",
+        )
+        assert "ServerData" in str(found)
+        assert artifact_manifest.size_of(found) == remote_total
+
+    def test_single_file_types_are_unaffected_by_tree_handling(self, tmp_path):
+        # The tree rule must apply to ADDRESSABLES only.
+        build = tmp_path / "build"
+        build.mkdir()
+        (build / "Game.exe").write_bytes(b"x" * 4096)
+        found = artifact_manifest.discover_artifact(build, "EXE")
+        assert found.is_file() and found.name == "Game.exe"
+
     def test_returns_none_when_the_type_is_absent(self, tmp_path):
         build = tmp_path / "build"
         build.mkdir()

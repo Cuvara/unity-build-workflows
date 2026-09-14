@@ -1304,6 +1304,11 @@ jobs:
         shell: bash
         env:
           SEARCH_ROOT: ${{ inputs.platform == 'Addressables' && format('{0}/ServerData', inputs.project-path) || 'build' }}
+          # Addressables content lands in one of two trees and the toolkit cannot
+          # know which: a REMOTE group builds to ServerData, a LOCAL group (the
+          # Unity default) builds to Library/com.unity.addressables/aa. Searching
+          # only ServerData reported every default project as having no content.
+          SEARCH_ROOT_LOCAL: ${{ inputs.platform == 'Addressables' && format('{0}/Library/com.unity.addressables/aa', inputs.project-path) || '' }}
         run: |
           set -Eeuo pipefail
           if [ ! -f ".toolkit/scripts/common/artifact_manifest.py" ]; then
@@ -1311,6 +1316,14 @@ jobs:
             exit 0
           fi
           mkdir -p "${SEARCH_ROOT}"
+
+          # Roots are tried in order, so a remote build (ServerData) keeps
+          # winning for projects that use one. The local tree is only consulted
+          # when ServerData holds nothing.
+          SEARCH_ARGS=(--search-root "${SEARCH_ROOT}")
+          if [ -n "${SEARCH_ROOT_LOCAL:-}" ]; then
+            SEARCH_ARGS+=(--search-root "${SEARCH_ROOT_LOCAL}")
+          fi
 
           # The manifest must NOT be written into the build output. On the
           # docker lane build/ is created by the Unity container under a
@@ -1325,7 +1338,7 @@ jobs:
             --platform       "${{ inputs.platform }}" \
             --configuration  "${{ inputs.configuration != '' && inputs.configuration || inputs.environment }}" \
             --artifact-type  "${{ steps.artifact-type.outputs.artifact-type }}" \
-            --search-root    "${SEARCH_ROOT}" \
+            "${SEARCH_ARGS[@]}" \
             --output         "${MANIFEST_DIR}/artifact-manifest.json" \
             --project-path   "${{ inputs.project-path }}" \
             --version        "${{ inputs.app-version }}" \
@@ -1380,7 +1393,11 @@ jobs:
           compression-level: 6
 
       # ── Step 11b: Upload Addressables artifact ────────────────────────────
-      # Artifacts: Addressable catalog + bundles (ServerData, StreamingAssets).
+      # Artifacts: Addressable catalog + bundles. REMOTE groups build to
+      # ServerData, LOCAL groups (the Unity default) to
+      # Library/com.unity.addressables/aa — upload both, because a project
+      # using only local groups otherwise ships an artifact with no bundles
+      # in it, and the empty upload still reports success.
       - name: Upload Addressables artifact
         if: ${{ inputs.platform == 'Addressables' && steps.ios-guard.outputs.blocked != 'true' }}
         # Self-hosted output persists locally — don't fail on upload quota.
@@ -1390,6 +1407,7 @@ jobs:
           name: unity-build-Addressables
           path: |
             ${{ inputs.project-path }}/ServerData
+            ${{ inputs.project-path }}/Library/com.unity.addressables/aa
             ${{ inputs.project-path }}/Assets/AddressableAssetsData
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}
