@@ -8,20 +8,25 @@ signed in with access to the repository — on a public repo too — so the link
 a Discord message is useless to everyone except the people who could already
 find the build themselves.
 
-This copies the artifact to a host that serves it, and prints the URL. Two
+This copies the artifact to a host that serves it, and prints the URL. Three
 providers, chosen by `BUILD_DELIVERY`:
 
-    r2      Cloudflare R2 over the S3 API. Free egress, which is the reason to
-            prefer it: a 33 MB build fetched by a team several times a day is
-            real bandwidth, and R2 does not bill for it.
+    r2        Cloudflare R2 over the S3 API. Free egress, which is the reason to
+              prefer it: a 33 MB build fetched by a team several times a day is
+              real bandwidth, and R2 does not bill for it.
 
-    local   A directory on a self-hosted runner, served by a web server you
-            already run. The toolkit copies the file and composes the URL; it
-            does not install or configure the server, and cannot verify the
-            file is reachable.
+    local     A directory on a self-hosted runner, served by a web server you
+              already run. The toolkit copies the file and composes the URL; it
+              does not install or configure the server, and cannot verify the
+              file is reachable.
 
-    none    Default. Nothing is published and nothing fails — a project that
-            has not configured delivery still builds.
+    firebase  Firebase App Distribution. Uploads the build via the Firebase CLI
+              and returns the tester link. Testers must be invited to the
+              Firebase project or a tester group to access it. Supports APK,
+              AAB and IPA.
+
+    none      Default. Nothing is published and nothing fails — a project that
+              has not configured delivery still builds.
 
 Delivery is not the build. A publish failure is reported and does not fail the
 job: a green build that could not be copied somewhere is still a green build.
@@ -37,9 +42,12 @@ import argparse
 import datetime
 import hashlib
 import hmac
+import json
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -192,6 +200,107 @@ def publish_local(source, key):
     return f"{base}/{key}", None
 
 
+# ── Firebase App Distribution ───────────────────────────────────────────────
+
+def publish_firebase(source, key):
+    """Upload to Firebase App Distribution via the Firebase CLI.
+
+    Returns (testing_uri, None) on success, or (None, problem) on failure.
+    The testing URI is a stable link any invited tester can use to install
+    the build — unlike the binary download URI which expires in one hour.
+    """
+    app_id = env("FIREBASE_APP_ID")
+    creds_json = env("FIREBASE_SERVICE_ACCOUNT_JSON")
+    groups = env("FIREBASE_TESTER_GROUPS")
+    release_notes = env("FIREBASE_RELEASE_NOTES")
+
+    if not creds_json:
+        return None, (
+            "BUILD_DELIVERY=firebase but FIREBASE_SERVICE_ACCOUNT_JSON is not "
+            "set. Configure a service account with Firebase App Distribution "
+            "Admin role, or set BUILD_DELIVERY=none."
+        )
+    if not app_id:
+        return None, (
+            "BUILD_DELIVERY=firebase but FIREBASE_APP_ID is not set. "
+            "Set it to the Firebase App ID for this platform "
+            "(e.g. 1:123456789:android:abcdef)."
+        )
+
+    suffix = source.suffix.lower()
+    if suffix not in (".apk", ".aab", ".ipa"):
+        return None, (
+            f"Firebase App Distribution does not support {suffix} files. "
+            "Only APK, AAB and IPA are accepted."
+        )
+
+    # Write credentials to a temp file — never pass on command line.
+    creds_file = None
+    try:
+        fd, creds_path = tempfile.mkstemp(suffix=".json", prefix="firebase-sa-")
+        creds_file = creds_path
+        with os.fdopen(fd, "w") as fh:
+            fh.write(creds_json)
+
+        cmd = [
+            "firebase", "appdistribution:distribute", str(source),
+            "--app", app_id,
+        ]
+        if groups:
+            cmd.extend(["--groups", groups])
+        if release_notes:
+            cmd.extend(["--release-notes", release_notes])
+
+        proc_env = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": creds_path}
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600, env=proc_env)
+
+        if proc.returncode != 0:
+            # Strip credentials path from error output for safety.
+            stderr = proc.stderr.replace(creds_path, "<credentials>")
+            return None, f"Firebase CLI failed (exit {proc.returncode}): {stderr.strip()}"
+
+        # Parse the testing URI from CLI output.
+        # Firebase CLI prints: "✔ View this release in the Firebase console: <url>"
+        # and "Share this release with testers who have access: <testing_uri>"
+        testing_uri = _parse_firebase_testing_uri(proc.stdout)
+        if not testing_uri:
+            # Fallback: upload succeeded but could not parse URI.
+            return None, (
+                "Firebase upload succeeded but could not extract the tester "
+                f"link from CLI output. stdout: {proc.stdout[:200]}"
+            )
+
+        return testing_uri, None
+
+    except FileNotFoundError:
+        return None, (
+            "Firebase CLI (firebase-tools) is not installed. "
+            "Install it with: npm install -g firebase-tools"
+        )
+    except subprocess.TimeoutExpired:
+        return None, "Firebase upload timed out after 600 seconds."
+    finally:
+        if creds_file and os.path.exists(creds_file):
+            os.unlink(creds_file)
+
+
+def _parse_firebase_testing_uri(stdout):
+    """Extract the tester link from Firebase CLI stdout."""
+    for line in stdout.splitlines():
+        # The CLI outputs various URLs. The testing/sharing URI is the one
+        # testers use to install — look for it by common patterns.
+        stripped = line.strip()
+        if "appdistribution.firebase.google.com" in stripped:
+            # Extract URL from the line (may have prefix text)
+            for token in stripped.split():
+                if token.startswith("https://"):
+                    return token
+        if stripped.startswith("https://appdistribution.firebase.google.com"):
+            return stripped
+    return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Publish a build for download")
     parser.add_argument("--file", required=True, help="The artifact to publish")
@@ -222,8 +331,10 @@ def main(argv=None):
         url, problem = publish_r2(source, key)
     elif provider == "local":
         url, problem = publish_local(source, key)
+    elif provider == "firebase":
+        url, problem = publish_firebase(source, key)
     else:
-        return fail(f"Unknown BUILD_DELIVERY '{provider}'. Valid: r2, local, none.")
+        return fail(f"Unknown BUILD_DELIVERY '{provider}'. Valid: r2, local, firebase, none.")
 
     if url is None:
         # Configuration is wrong, which is worth stopping for: the alternative

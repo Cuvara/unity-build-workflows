@@ -189,9 +189,10 @@ on:
         description: >-
           Where a finished build is copied so people can download it by
           clicking a link: `r2` (Cloudflare R2), `local` (a directory on a
-          self-hosted runner that your web server serves), or `none`.
-          A GitHub artifact link requires a signed-in account with repository
-          access, so it is not an answer for anyone else.
+          self-hosted runner that your web server serves), `firebase`
+          (Firebase App Distribution — tester link for APK/AAB/IPA), or
+          `none`. A GitHub artifact link requires a signed-in account with
+          repository access, so it is not an answer for anyone else.
         required: false
         default: none
         type: string
@@ -345,6 +346,12 @@ on:
         required: false
       IOS_PROVISIONING_PROFILE_BASE64:
         description: Base64-encoded iOS provisioning profile. Required when sign-ios is true.
+        required: false
+      FIREBASE_SERVICE_ACCOUNT_JSON:
+        description: >-
+          Google service account key JSON with Firebase App Distribution Admin
+          role. Required when build-delivery is 'firebase'. Read as env var,
+          never passed on a command line.
         required: false
 
     outputs:
@@ -1562,6 +1569,11 @@ jobs:
           # Credentials, never printed by the script.
           R2_ACCESS_KEY_ID:       ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY:   ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # Firebase App Distribution
+          FIREBASE_APP_ID:              ${{ inputs.platform == 'iOS' && vars.FIREBASE_APP_ID_IOS || vars.FIREBASE_APP_ID_ANDROID }}
+          FIREBASE_TESTER_GROUPS:       ${{ vars.FIREBASE_TESTER_GROUPS }}
+          FIREBASE_RELEASE_NOTES:       ${{ inputs.configuration }} ${{ inputs.platform }} build ${{ inputs.build-number }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
         shell: bash
         run: |
           set -Eeuo pipefail
