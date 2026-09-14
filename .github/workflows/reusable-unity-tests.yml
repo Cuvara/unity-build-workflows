@@ -257,7 +257,7 @@ jobs:
           # organization — git reports it as "not found". Fetch them here instead,
           # so the URLs in .gitmodules are used exactly as written.
           _key_file=""
-          cleanup() { [[ -n "${_key_file}" ]] && rm -f "${_key_file}"; }
+          cleanup() { [[ -n "${_key_file}" ]] && rm -f "${_key_file}" || true; }
           trap cleanup EXIT
 
           _ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=yes"
