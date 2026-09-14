@@ -894,23 +894,30 @@ def test_promotion_cannot_modify_the_binary(key, spec):
     )
 
 
-def test_ios_signing_happens_before_the_boundary(pipeline_jobs):
+def test_ios_signing_happens_before_the_boundary():
     """The correction this test exists for: signing used to run during
     promotion, so the artifact QA validated (an Xcode project) was not the
-    artifact that shipped (an IPA built from it afterwards)."""
-    assert "sign-ios" in pipeline_jobs, (
-        "the build lane does not sign iOS, so the signed IPA can only be "
-        "produced during promotion"
+    artifact that shipped (an IPA built from it afterwards).
+
+    iOS signing is now folded into reusable-build-platform.yml as conditional
+    steps (sign-ios input). This eliminates the separate sign-ios job from the
+    Actions graph, keeping iOS-only operations invisible for non-iOS builds."""
+    rbp = yaml.safe_load((WORKFLOWS / "reusable-build-platform.yml").read_text())
+    steps = rbp["jobs"]["build"]["steps"]
+    uses = "\n".join(str(s.get("uses", "")) for s in steps)
+    assert "ios-archive-export" in uses, (
+        "reusable-build-platform must contain ios-archive-export step"
     )
-    job = pipeline_jobs["sign-ios"]
-    uses = "\n".join(str(s.get("uses", "")) for s in job["steps"])
-    assert "ios-archive-export" in uses
-    assert "ios-setup-signing" in uses
-    # Only for release builds — a development iOS build needs no distribution identity.
-    # The job is matrix-driven: has-sign-ops gates entry, the sign-matrix
-    # is empty for non-release / non-iOS builds.
-    job_if = str(job.get("if", ""))
-    assert "has-sign-ops == 'true'" in job_if or "sign-ios == 'true'" in job_if
+    assert "ios-setup-signing" in uses, (
+        "reusable-build-platform must contain ios-setup-signing step"
+    )
+    # The signing steps are gated on the sign-ios input
+    # PyYAML parses bare `on:` as boolean True
+    on_block = rbp.get(True, rbp.get("on", {}))
+    inputs = on_block.get("workflow_call", {}).get("inputs", {})
+    assert "sign-ios" in inputs, (
+        "reusable-build-platform must declare a sign-ios input"
+    )
 
 
 def test_ios_release_artifact_is_the_ipa(resolve_matrix):

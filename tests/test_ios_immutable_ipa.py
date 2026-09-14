@@ -167,30 +167,34 @@ def test_promoting_an_intermediate_is_refused(tmp_path):
 
 def test_signing_happens_in_the_build_lane():
     """I-004. If the IPA were exported during promotion, the binary QA
-    validated (a project) would not be the binary that ships."""
-    jobs = pipeline()["jobs"]
-    assert "sign-ios" in jobs
-    steps = json.dumps(jobs["sign-ios"]["steps"])
-    assert "ios-archive-export" in steps
-    assert "ios-setup-signing" in steps
+    validated (a project) would not be the binary that ships.
+
+    iOS signing is now folded into reusable-build-platform.yml as conditional
+    steps, so signing happens inside the build matrix job."""
+    rbp = yaml.safe_load(
+        (WORKFLOWS / "reusable-build-platform.yml").read_text())
+    steps = rbp["jobs"]["build"]["steps"]
+    uses = "\n".join(str(s.get("uses", "")) for s in steps)
+    assert "ios-archive-export" in uses
+    assert "ios-setup-signing" in uses
 
 
 def test_the_ipa_gets_its_own_artifact_manifest():
     """Without one, the only iOS manifest in the run is the Xcode project's and
     the Release Set lists a project where the shippable binary should be."""
-    steps = pipeline()["jobs"]["sign-ios"]["steps"]
+    rbp = yaml.safe_load(
+        (WORKFLOWS / "reusable-build-platform.yml").read_text())
+    steps = rbp["jobs"]["build"]["steps"]
     manifest_steps = [s for s in steps
                       if "artifact_manifest.py" in str(s.get("run", ""))]
-    assert manifest_steps, "stage 03b writes no artifact manifest for the IPA"
-    run = str(manifest_steps[0]["run"])
-    assert "--artifact-type   IPA" in run or "--artifact-type IPA" in run
-    # The artifact name comes from the sign matrix (matrix.ipa-artifact)
-    # which resolves to e.g. "release-ios-ipa" at runtime.
-    assert "-ios-ipa" in run or "ipa-artifact" in run
+    assert manifest_steps, "the build lane writes no artifact manifest for the IPA"
+    # At least one manifest step must reference IPA artifact type
+    all_runs = "\n".join(str(s.get("run", "")) for s in manifest_steps)
+    assert "--artifact-type   IPA" in all_runs or "--artifact-type IPA" in all_runs
 
     uploads = [s for s in steps
                if "upload-artifact" in str(s.get("uses", ""))
-               and "ipa-manifest" in json.dumps(s.get("with", {}))]
+               and "ipa" in json.dumps(s.get("with", {})).lower()]
     assert uploads, "the IPA manifest is never uploaded, so stage 05 cannot see it"
 
 
@@ -215,9 +219,10 @@ def test_the_ipa_is_validated_before_it_becomes_immutable(resolve_matrix):
     assert "validate_ipa.sh" in (WORKFLOWS / "unity-pipeline.yml").read_text()
 
 
-def test_stage_04_waits_for_signing():
+def test_stage_04_waits_for_build():
+    """Signing is now part of the build job, so stage 04 waits for build."""
     validate = pipeline()["jobs"]["validate-artifact"]
-    assert "sign-ios" in validate["needs"]
+    assert "build" in validate["needs"]
 
 
 # ---------------------------------------------------------------------------

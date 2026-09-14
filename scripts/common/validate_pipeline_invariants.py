@@ -107,7 +107,24 @@ def check_promotion_never_mutates(workflows_dir, report):
 
 
 def check_signing_before_boundary(workflows_dir, report):
-    """I-004: iOS production signing must live in the build lane."""
+    """I-004: iOS production signing must live in the build lane.
+
+    Signing can live either in a dedicated sign-ios job in unity-pipeline.yml
+    OR folded into reusable-build-platform.yml as conditional steps (sign-ios
+    input). Both satisfy the invariant: the IPA is produced before the
+    immutable-artifact boundary."""
+    # Check reusable-build-platform first (preferred: signing folded into build)
+    rbp = workflows_dir / "reusable-build-platform.yml"
+    if rbp.exists():
+        rbp_jobs = (load_workflow(rbp).get("jobs") or {})
+        build_job = rbp_jobs.get("build")
+        if build_job:
+            uses = job_text(build_job)
+            if "ios-archive-export" in uses and "ios-setup-signing" in uses:
+                report.ok("I-004", "iOS production signing runs in the build lane (reusable-build-platform.yml)")
+                return
+
+    # Fallback: check for a dedicated sign-ios job in unity-pipeline.yml
     pipeline = workflows_dir / "unity-pipeline.yml"
     if not pipeline.exists():
         report.fail("I-004", "unity-pipeline.yml is missing")
@@ -117,8 +134,9 @@ def check_signing_before_boundary(workflows_dir, report):
     if signer is None:
         report.fail(
             "I-004",
-            "unity-pipeline.yml has no sign-ios job, so a signed IPA can only be "
-            "produced during promotion — after QA has approved something else.",
+            "iOS production signing not found in reusable-build-platform.yml or "
+            "unity-pipeline.yml — a signed IPA can only be produced during "
+            "promotion, after QA has approved something else.",
         )
         return
     uses = job_text(signer)
