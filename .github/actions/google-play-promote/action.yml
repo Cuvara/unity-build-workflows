@@ -1,7 +1,7 @@
 name: Google Play Track Promotion
 description: >
   Promotes an existing build from one Google Play track to another without re-uploading.
-  Supports staged rollout and release notes.
+  Supports staged rollout. Uses Fastlane supply.
 
 inputs:
   package-name:
@@ -17,13 +17,13 @@ inputs:
     description: Rollout fraction 0.0-1.0 (default 1.0 = full rollout)
     required: false
     default: '1.0'
-  release-notes-path:
-    description: Path to JSON release notes file
-    required: false
-    default: ''
   service-account-json:
     description: Google Play service account JSON (prefer passing via env)
     required: true
+  toolkit-path:
+    description: Path to the toolkit checkout (contains Gemfile + fastlane/)
+    required: false
+    default: '.toolkit'
 
 outputs:
   promotion-status:
@@ -33,9 +33,12 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install dependencies
-      shell: bash
-      run: pip install --quiet google-api-python-client google-auth
+    - name: Setup Fastlane
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '3.2'
+        bundler-cache: true
+        working-directory: ${{ inputs.toolkit-path }}
 
     - name: Promote track
       id: promote
@@ -43,14 +46,10 @@ runs:
       env:
         GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ inputs.service-account-json }}
       run: |
-        ARGS=(
-          --package-name "${{ inputs.package-name }}"
-          --from-track "${{ inputs.from-track }}"
-          --to-track "${{ inputs.to-track }}"
-          --rollout-fraction "${{ inputs.rollout-fraction }}"
-        )
-        if [[ -n "${{ inputs.release-notes-path }}" ]]; then
-          ARGS+=(--release-notes-file "${{ inputs.release-notes-path }}")
-        fi
-        python3 "${{ github.action_path }}/../../../scripts/android/promote_google_play.py" "${ARGS[@]}"
+        cd "${{ inputs.toolkit-path }}"
+        bundle exec fastlane android promote_track \
+          package_name:"${{ inputs.package-name }}" \
+          from_track:"${{ inputs.from-track }}" \
+          to_track:"${{ inputs.to-track }}" \
+          rollout_fraction:"${{ inputs.rollout-fraction }}"
         echo "promotion-status=success" >> "${GITHUB_OUTPUT}"
