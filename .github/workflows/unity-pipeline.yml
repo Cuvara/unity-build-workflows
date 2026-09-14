@@ -2099,9 +2099,17 @@ jobs:
           # matching the build-type and platform slug anywhere in the name.
           for P in Android WebGL Linux64 LinuxServer Windows64 iOS; do
             SLUG=$(printf '%s' "${P}" | tr '[:upper:]' '[:lower:]')
+            # Try GitHub artifact map first (ARTIFACT_STORAGE=github)
             ART=$(printf '%s\n' "${ARTIFACT_MAP}" \
               | awk '{print $1}' \
               | grep -E "_${BUILD_TYPE}_${SLUG}(_[a-z0-9]+)?$" | head -1) || ART=""
+            # Fallback: read from pipeline-result JSON (ARTIFACT_STORAGE=firebase —
+            # binary not on GitHub but the result file still has the name).
+            if [ -z "${ART}" ]; then
+              ART=$(find ./platform-results -name "build-${P}.json" -print 2>/dev/null \
+                | head -1 | xargs -r cat 2>/dev/null \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("artifactName",""))' 2>/dev/null) || ART=""
+            fi
             [ -z "${ART}" ] && continue
 
             LOG=$(find ./artifacts -path "*${ART}-logs*Editor.log" \
