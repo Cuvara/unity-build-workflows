@@ -18,6 +18,8 @@ They read the templates, which are what consumer repositories copy.
 """
 from pathlib import Path
 
+import re
+
 import pytest
 import yaml
 
@@ -273,12 +275,42 @@ def test_entry_points_share_one_engine_reference(entry):
     )
 
 
+def _current_major():
+    """The major this repository is releasing, read from the changelog."""
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    match = re.search(r"^## \[(\d+)\.\d+\.\d+\]", changelog, re.M)
+    assert match, "no released version heading in CHANGELOG.md"
+    return f"v{match.group(1)}"
+
+
 def test_all_entry_points_agree_on_the_engine_ref():
     refs = {
         key: str(next(iter(load(path)["jobs"].values()))["uses"]).rsplit("@", 1)[1]
         for key, path in ENTRY_POINTS.items()
     }
     assert len(set(refs.values())) == 1, f"entry points disagree on the engine ref: {refs}"
+
+
+def test_entry_points_pin_the_current_major():
+    """Agreement is not currency.
+
+    4.0.0 renamed every node and shipped templates still pinned to `@v3`. All
+    eight agreed, so the agreement test passed, and a consumer copying them got
+    `name: Dev` from the template with `03 / Android / APK` from the v3 engine —
+    a half-renamed graph, from files that were supposed to be the reference.
+    """
+    expected = _current_major()
+    stale = {
+        key: ref
+        for key, ref in (
+            (key, str(next(iter(load(path)["jobs"].values()))["uses"]).rsplit("@", 1)[1])
+            for key, path in ENTRY_POINTS.items()
+        )
+        if ref != expected
+    }
+    assert not stale, (
+        f"templates pin an engine ref older than the current major ({expected}): {stale}"
+    )
 
 
 def test_entry_points_have_distinct_concurrency_groups():
