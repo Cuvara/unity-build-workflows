@@ -189,3 +189,28 @@ def test_the_matrix_step_does_not_depend_on_the_working_directory(tmp_path):
         "its runs-on, and the run dies at expression-evaluation time"
     )
 
+
+
+# ---------------------------------------------------------------------------
+# The label input accepts the form its own description promises
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("form", [
+    "self-hosted,macOS",
+    '["self-hosted","macOS"]',
+    "self-hosted macOS",
+    '[ "self-hosted" , "macOS" ]',
+])
+def test_runner_labels_accepts_csv_and_json(tmp_path, form):
+    """The dispatch input calls itself "Runner labels as a JSON array".
+
+    Passing one produced `["self-hosted"` and `"macOS"]` — labels no runner
+    carries, so the job queued forever instead of failing. Either the
+    description or the parser was wrong, and the description is the one people
+    read before typing.
+    """
+    outputs, _ = resolve(tmp_path, IN_PLATFORM="Android",
+                         IN_RUNNER_TYPE="self-hosted", IN_BUILD_ENGINE="local",
+                         IN_RUNNER_LABELS=form)
+    mapping = json.loads(outputs["runner-labels-by-platform"])
+    assert mapping["Android"] == ["self-hosted", "macOS"], f"{form!r} -> {mapping}"
