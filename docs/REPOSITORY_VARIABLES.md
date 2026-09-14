@@ -275,15 +275,15 @@ new setups should configure `RUNNER_LABELS` directly.
 
 ## CACHE
 
-All cache toggles default to `true`. Disable a cache only to debug a cache
-corruption issue or to force a fully cold run.
+All cache toggles default to `true`. Set a variable to `false` to disable
+the corresponding cache.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `CACHE_LIBRARY_ENABLED` | `true` | Caches Unity's `Library/` folder between runs. |
-| `CACHE_GRADLE_ENABLED` | `true` | Caches Gradle dependencies for Android builds. |
-| `CACHE_ADDRESSABLES_ENABLED` | `true` | Caches built Addressables content. |
-| `CACHE_NUGET_ENABLED` | `true` | Caches NuGet packages. |
+| `CACHE_LIBRARY_ENABLED` | `true` | Caches Unity's `Library/` folder between runs. Uploads/downloads via GitHub Actions cache. |
+| `CACHE_GRADLE_ENABLED` | `true` | Caches Gradle dependencies for Android builds (docker lane only). |
+| `CACHE_ADDRESSABLES_ENABLED` | `true` | Caches built Addressables content (docker lane only). |
+| `CACHE_NUGET_ENABLED` | `true` | Caches NuGet packages (docker lane only). |
 
 ```
 CACHE_LIBRARY_ENABLED=true
@@ -291,6 +291,18 @@ CACHE_GRADLE_ENABLED=true
 CACHE_ADDRESSABLES_ENABLED=true
 CACHE_NUGET_ENABLED=true
 ```
+
+> **Self-hosted runners:** The `Library/` folder persists on disk between runs
+> at `<runner-work>/<repo>/<repo>/<project-path>/Library/`. Uploading and
+> downloading it through GitHub Actions cache adds significant overhead
+> (10–20+ minutes per run for large projects) with no benefit — the local
+> copy is already warm. **Set `CACHE_LIBRARY_ENABLED=false` when using
+> `RUNNER_TYPE=self-hosted`.**
+>
+> The same applies to `CACHE_GRADLE_ENABLED` when the self-hosted runner uses
+> `BUILD_ENGINE=local` (Gradle caches persist in the user's home directory).
+> The docker-lane caches (`CACHE_ADDRESSABLES_ENABLED`, `CACHE_NUGET_ENABLED`)
+> are only active when `BUILD_ENGINE=docker`.
 
 ## ARTIFACT
 
@@ -429,6 +441,10 @@ ARTIFACT_COMPRESSION=zip
 - Set `RUNNER_TYPE=self-hosted`, `BUILD_ENGINE=local`, and confirm
   `RUNNER_LABELS` matches the label(s) of your provisioned runner(s) (default
   `self-hosted,windows`).
+- **Disable caches that are already local:** set `CACHE_LIBRARY_ENABLED=false`
+  and `CACHE_GRADLE_ENABLED=false`. The `Library/` and Gradle caches persist
+  on the runner's disk — uploading them to GitHub Actions cache wastes
+  10–20+ minutes per run on large projects. See [CACHE](#cache).
 - Required for IL2CPP Windows64 builds (the Docker lane only supports Mono
   scripting backend for Windows64).
 - See [RUNNER_AND_BUILD_ENGINE.md](RUNNER_AND_BUILD_ENGINE.md) for the
