@@ -1019,6 +1019,73 @@ _source_label() {
     esac
 }
 
+# ---------------------------------------------------------------------------
+# Runner plan — one row per selected platform: where it lands, and why
+# ---------------------------------------------------------------------------
+# Eight settings feed one decision (RUNNER_TYPE, BUILD_ENGINE, RUNNER_LABELS,
+# the three per-OS label variables, the legacy RUNNER_DEFAULT_MODE family and
+# the derived runner-mode), and nothing anywhere printed the answer. A person
+# asking "why did the iOS job land on that machine?" had to read the resolver.
+#
+# This changes no behaviour. It states the decision the resolver already made,
+# per platform, with the tier that won. Read it before trusting anything below.
+#
+# The rows are all identical today, on purpose: stage 03 passes ONE runner-labels
+# list to every leg of the build matrix, and stage 03b falls back to it too. That
+# is the finding, not a rendering bug -- see docs/adr/004-runner-selection.md.
+
+runner_plan_rows=()
+runner_plan_json="["
+_rp_first="true"
+
+_runner_plan_add() {
+    local platform="$1" note="$2"
+    local labels_json="${runner_labels_json}"
+    local labels_csv="${runner_labels_csv}"
+
+    if [[ "${_rp_first}" == "true" ]]; then _rp_first="false"; else runner_plan_json+=","; fi
+    runner_plan_json+="{\"platform\":\"${platform}\",\"runsOn\":${labels_json}"
+    runner_plan_json+=",\"engine\":\"${build_engine}\",\"runnerType\":\"${runner_type}\""
+    runner_plan_json+=",\"labelsSource\":\"${runner_labels_source}\",\"note\":\"${note}\"}"
+    runner_plan_rows+=("${platform}|${labels_csv}|${build_engine}|$(_source_label "${runner_labels_source}")|${note}")
+}
+
+# iOS is the one requirement that is unambiguous and already documented: Xcode
+# only exists on macOS. Reported, not enforced -- enforcement is a separate,
+# breaking change, and a warning that shows up today is worth more than a gate
+# that ships next month.
+_ios_note=""
+if [[ "${build_ios}" == "true" ]]; then
+    case ",${runner_labels_csv}," in
+        *,macOS,*|*,macos,*|*,macos-latest,*|*,macOS-latest,*) : ;;
+        *)
+            _ios_note="iOS needs a macOS runner; these labels are not one"
+            log_warn "iOS is selected but runner labels are '${runner_labels_csv}'. Xcode only exists on macOS, so stage 03b will queue against a runner that cannot sign."
+            ;;
+    esac
+fi
+
+# `platform: None` is the CI lane. The resolver's own platform flags still
+# read true here, because on a push it takes them from the branch's
+# *_BUILD_PLATFORMS variable and never looks at the input -- the honouring
+# happens later, where unity-pipeline.yml builds the matrix. A plan that
+# listed Android and WebGL for a run that builds neither would be a
+# confident answer to the wrong question, which is worse than no plan.
+if [[ "${IN_PLATFORM}" == "None" ]]; then
+    build_android="false"; build_webgl="false"; build_linux64="false"
+    build_linuxserver="false"; build_windows64="false"; build_ios="false"
+    _runner_plan_note_ci="platform=None — validation and tests only, no player build"
+fi
+
+[[ "${build_android}" == "true" ]]     && _runner_plan_add "Android" ""
+[[ "${build_webgl}" == "true" ]]       && _runner_plan_add "WebGL" ""
+[[ "${build_linux64}" == "true" ]]     && _runner_plan_add "Linux64" ""
+[[ "${build_linuxserver}" == "true" ]] && _runner_plan_add "LinuxServer" ""
+[[ "${build_windows64}" == "true" ]]   && _runner_plan_add "Windows64" ""
+[[ "${build_ios}" == "true" ]]         && _runner_plan_add "iOS" "${_ios_note}"
+
+runner_plan_json+="]"
+
 {
     echo ""
     echo "==================== Resolve Config: Build Flow ===================="
@@ -1035,6 +1102,16 @@ _source_label() {
     echo "Runner Labels:        ${runner_labels_csv} (source: $(_source_label "${runner_labels_source}"))"
     echo "Build Engine:         ${build_engine} (source: $(_source_label "${build_engine_source}"))"
     echo "Execution Strategy:   ${execution_strategy}"
+    if [[ "${#runner_plan_rows[@]}" -gt 0 ]]; then
+        echo "Runner Plan:          (platform | runs-on | engine | labels from | note)"
+        for _row in "${runner_plan_rows[@]}"; do
+            echo "  - ${_row}"
+        done
+    elif [[ -n "${_runner_plan_note_ci:-}" ]]; then
+        echo "Runner Plan:          ${_runner_plan_note_ci}"
+    else
+        echo "Runner Plan:          <no platform selected>"
+    fi
     echo "Activation Strategy:  ${activation_strategy}"
     echo "Platforms:            android=${build_android} webgl=${build_webgl} linux64=${build_linux64} linuxserver=${build_linuxserver} windows64=${build_windows64} ios=${build_ios} (source: $(_source_label "${platform_source}"))"
     echo "Tests:                run-tests=${run_tests} (source: $(_source_label "${run_tests_source}")) test-mode=${test_mode} editmode=${test_editmode} playmode=${test_playmode} fail-fast=${test_fail_fast}"
@@ -1103,6 +1180,7 @@ emit "activation-strategy"     "${activation_strategy}"
 emit "runner-type-source"      "${runner_type_source}"
 emit "build-engine-source"     "${build_engine_source}"
 emit "runner-labels-source"    "${runner_labels_source}"
+emit "runner-plan"             "${runner_plan_json}"
 emit "cache-library"           "${cache_library}"
 emit "cache-gradle"            "${cache_gradle}"
 emit "cache-addressables"      "${cache_addressables}"

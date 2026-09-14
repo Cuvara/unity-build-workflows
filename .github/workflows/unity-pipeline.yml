@@ -268,6 +268,8 @@ jobs:
       execution-strategy:      ${{ steps.flow.outputs.execution-strategy }}
       runner-labels:           ${{ steps.flow.outputs.runner-labels }}
       runner-labels-csv:       ${{ steps.flow.outputs.runner-labels-csv }}
+      # One row per selected platform: where it lands and which tier decided.
+      runner-plan:             ${{ steps.flow.outputs.runner-plan }}
       activation-strategy:     ${{ steps.flow.outputs.activation-strategy }}
       cache-library:           ${{ steps.flow.outputs.cache-library }}
       cache-gradle:            ${{ steps.flow.outputs.cache-gradle }}
@@ -706,6 +708,7 @@ jobs:
           RUNNER_LABELS_CSV:  ${{ steps.flow.outputs.runner-labels-csv }}
           BUILD_ENGINE:       ${{ steps.flow.outputs.build-engine }}
           EXECUTION_STRATEGY: ${{ steps.flow.outputs.execution-strategy }}
+          RUNNER_PLAN:        ${{ steps.flow.outputs.runner-plan }}
           ACTIVATION_STRATEGY: ${{ steps.flow.outputs.activation-strategy }}
           SEL_ANDROID:     ${{ steps.flow.outputs.build-android }}
           SEL_WEBGL:       ${{ steps.flow.outputs.build-webgl }}
@@ -756,6 +759,19 @@ jobs:
             echo "| Runner Labels | \`${RUNNER_LABELS_CSV:-unknown}\` |"
             echo "| Build Engine | \`${BUILD_ENGINE:-unknown}\` |"
             echo "| Execution Strategy | \`${EXECUTION_STRATEGY:-unknown}\` |"
+            # Eight settings feed one decision and nothing printed the answer.
+            # This is that answer, per platform, before anything is built.
+            if [ -n "${RUNNER_PLAN:-}" ] && [ "${RUNNER_PLAN}" != "[]" ]; then
+              {
+                echo ""
+                echo "### Runner plan"
+                echo ""
+                echo "| Platform | runs-on | Engine | Labels from | Note |"
+                echo "|---|---|---|---|---|"
+                printf '%s' "${RUNNER_PLAN}" | jq -r '.[] |
+                  "| \(.platform) | `\(.runsOn | join(", "))` | \(.engine) | \(.labelsSource) | \(.note) |"'
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
             echo "| Activation Strategy | \`${ACTIVATION_STRATEGY:-unknown}\` |"
             echo "| Platforms | ${PLATFORMS} |"
             echo "| Tests | \`${TESTS}\` |"
