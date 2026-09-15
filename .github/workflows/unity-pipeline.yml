@@ -206,12 +206,6 @@ on:
       R2_SECRET_ACCESS_KEY:
         description: Cloudflare R2 secret key, used only when BUILD_DELIVERY=r2.
         required: false
-      FIREBASE_SERVICE_ACCOUNT_JSON:
-        description: >-
-          Google service account key JSON with Firebase App Distribution Admin
-          role. Used only when BUILD_DELIVERY=firebase. Optional: a project
-          that does not use Firebase still builds normally.
-        required: false
 
 # The pipeline's stages, declared once. Every job renders this same ladder with
 # itself marked, so the run summary grows into a progress view while the run is
@@ -1274,7 +1268,6 @@ jobs:
       IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
       IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-      FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 03b — iOS PRODUCTION SIGNING
