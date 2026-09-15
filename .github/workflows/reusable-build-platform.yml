@@ -1447,7 +1447,7 @@ jobs:
       # if-no-files-found: warn — missing binary is a build failure already caught by exit code.
       - name: Upload build artifact
         id: upload
-        if: ${{ inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' && inputs.artifact-storage != 'firebase' }}
+        if: ${{ inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' && !(inputs.artifact-storage == 'firebase' && inputs.build-delivery == 'firebase' && (inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios))) }}
         # On self-hosted runners the build output already persists on the
         # operator's own machine (build/), so a failed upload (e.g. GitHub
         # Actions artifact storage quota) must not fail an otherwise-green build.
@@ -1537,7 +1537,7 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
 
       - name: iOS — Upload signed IPA
-        if: ${{ inputs.sign-ios && inputs.platform == 'iOS' && steps.ios-guard.outputs.blocked != 'true' && inputs.artifact-storage != 'firebase' }}
+        if: ${{ inputs.sign-ios && inputs.platform == 'iOS' && steps.ios-guard.outputs.blocked != 'true' && !(inputs.artifact-storage == 'firebase' && inputs.build-delivery == 'firebase' && (inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios))) }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.ipa-artifact-name }}
@@ -1576,12 +1576,12 @@ jobs:
 
       # ── Step 11a-pre: Install Firebase CLI (only when needed) ──────────────
       - name: Install Firebase CLI
-        if: ${{ inputs.build-delivery == 'firebase' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
+        if: ${{ inputs.build-delivery == 'firebase' && (inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios)) && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
         shell: bash
         run: |
           if ! command -v firebase &>/dev/null; then
             echo "Installing firebase-tools..."
-            npm install -g firebase-tools --silent 2>/dev/null
+            npm install -g firebase-tools@15.30.1 --no-audit --no-fund
             firebase --version
           else
             echo "Firebase CLI already available: $(firebase --version)"
@@ -1595,7 +1595,7 @@ jobs:
       # sets BUILD_DELIVERY.
       - name: Publish the build for download
         id: publish
-        if: ${{ always() && inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
+        if: ${{ always() && inputs.platform != 'Addressables' && (inputs.build-delivery != 'firebase' || inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios)) && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
         env:
           BUILD_DELIVERY:         ${{ inputs.build-delivery }}
           # Public ids, safe to log.
@@ -1621,6 +1621,10 @@ jobs:
             exit 0
           fi
           ARTIFACT="${{ steps.manifest.outputs.artifact-path }}"
+          if [ "${BUILD_DELIVERY}" = "firebase" ] && [ "${{ inputs.platform }}" = "iOS" ]; then
+            ARTIFACT="${{ steps.ios-archive.outputs.ipa-path }}"
+            test -f "${ARTIFACT}" || { echo "::error::Signed IPA is missing"; exit 1; }
+          fi
           # Unguessable enough that a public bucket is not a directory listing:
           # branch, run number and the commit the build came from.
           KEY="${GITHUB_REF_NAME//\//-}/${GITHUB_RUN_NUMBER}/${GITHUB_SHA:0:7}/$(basename "${ARTIFACT}")"

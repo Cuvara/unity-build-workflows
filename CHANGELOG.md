@@ -31,7 +31,6 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   from the build runner — no separate release pipeline needed. Infrastructure:
   `Gemfile`, `fastlane/Fastfile`, `.github/actions/setup-fastlane/action.yml`.
   Existing release pipelines remain for `ARTIFACT_STORAGE=github` mode.
-
 ---
 
 ## [6.0.0] — 2026-09-14

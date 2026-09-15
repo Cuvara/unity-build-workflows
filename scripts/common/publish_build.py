@@ -44,6 +44,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -239,12 +240,12 @@ def publish_firebase(source, key):
     try:
         fd, creds_path = tempfile.mkstemp(suffix=".json", prefix="firebase-sa-")
         creds_file = creds_path
-        with os.fdopen(fd, "w") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(creds_json)
 
         cmd = [
-            "firebase", "appdistribution:distribute", str(source),
-            "--app", app_id,
+            shutil.which("firebase") or "firebase", "appdistribution:distribute", str(source),
+            "--app", app_id, "--json", "--non-interactive",
         ]
         if groups:
             cmd.extend(["--groups", groups])
@@ -253,7 +254,8 @@ def publish_firebase(source, key):
 
         proc_env = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": creds_path}
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600, env=proc_env)
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=600, env=proc_env)
 
         if proc.returncode != 0:
             # Strip credentials path from error output for safety.
@@ -265,12 +267,17 @@ def publish_firebase(source, key):
         # Parse the testing URI from CLI output.
         # Firebase CLI prints: "✔ View this release in the Firebase console: <url>"
         # and "Share this release with testers who have access: <testing_uri>"
-        testing_uri = _parse_firebase_testing_uri(proc.stdout)
+        # firebase-tools may write the JSON payload or human-readable
+        # tester link to stderr, depending on the CLI version and whether
+        # progress output is enabled. Inspect both streams after success.
+        testing_uri = _parse_firebase_testing_uri(
+            "\n".join(part for part in (proc.stdout, proc.stderr) if part)
+        )
         if not testing_uri:
             # Fallback: upload succeeded but could not parse URI.
             return None, (
                 "Firebase upload succeeded but could not extract the tester "
-                f"link from CLI output. stdout: {proc.stdout[:200]}"
+                "link from CLI output. Check the Firebase release in the console."
             )
 
         return testing_uri, None
@@ -288,16 +295,72 @@ def publish_firebase(source, key):
 
 
 def _parse_firebase_testing_uri(stdout):
-    """Extract the tester link from Firebase CLI stdout."""
+    """Extract a tester or Firebase console release link from CLI output."""
+    # JSON mode can be interleaved with progress/diagnostic output and may
+    # escape URL slashes. Normalize those forms before attempting to decode.
+    stdout = re.sub(r"\x1b\[[0-9;]*m", "", stdout).replace("\\/", "/")
+    try:
+        payload = json.loads(stdout)
+        def find_uri(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in ("testingUri", "testing_uri") and isinstance(item, str):
+                        if item.startswith("https://appdistribution.firebase.google.com/"):
+                            return item
+                    found = find_uri(item)
+                    if found:
+                        return found
+            elif isinstance(value, list):
+                for item in value:
+                    found = find_uri(item)
+                    if found:
+                        return found
+            return None
+
+        uri = find_uri(payload)
+        if uri:
+            return uri
+    except (ValueError, AttributeError):
+        pass
+    # If progress output surrounds the JSON object, pull the tester field
+    # directly instead of requiring the entire stream to be valid JSON.
+    field_match = re.search(
+        r"[\"'](?:testing_uri|testingUri)[\"']\s*:\s*[\"']"
+        r"(https://appdistribution\.firebase\.google\.com/[^\"']+)"
+        r"[\"']",
+        stdout,
+    )
+    if field_match:
+        return field_match.group(1).rstrip(".,)")
+    # Last resort for CLI versions that wrap or split the JSON value while
+    # rendering progress output: locate the tester host across the full stream.
+    url_match = re.search(
+        r"https://appdistribution\.firebase\.google\.com/[A-Za-z0-9_./?=&%:-]+",
+        stdout,
+    )
+    if url_match:
+        return url_match.group(0).rstrip(".,)")
+    # Firebase omits testing_uri when no tester/group is supplied. The console
+    # release URI still proves the upload and lets an authorized operator
+    # inspect/share the release until a tester group is configured.
+    console_match = re.search(
+        r"https://console\.firebase\.google\.com/[A-Za-z0-9_./?=&%:-]+",
+        stdout,
+    )
+    if console_match:
+        return console_match.group(0).rstrip(".,)")
     for line in stdout.splitlines():
         # The CLI outputs various URLs. The testing/sharing URI is the one
         # testers use to install — look for it by common patterns.
         stripped = line.strip()
         if "appdistribution.firebase.google.com" in stripped:
             # Extract URL from the line (may have prefix text)
-            for token in stripped.split():
-                if token.startswith("https://"):
-                    return token
+            match = re.search(
+                r"https://appdistribution\.firebase\.google\.com/[^\s\"'<>]+",
+                stripped,
+            )
+            if match:
+                return match.group(0).rstrip(".,)")
         if stripped.startswith("https://appdistribution.firebase.google.com"):
             return stripped
     return None
@@ -309,7 +372,7 @@ def main(argv=None):
     parser.add_argument("--key", required=True,
                         help="Destination path, e.g. develop/42/abc1234/game.apk")
     parser.add_argument("--provider", default="",
-                        help="r2 | local | none (default: $BUILD_DELIVERY)")
+                        help="r2 | local | firebase | none (default: $BUILD_DELIVERY)")
     parser.add_argument("--github-output", action="store_true")
     args = parser.parse_args(argv)
 
@@ -348,10 +411,10 @@ def main(argv=None):
 
     print(f"[publish] {url}")
     if args.github_output and env("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"download-url={url}\n")
     if env("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
             fh.write(f"\n**Download** — [{source.name}]({url}) "
                      f"({size_mb:.1f} MB, via {provider})\n")
     return 0

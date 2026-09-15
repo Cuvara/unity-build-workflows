@@ -126,7 +126,7 @@ APKs server-side for tester devices.
 4. Create a **service account** in Google Cloud (IAM → Service Accounts) with the
    `Firebase App Distribution Admin` role.
 5. Download the JSON key.
-6. Install **Firebase CLI** on your runner: `npm install -g firebase-tools`.
+6. The workflow installs **Firebase CLI** (`firebase-tools@15.30.1`) when absent.
    (GitHub-hosted runners have Node.js; self-hosted runners need it pre-installed.)
 
 **Variables** (public ids, not secrets):
@@ -160,8 +160,15 @@ build. Uninvited people see an access error, which is a feature: builds are not
 accidentally public.
 
 **Platforms.** Only Android (APK/AAB) and iOS (IPA) are supported. WebGL, Linux
-and Windows builds skip Firebase delivery with a warning — use `r2` or `local`
-for those platforms.
+and Windows builds, Addressables, and unsigned iOS Xcode projects skip Firebase
+delivery and retain their GitHub artifacts. Signed iOS builds publish the exported
+IPA, not the Xcode archive. AAB uploads require linking the Firebase app to Google Play.
+
+**Storage.** Set `ARTIFACT_STORAGE=firebase` together with `BUILD_DELIVERY=firebase`
+to skip GitHub binary uploads for Android and signed iOS builds. Logs, manifests,
+and platform results still go to GitHub. Validation and release-manifest jobs
+that require downloading the binary are disabled in this mode; use the default
+`ARTIFACT_STORAGE=github` for artifact-based promotion workflows.
 
 **AAB support requires linking Google Play.** Firebase App Distribution can
 distribute AAB files, but only if your Firebase project is linked to a Google
