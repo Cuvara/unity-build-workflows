@@ -309,12 +309,33 @@ CACHE_NUGET_ENABLED=true
 | Variable | Default | Notes |
 |---|---|---|
 | `ARTIFACT_RETENTION_DAYS` | per build type | Positive integer. **Unset** the pipeline tiers it: release **90** days, staging 14, development 7 — a release artifact that expires can never be promoted, while a development one is disposable (I-002). Logs and reports always keep 7. Setting this is a decision and overrides every tier. |
-| `BUILD_DELIVERY` | `none` | Where a finished build is copied so people can download it: `r2`, `local`, or `none`. A GitHub artifact link 404s for anyone not signed in with repository access. See [BUILD_DELIVERY.md](BUILD_DELIVERY.md) |
+| `BUILD_DELIVERY` | `none` | Where a finished build is copied so people can download it: `r2`, `local`, `firebase`, or `none`. A GitHub artifact link 404s for anyone not signed in with repository access. See [BUILD_DELIVERY.md](BUILD_DELIVERY.md) |
+| `ARTIFACT_STORAGE` | `github` | Where the build binary is stored: `github` (GitHub Actions artifacts) or `firebase` (Firebase App Distribution only — skips GitHub binary upload to save storage on private repos). When `firebase`, release builds use Fastlane to upload directly to stores. Logs/manifests always go to GitHub |
 | `R2_BUCKET` · `R2_ACCOUNT_ID` · `R2_PUBLIC_BASE_URL` | — | Cloudflare R2 target, when `BUILD_DELIVERY=r2`. `R2_ACCOUNT_ID` falls back to `CLOUDFLARE_ACCOUNT_ID`. Secrets `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` carry the credentials |
 | `BUILD_PUBLISH_DIR` · `BUILD_PUBLISH_BASE_URL` | — | Directory and public base URL, when `BUILD_DELIVERY=local`. Self-hosted lane only — the file has to be on the machine that serves it |
+| `FIREBASE_APP_ID_ANDROID` | — | Firebase App ID for Android builds (e.g. `1:123456789:android:abcdef`). Required when `BUILD_DELIVERY=firebase` |
+| `FIREBASE_APP_ID_IOS` | — | Firebase App ID for iOS builds. Required when `BUILD_DELIVERY=firebase` and building iOS |
+| `FIREBASE_TESTER_GROUPS` | — | Comma-separated Firebase tester group names (e.g. `internal-testers,qa`). Optional — omit to skip group assignment |
+| `ANDROID_PACKAGE_NAME` | — | Android package name (e.g. `com.studio.game`). Required for Fastlane Google Play upload when `ARTIFACT_STORAGE=firebase` |
+| `IOS_APP_ID` | — | Apple App ID (numeric). Required for Fastlane TestFlight upload when `ARTIFACT_STORAGE=firebase` |
 | `ARTIFACT_COMPRESSION` | `zip` | See [Known limitations](#known-limitations) — only `zip` is supported today. |
 
+### Secrets for delivery and release
+
+| Secret | Required when |
+|---|---|
+| `DISCORD_WEBHOOK_URL` | Discord notifications enabled |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | `BUILD_DELIVERY=firebase` — Google service account JSON with Firebase App Distribution Admin role |
+| `R2_ACCESS_KEY_ID` · `R2_SECRET_ACCESS_KEY` | `BUILD_DELIVERY=r2` |
+| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | `ARTIFACT_STORAGE=firebase` + Android release, or Release / Android pipeline |
+| `APP_STORE_CONNECT_KEY_ID` · `APP_STORE_CONNECT_ISSUER_ID` · `APP_STORE_CONNECT_PRIVATE_KEY` | `ARTIFACT_STORAGE=firebase` + iOS release, or Release / iOS pipeline |
+
 ```
+# Example: Firebase delivery + direct-to-store for a private repo
+ARTIFACT_STORAGE=firebase
+BUILD_DELIVERY=firebase
+FIREBASE_APP_ID_ANDROID=1:123456789:android:abcdef
+ANDROID_PACKAGE_NAME=com.studio.game
 ARTIFACT_RETENTION_DAYS=30
 ARTIFACT_COMPRESSION=zip
 ```

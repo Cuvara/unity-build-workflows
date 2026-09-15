@@ -1,0 +1,126 @@
+# Fastfile — release lanes for the Unity CI/CD pipeline.
+#
+# These lanes replace the custom Python/shell release scripts. Each lane
+# receives all project-specific values (package name, app ID, paths) as
+# parameters — nothing is hardcoded. Credentials come from environment
+# variables, never from lane parameters.
+#
+# Android: fastlane supply (Google Play Developer API)
+# iOS:     fastlane pilot (TestFlight) + fastlane deliver (App Store)
+
+default_platform(:android)
+
+# ──────────────────────────────────────────────────────────────────────────
+# ANDROID LANES
+# ──────────────────────────────────────────────────────────────────────────
+
+platform :android do
+
+  desc "Upload AAB/APK to Google Play internal track"
+  lane :upload_internal do |options|
+    upload_to_play_store(
+      package_name:          options[:package_name],
+      aab:                   options[:aab_path],
+      apk:                   options[:apk_path],
+      track:                 "internal",
+      release_status:        "completed",
+      json_key_data:         ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"],
+      version_name:          options[:version_name],
+      skip_upload_metadata:  true,
+      skip_upload_changelogs: true,
+      skip_upload_images:    true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+  desc "Promote from one track to another"
+  lane :promote_track do |options|
+    upload_to_play_store(
+      package_name:          options[:package_name],
+      track:                 options[:from_track],
+      track_promote_to:      options[:to_track],
+      rollout:               (options[:rollout_fraction] || "1.0").to_s,
+      json_key_data:         ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"],
+      skip_upload_apk:       true,
+      skip_upload_aab:       true,
+      skip_upload_metadata:  true,
+      skip_upload_changelogs: true,
+      skip_upload_images:    true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+  desc "Update staged rollout percentage or halt"
+  lane :update_rollout do |options|
+    status = options[:halt] ? "halted" : nil
+    fraction = options[:halt] ? nil : (options[:rollout_fraction] || "1.0").to_s
+
+    upload_to_play_store(
+      package_name:          options[:package_name],
+      track:                 options[:track] || "production",
+      rollout:               fraction,
+      release_status:        status || (options[:rollout_fraction].to_f >= 1.0 ? "completed" : "inProgress"),
+      json_key_data:         ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"],
+      skip_upload_apk:       true,
+      skip_upload_aab:       true,
+      skip_upload_metadata:  true,
+      skip_upload_changelogs: true,
+      skip_upload_images:    true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+end
+
+# ──────────────────────────────────────────────────────────────────────────
+# iOS LANES
+# ──────────────────────────────────────────────────────────────────────────
+
+platform :ios do
+
+  desc "Configure App Store Connect API key from environment"
+  private_lane :configure_asc_api_key do
+    app_store_connect_api_key(
+      key_id:             ENV["APP_STORE_CONNECT_KEY_ID"],
+      issuer_id:          ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_content:        ENV["APP_STORE_CONNECT_PRIVATE_KEY"],
+      is_key_content_base64: false,
+    )
+  end
+
+  desc "Upload IPA to TestFlight"
+  lane :upload_testflight do |options|
+    configure_asc_api_key
+
+    upload_to_testflight(
+      ipa:                              options[:ipa_path],
+      skip_submission:                  true,
+      skip_waiting_for_build_processing: !(options[:wait_for_processing] == true || options[:wait_for_processing] == "true"),
+      apple_id:                         options[:app_id],
+      wait_processing_interval:         30,
+      wait_processing_timeout_duration: (options[:timeout] || 1800).to_i,
+    )
+  end
+
+  desc "Submit build for App Store review"
+  lane :submit_for_review do |options|
+    configure_asc_api_key
+
+    deliver(
+      app_identifier:       options[:bundle_id],
+      app_version:          options[:version_string],
+      build_number:         options[:build_number],
+      submit_for_review:    true,
+      automatic_release:    !(options[:phased_release] == true || options[:phased_release] == "true"),
+      phased_release:       options[:phased_release] == true || options[:phased_release] == "true",
+      skip_binary_upload:   true,
+      skip_metadata:        true,
+      skip_screenshots:     true,
+      force:                true,
+      submission_information: {
+        add_id_info_uses_idfa: false,
+      },
+    )
+  end
+
+end

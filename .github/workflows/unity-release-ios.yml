@@ -367,7 +367,6 @@ jobs:
           app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           app-store-connect-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           app-store-connect-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
-          report-path: BuildReports/iOS
 
       # ── Upload IPA artifact ──────────────────────────────────────────────────
       - name: Upload IPA artifact

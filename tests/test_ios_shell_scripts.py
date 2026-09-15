@@ -220,10 +220,11 @@ class TestIOSScriptFilesExist:
             f"PENDING macos-workflows-engineer: {EXPORT_IOS_SH} does not exist."
         )
 
-    def test_testflight_upload_sh_exists(self):
-        assert UPLOAD_TESTFLIGHT_SH.exists(), (
-            f"PENDING macos-workflows-engineer: {UPLOAD_TESTFLIGHT_SH} does not exist."
-        )
+    def test_testflight_uses_fastlane(self):
+        """testflight_upload.sh replaced by Fastlane pilot via ios-testflight action."""
+        action = REPO_ROOT / ".github" / "actions" / "ios-testflight" / "action.yml"
+        assert action.exists(), "ios-testflight action must exist"
+        assert "fastlane" in action.read_text(), "ios-testflight must use Fastlane"
 
     def test_cleanup_signing_sh_exists(self):
         assert CLEANUP_IOS_SH.exists(), (
