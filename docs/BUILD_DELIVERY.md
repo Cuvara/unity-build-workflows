@@ -170,6 +170,21 @@ and platform results still go to GitHub. Validation and release-manifest jobs
 that require downloading the binary are disabled in this mode; use the default
 `ARTIFACT_STORAGE=github` for artifact-based promotion workflows.
 
+**AAB support requires linking Google Play.** Firebase App Distribution can
+distribute AAB files, but only if your Firebase project is linked to a Google
+Play developer account. Without the link, AAB uploads fail with "This project
+is not linked to a Google Play account". APK uploads always work without linking.
+
+To link Google Play:
+
+1. Open https://console.firebase.google.com/project/YOUR_PROJECT/settings/integrations
+2. Find **Google Play** → click **Link**
+3. Select your Google Play developer account
+4. Accept the permissions
+
+After linking, Firebase converts AAB to per-device APKs using the same
+signing config Play Store uses. Development builds (APK) work without linking.
+
 ## What the layout looks like
 
 ```
