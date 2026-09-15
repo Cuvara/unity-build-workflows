@@ -44,6 +44,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -264,7 +265,12 @@ def publish_firebase(source, key):
         # Parse the testing URI from CLI output.
         # Firebase CLI prints: "✔ View this release in the Firebase console: <url>"
         # and "Share this release with testers who have access: <testing_uri>"
-        testing_uri = _parse_firebase_testing_uri(proc.stdout)
+        # firebase-tools may write the JSON payload or human-readable
+        # tester link to stderr, depending on the CLI version and whether
+        # progress output is enabled. Inspect both streams after success.
+        testing_uri = _parse_firebase_testing_uri(
+            "\n".join(part for part in (proc.stdout, proc.stderr) if part)
+        )
         if not testing_uri:
             # Fallback: upload succeeded but could not parse URI.
             return None, (
@@ -290,9 +296,24 @@ def _parse_firebase_testing_uri(stdout):
     """Extract the tester link from Firebase CLI stdout."""
     try:
         payload = json.loads(stdout)
-        result = payload.get("result", {})
-        uri = result.get("testingUri", "") if isinstance(result, dict) else ""
-        if isinstance(uri, str) and uri.startswith("https://appdistribution.firebase.google.com/"):
+        def find_uri(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in ("testingUri", "testing_uri") and isinstance(item, str):
+                        if item.startswith("https://appdistribution.firebase.google.com/"):
+                            return item
+                    found = find_uri(item)
+                    if found:
+                        return found
+            elif isinstance(value, list):
+                for item in value:
+                    found = find_uri(item)
+                    if found:
+                        return found
+            return None
+
+        uri = find_uri(payload)
+        if uri:
             return uri
     except (ValueError, AttributeError):
         pass
@@ -302,9 +323,12 @@ def _parse_firebase_testing_uri(stdout):
         stripped = line.strip()
         if "appdistribution.firebase.google.com" in stripped:
             # Extract URL from the line (may have prefix text)
-            for token in stripped.split():
-                if token.startswith("https://"):
-                    return token
+            match = re.search(
+                r"https://appdistribution\.firebase\.google\.com/[^\s\"'<>]+",
+                stripped,
+            )
+            if match:
+                return match.group(0).rstrip(".,)")
         if stripped.startswith("https://appdistribution.firebase.google.com"):
             return stripped
     return None
