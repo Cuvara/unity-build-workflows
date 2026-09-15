@@ -294,6 +294,9 @@ def publish_firebase(source, key):
 
 def _parse_firebase_testing_uri(stdout):
     """Extract the tester link from Firebase CLI stdout."""
+    # JSON mode can be interleaved with progress/diagnostic output and may
+    # escape URL slashes. Normalize those forms before attempting to decode.
+    stdout = re.sub(r"\x1b\[[0-9;]*m", "", stdout).replace("\\/", "/")
     try:
         payload = json.loads(stdout)
         def find_uri(value):
@@ -317,6 +320,16 @@ def _parse_firebase_testing_uri(stdout):
             return uri
     except (ValueError, AttributeError):
         pass
+    # If progress output surrounds the JSON object, pull the tester field
+    # directly instead of requiring the entire stream to be valid JSON.
+    field_match = re.search(
+        r"[\"'](?:testing_uri|testingUri)[\"']\s*:\s*[\"']"
+        r"(https://appdistribution\.firebase\.google\.com/[^\"']+)"
+        r"[\"']",
+        stdout,
+    )
+    if field_match:
+        return field_match.group(1).rstrip(".,)")
     for line in stdout.splitlines():
         # The CLI outputs various URLs. The testing/sharing URI is the one
         # testers use to install — look for it by common patterns.
