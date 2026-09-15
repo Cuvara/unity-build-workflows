@@ -206,6 +206,12 @@ on:
       R2_SECRET_ACCESS_KEY:
         description: Cloudflare R2 secret key, used only when BUILD_DELIVERY=r2.
         required: false
+      FIREBASE_SERVICE_ACCOUNT_JSON:
+        description: >-
+          Google service account key JSON with Firebase App Distribution Admin
+          role. Used only when BUILD_DELIVERY=firebase. Optional: a project
+          that does not use Firebase still builds normally.
+        required: false
 
 # The pipeline's stages, declared once. Every job renders this same ladder with
 # itself marked, so the run summary grows into a progress view while the run is
@@ -1174,6 +1180,7 @@ jobs:
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
       log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
       build-delivery:          ${{ vars.BUILD_DELIVERY || 'none' }}
+      artifact-storage:        ${{ vars.ARTIFACT_STORAGE || 'github' }}
       artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
       build-method:            ${{ needs.resolve-config.outputs.build-method }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
@@ -1245,6 +1252,7 @@ jobs:
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
       log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
       build-delivery:          ${{ vars.BUILD_DELIVERY || 'none' }}
+      artifact-storage:        ${{ vars.ARTIFACT_STORAGE || 'github' }}
       artifact-compression:    ${{ needs.resolve-config.outputs.artifact-compression }}
       build-method:            ${{ needs.resolve-config.outputs.build-method }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}
@@ -1266,6 +1274,7 @@ jobs:
       IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
       IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 03b — iOS PRODUCTION SIGNING
@@ -1314,7 +1323,8 @@ jobs:
     if: >-
       !cancelled() &&
       needs.build.result == 'success' &&
-      needs.resolve-config.outputs.has-validations == 'true'
+      needs.resolve-config.outputs.has-validations == 'true' &&
+      (vars.ARTIFACT_STORAGE || 'github') != 'firebase'
     strategy:
       fail-fast: false
       matrix:
@@ -1466,7 +1476,8 @@ jobs:
       !cancelled() &&
       needs.resolve-config.outputs.build-type == 'release' &&
       needs.build.result == 'success' &&
-      (needs.validate-artifact.result == 'success' || needs.validate-artifact.result == 'skipped')
+      (needs.validate-artifact.result == 'success' || needs.validate-artifact.result == 'skipped') &&
+      (vars.ARTIFACT_STORAGE || 'github') != 'firebase'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit
@@ -2065,14 +2076,22 @@ jobs:
             -q '.artifacts[]|"\(.name) \(.id)"' 2>/dev/null) || true
 
           # ── Per-platform scan ─────────────────────────────────────────────
-          # Artifacts are named <build-type>-<platform>-<artifact>, so the
-          # platform's own artifact name is discovered from the map rather than
-          # reconstructed — the artifact type is not knowable here.
+          # Artifacts are named {product}_{version}_{build}_{type}_{platform}_{artifact},
+          # so the platform's own artifact name is discovered from the map by
+          # matching the build-type and platform slug anywhere in the name.
           for P in Android WebGL Linux64 LinuxServer Windows64 iOS; do
             SLUG=$(printf '%s' "${P}" | tr '[:upper:]' '[:lower:]')
+            # Try GitHub artifact map first (ARTIFACT_STORAGE=github)
             ART=$(printf '%s\n' "${ARTIFACT_MAP}" \
               | awk '{print $1}' \
-              | grep -E "^${BUILD_TYPE}-${SLUG}-[a-z0-9]+$" | head -1) || ART=""
+              | grep -E "_${BUILD_TYPE}_${SLUG}(_[a-z0-9]+)?$" | head -1) || ART=""
+            # Fallback: read from pipeline-result JSON (ARTIFACT_STORAGE=firebase —
+            # binary not on GitHub but the result file still has the name).
+            if [ -z "${ART}" ]; then
+              ART=$(find ./platform-results -name "build-${P}.json" -print 2>/dev/null \
+                | head -1 | xargs -r cat 2>/dev/null \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("artifactName",""))' 2>/dev/null) || ART=""
+            fi
             [ -z "${ART}" ] && continue
 
             LOG=$(find ./artifacts -path "*${ART}-logs*Editor.log" \
