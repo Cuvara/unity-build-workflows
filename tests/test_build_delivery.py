@@ -36,7 +36,7 @@ def run(tmp_path, key="develop/42/abc1234/game.apk", **env):
     if not source.exists():
         source.write_bytes(b"APK" * 1024)
     environment = {k: v for k, v in os.environ.items()
-                   if not k.startswith(("R2_", "BUILD_", "CLOUDFLARE_"))}
+                   if not k.startswith(("R2_", "BUILD_", "CLOUDFLARE_", "FIREBASE_"))}
     environment.update(env)
     return subprocess.run(
         ["python3", str(SCRIPT), "--file", str(source), "--key", key],
@@ -151,6 +151,7 @@ def test_firebase_cli_not_installed(tmp_path, monkeypatch):
     monkeypatch.setenv("FIREBASE_RELEASE_NOTES", "")
 
     # Make subprocess.run raise FileNotFoundError (simulating missing CLI)
+    monkeypatch.setattr(publish_build.shutil, "which", lambda _: None)
     original_run = subprocess.run
     def fake_run(cmd, **kwargs):
         if cmd[0] == "firebase":
@@ -323,3 +324,55 @@ def test_no_credential_is_passed_on_a_command_line():
         # Present as an env var, never as an argument.
         assert f"--{secret.lower()}" not in publish
         assert f"{secret}:" in publish
+
+
+@pytest.mark.parametrize("suffix", [".apk", ".aab", ".ipa"])
+@pytest.mark.parametrize("outcome", ["success", "error", "timeout", "missing_link"])
+def test_firebase_upload_contract_and_credential_cleanup(tmp_path, monkeypatch, suffix, outcome):
+    import publish_build
+    source = tmp_path / ("game" + suffix)
+    source.write_bytes(b"build")
+    creds = '{"type":"service_account"}'
+    uri = "https://appdistribution.firebase.google.com/testerapps/app/releases/release"
+    monkeypatch.setenv("FIREBASE_SERVICE_ACCOUNT_JSON", creds)
+    monkeypatch.setenv("FIREBASE_APP_ID", "app")
+    monkeypatch.setenv("FIREBASE_TESTER_GROUPS", "qa")
+    monkeypatch.setenv("FIREBASE_RELEASE_NOTES", "QA build")
+    credential_paths = []
+
+    def fake_run(cmd, **kwargs):
+        assert "--json" in cmd and "--non-interactive" in cmd
+        assert cmd[cmd.index("--groups") + 1] == "qa"
+        assert cmd[cmd.index("--release-notes") + 1] == "QA build"
+        assert creds not in cmd
+        path = Path(kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"])
+        assert path.read_text() == creds
+        credential_paths.append(path)
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(cmd, 600)
+        return subprocess.CompletedProcess(cmd, 1 if outcome == "error" else 0,
+            json.dumps({"status":"success", "result": {"testingUri": uri} if outcome == "success" else {}}),
+            str(path) + " upload failed" if outcome == "error" else "")
+
+    monkeypatch.setattr(publish_build.subprocess, "run", fake_run)
+    url, problem = publish_build.publish_firebase(source, "key")
+    assert credential_paths and all(not p.exists() for p in credential_paths)
+    if outcome == "success":
+        assert (url, problem) == (uri, None)
+    else:
+        assert url is None and problem
+        assert all(str(p) not in problem for p in credential_paths)
+
+
+def test_firebase_output_and_summary_are_utf8(tmp_path, monkeypatch):
+    import publish_build
+    source = tmp_path / "game.apk"
+    source.write_bytes(b"build")
+    output, summary = tmp_path / "output", tmp_path / "summary"
+    uri = "https://appdistribution.firebase.google.com/testerapps/app/releases/release"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr(publish_build, "publish_firebase", lambda *args: (uri, None))
+    assert publish_build.main(["--file", str(source), "--key", "key", "--provider", "firebase", "--github-output"]) == 0
+    assert output.read_text(encoding="utf-8") == f"download-url={uri}\n"
+    assert uri in summary.read_text(encoding="utf-8")

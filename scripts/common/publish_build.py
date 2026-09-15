@@ -239,12 +239,12 @@ def publish_firebase(source, key):
     try:
         fd, creds_path = tempfile.mkstemp(suffix=".json", prefix="firebase-sa-")
         creds_file = creds_path
-        with os.fdopen(fd, "w") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(creds_json)
 
         cmd = [
-            "firebase", "appdistribution:distribute", str(source),
-            "--app", app_id,
+            shutil.which("firebase") or "firebase", "appdistribution:distribute", str(source),
+            "--app", app_id, "--json", "--non-interactive",
         ]
         if groups:
             cmd.extend(["--groups", groups])
@@ -253,7 +253,8 @@ def publish_firebase(source, key):
 
         proc_env = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": creds_path}
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600, env=proc_env)
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=600, env=proc_env)
 
         if proc.returncode != 0:
             # Strip credentials path from error output for safety.
@@ -268,7 +269,7 @@ def publish_firebase(source, key):
             # Fallback: upload succeeded but could not parse URI.
             return None, (
                 "Firebase upload succeeded but could not extract the tester "
-                f"link from CLI output. stdout: {proc.stdout[:200]}"
+                "link from CLI output. Check the Firebase release in the console."
             )
 
         return testing_uri, None
@@ -287,6 +288,14 @@ def publish_firebase(source, key):
 
 def _parse_firebase_testing_uri(stdout):
     """Extract the tester link from Firebase CLI stdout."""
+    try:
+        payload = json.loads(stdout)
+        result = payload.get("result", {})
+        uri = result.get("testingUri", "") if isinstance(result, dict) else ""
+        if isinstance(uri, str) and uri.startswith("https://appdistribution.firebase.google.com/"):
+            return uri
+    except (ValueError, AttributeError):
+        pass
     for line in stdout.splitlines():
         # The CLI outputs various URLs. The testing/sharing URI is the one
         # testers use to install — look for it by common patterns.
@@ -307,7 +316,7 @@ def main(argv=None):
     parser.add_argument("--key", required=True,
                         help="Destination path, e.g. develop/42/abc1234/game.apk")
     parser.add_argument("--provider", default="",
-                        help="r2 | local | none (default: $BUILD_DELIVERY)")
+                        help="r2 | local | firebase | none (default: $BUILD_DELIVERY)")
     parser.add_argument("--github-output", action="store_true")
     args = parser.parse_args(argv)
 
@@ -346,10 +355,10 @@ def main(argv=None):
 
     print(f"[publish] {url}")
     if args.github_output and env("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
             fh.write(f"download-url={url}\n")
     if env("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
             fh.write(f"\n**Download** — [{source.name}]({url}) "
                      f"({size_mb:.1f} MB, via {provider})\n")
     return 0
