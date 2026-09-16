@@ -26,6 +26,8 @@ Related docs:
 - [GITHUB\_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md) — environment protection rules, deployment hygiene
 - [UNITY\_PERSONAL\_DOCKER\_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md) — Unity Personal/free license setup
 - [PIPELINE\_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md) — the stage model, the artifact contract, the immutable boundary
+- [FASTLANE.md](FASTLANE.md) — Fastlane lanes, credentials, store metadata, auto changelogs
+- [BUILD\_DELIVERY.md](BUILD_DELIVERY.md) — Firebase App Distribution, R2, local delivery
 
 ---
 

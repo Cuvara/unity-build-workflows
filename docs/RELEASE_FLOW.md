@@ -97,10 +97,28 @@ Production build uses:
 Docker Container (Unity build)
   └─ Unsigned artifact
        └─ Host signing step (Android keystore / not in container)
-            └─ Host deployment step (Google Play / Cloudflare)
+            └─ Host deployment step (Fastlane → Google Play / App Store / Firebase)
 ```
 
 Signing and deployment credentials are never inside the Unity container.
+
+### Two deployment modes
+
+**`ARTIFACT_STORAGE=firebase`** — direct-to-store (recommended for private repos):
+
+```
+Build → Fastlane firebase_distribute (tester) → Fastlane supply/pilot (store)
+```
+
+All in one job. No GitHub artifact storage cost. No separate release pipeline.
+
+**`ARTIFACT_STORAGE=github`** — promote-based (default):
+
+```
+Build → GitHub artifact → validate → release-manifest → promote → Fastlane → store
+```
+
+See [FASTLANE.md](FASTLANE.md) for all available lanes and credentials.
 
 ---
 
