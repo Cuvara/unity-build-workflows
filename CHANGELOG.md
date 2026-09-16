@@ -8,7 +8,7 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
-## [Unreleased]
+## [6.2.0] — 2026-09-16
 
 ### Added
 
@@ -31,6 +31,33 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   from the build runner — no separate release pipeline needed. Infrastructure:
   `Gemfile`, `fastlane/Fastfile`, `.github/actions/setup-fastlane/action.yml`.
   Existing release pipelines remain for `ARTIFACT_STORAGE=github` mode.
+
+### Changed
+
+- **Release actions refactored to Fastlane.** `google-play-promote`,
+  `ios-testflight`, and `ios-asc-submit-review` composite actions now use
+  Fastlane supply/pilot/deliver. Old Python/shell scripts removed:
+  `upload_google_play.py`, `promote_google_play.py`, `update_rollout.py`,
+  `testflight_upload.sh`, `asc_api.py`.
+
+- **Consumer templates bumped from @v5 to @v6** in template files.
+
+### Fixed
+
+- **Artifact name pattern in final-report diagnostics.** The per-platform
+  artifact lookup now matches the new naming convention and falls back to
+  `pipeline-result-build-*.json` when GitHub artifact is absent (firebase
+  storage mode).
+
+- **Firebase tester link fallback.** When the CLI does not return a parseable
+  tester URI, the console project URL is used instead. Builds stay green.
+
+- **Firebase CLI auto-installed** on GitHub-hosted runners when
+  `BUILD_DELIVERY=firebase`.
+
+- **AAB upload to Firebase App Distribution** requires linking Google Play
+  to the Firebase project. Documented in `BUILD_DELIVERY.md`.
+
 ---
 
 ## [6.0.0] — 2026-09-14
