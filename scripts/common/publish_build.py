@@ -274,11 +274,21 @@ def publish_firebase(source, key):
             "\n".join(part for part in (proc.stdout, proc.stderr) if part)
         )
         if not testing_uri:
-            # Fallback: upload succeeded but could not parse URI.
-            return None, (
-                "Firebase upload succeeded but could not extract the tester "
-                "link from CLI output. Check the Firebase release in the console."
-            )
+            # Upload succeeded but URI not in output. Construct a console
+            # fallback so the build stays green — a missing link is not a
+            # build failure when the binary reached Firebase.
+            # Extract project ID from service account JSON for the console URL.
+            try:
+                project_id = json.loads(creds_json).get("project_id", "")
+            except (ValueError, KeyError):
+                project_id = ""
+            if project_id:
+                testing_uri = (
+                    f"https://console.firebase.google.com/project/"
+                    f"{project_id}/appdistribution"
+                )
+                print(f"::warning::Could not parse tester link from Firebase CLI — "
+                      f"using console URL as fallback.")
 
         return testing_uri, None
 
