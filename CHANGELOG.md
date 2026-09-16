@@ -8,6 +8,29 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Full Fastlane lane coverage.** New lanes added to Fastfile:
+  - `generate_changelog` — auto release notes from git commits
+  - `android:firebase_distribute` / `ios:firebase_distribute` — native Fastlane
+    Firebase App Distribution (replaces Firebase CLI in publish step)
+  - `android:download_metadata` / `android:upload_metadata` — Google Play
+    store listing as code
+  - `ios:add_testers` — TestFlight beta tester management
+  - `ios:download_metadata` / `ios:upload_metadata` — App Store Connect
+    metadata management
+  - Auto-generated changelogs wired into `upload_internal` and `upload_testflight`
+
+### Changed
+
+- **Firebase delivery uses Fastlane plugin** instead of Firebase CLI subprocess.
+  No more `npm install -g firebase-tools` on runners. The `fastlane-plugin-firebase_app_distribution`
+  gem handles upload natively. R2 and local delivery still use `publish_build.py`.
+
+---
+
 ## [6.2.0] — 2026-09-16
 
 ### Added
