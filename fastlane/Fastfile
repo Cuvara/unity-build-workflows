@@ -1,14 +1,28 @@
-# Fastfile — release lanes for the Unity CI/CD pipeline.
+# Fastfile — full release automation for the Unity CI/CD pipeline.
 #
-# These lanes replace the custom Python/shell release scripts. Each lane
-# receives all project-specific values (package name, app ID, paths) as
+# All project-specific values (package name, app ID, paths) come as lane
 # parameters — nothing is hardcoded. Credentials come from environment
 # variables, never from lane parameters.
 #
-# Android: fastlane supply (Google Play Developer API)
-# iOS:     fastlane pilot (TestFlight) + fastlane deliver (App Store)
+# Capabilities:
+#   Android: supply (Google Play), firebase_app_distribution
+#   iOS:     pilot (TestFlight), deliver (App Store), firebase_app_distribution
+#   Shared:  changelog generation, version bumping, metadata management
 
 default_platform(:android)
+
+# ──────────────────────────────────────────────────────────────────────────
+# SHARED HELPERS
+# ──────────────────────────────────────────────────────────────────────────
+
+desc "Generate release notes from recent git commits"
+lane :generate_changelog do |options|
+  changelog_from_git_commits(
+    commits_count:          (options[:commits] || 10).to_i,
+    merge_commit_filtering: "exclude_merges",
+    pretty:                 options[:format] || "- %s (%an)",
+  )
+end
 
 # ──────────────────────────────────────────────────────────────────────────
 # ANDROID LANES
@@ -18,18 +32,33 @@ platform :android do
 
   desc "Upload AAB/APK to Google Play internal track"
   lane :upload_internal do |options|
+    notes = options[:release_notes] || Actions.lane_context[SharedValues::FL_CHANGELOG]
+    unless notes
+      begin
+        notes = changelog_from_git_commits(
+          commits_count: 10,
+          merge_commit_filtering: "exclude_merges",
+          pretty: "- %s",
+        )
+      rescue => e
+        UI.message("Could not generate changelog: #{e.message}")
+        notes = "Build #{options[:version_name] || 'unknown'}"
+      end
+    end
+
     upload_to_play_store(
       package_name:          options[:package_name],
       aab:                   options[:aab_path],
       apk:                   options[:apk_path],
-      track:                 "internal",
+      track:                 options[:track] || "internal",
       release_status:        "completed",
       json_key_data:         ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"],
       version_name:          options[:version_name],
       skip_upload_metadata:  true,
-      skip_upload_changelogs: true,
+      skip_upload_changelogs: false,
       skip_upload_images:    true,
       skip_upload_screenshots: true,
+      release_notes:         { "en-US" => notes },
     )
   end
 
@@ -70,6 +99,52 @@ platform :android do
     )
   end
 
+  desc "Upload to Firebase App Distribution (Android)"
+  lane :firebase_distribute do |options|
+    notes = options[:release_notes]
+    unless notes
+      begin
+        notes = changelog_from_git_commits(
+          commits_count: 10,
+          merge_commit_filtering: "exclude_merges",
+          pretty: "- %s",
+        )
+      rescue => e
+        notes = "Build #{options[:version_name] || 'unknown'}"
+      end
+    end
+
+    firebase_app_distribution(
+      app:                       options[:app_id] || ENV["FIREBASE_APP_ID"],
+      android_artifact_path:     options[:aab_path] || options[:apk_path],
+      service_credentials_file:  options[:service_account_path],
+      groups:                    options[:groups] || ENV["FIREBASE_TESTER_GROUPS"],
+      release_notes:             notes,
+    )
+  end
+
+  desc "Download and sync Google Play metadata to local directory"
+  lane :download_metadata do |options|
+    download_from_play_store(
+      package_name:  options[:package_name],
+      json_key_data: ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"],
+      metadata_path: options[:metadata_path] || "./metadata/android",
+    )
+  end
+
+  desc "Upload local metadata to Google Play"
+  lane :upload_metadata do |options|
+    upload_to_play_store(
+      package_name:           options[:package_name],
+      json_key_data:          ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"],
+      skip_upload_apk:        true,
+      skip_upload_aab:        true,
+      skip_upload_images:     options[:skip_images] != false,
+      skip_upload_screenshots: options[:skip_screenshots] != false,
+      metadata_path:          options[:metadata_path] || "./metadata/android",
+    )
+  end
+
 end
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -92,6 +167,19 @@ platform :ios do
   lane :upload_testflight do |options|
     configure_asc_api_key
 
+    notes = options[:release_notes]
+    unless notes
+      begin
+        notes = changelog_from_git_commits(
+          commits_count: 10,
+          merge_commit_filtering: "exclude_merges",
+          pretty: "- %s",
+        )
+      rescue => e
+        notes = "Build #{options[:build_number] || 'unknown'}"
+      end
+    end
+
     upload_to_testflight(
       ipa:                              options[:ipa_path],
       skip_submission:                  true,
@@ -99,6 +187,7 @@ platform :ios do
       apple_id:                         options[:app_id],
       wait_processing_interval:         30,
       wait_processing_timeout_duration: (options[:timeout] || 1800).to_i,
+      changelog:                        notes,
     )
   end
 
@@ -114,12 +203,76 @@ platform :ios do
       automatic_release:    !(options[:phased_release] == true || options[:phased_release] == "true"),
       phased_release:       options[:phased_release] == true || options[:phased_release] == "true",
       skip_binary_upload:   true,
-      skip_metadata:        true,
+      skip_metadata:        options[:skip_metadata] != false,
       skip_screenshots:     true,
       force:                true,
       submission_information: {
         add_id_info_uses_idfa: false,
       },
+    )
+  end
+
+  desc "Upload to Firebase App Distribution (iOS)"
+  lane :firebase_distribute do |options|
+    notes = options[:release_notes]
+    unless notes
+      begin
+        notes = changelog_from_git_commits(
+          commits_count: 10,
+          merge_commit_filtering: "exclude_merges",
+          pretty: "- %s",
+        )
+      rescue => e
+        notes = "Build #{options[:build_number] || 'unknown'}"
+      end
+    end
+
+    firebase_app_distribution(
+      app:                       options[:app_id] || ENV["FIREBASE_APP_ID"],
+      ipa_path:                  options[:ipa_path],
+      service_credentials_file:  options[:service_account_path],
+      groups:                    options[:groups] || ENV["FIREBASE_TESTER_GROUPS"],
+      release_notes:             notes,
+    )
+  end
+
+  desc "Manage TestFlight beta testers"
+  lane :add_testers do |options|
+    configure_asc_api_key
+
+    pilot(
+      app_identifier:  options[:bundle_id],
+      testers_file_path: options[:testers_file],
+      groups:          options[:groups],
+    )
+  end
+
+  desc "Download App Store metadata to local directory"
+  lane :download_metadata do |options|
+    configure_asc_api_key
+
+    deliver(
+      app_identifier:       options[:bundle_id],
+      force:                true,
+      skip_binary_upload:   true,
+      skip_screenshots:     true,
+      run_precheck_before_submit: false,
+      metadata_path:        options[:metadata_path] || "./metadata/ios",
+    )
+  end
+
+  desc "Upload local metadata to App Store Connect"
+  lane :upload_metadata do |options|
+    configure_asc_api_key
+
+    deliver(
+      app_identifier:       options[:bundle_id],
+      app_version:          options[:version_string],
+      skip_binary_upload:   true,
+      skip_screenshots:     options[:skip_screenshots] != false,
+      skip_metadata:        false,
+      force:                true,
+      metadata_path:        options[:metadata_path] || "./metadata/ios",
     )
   end
 

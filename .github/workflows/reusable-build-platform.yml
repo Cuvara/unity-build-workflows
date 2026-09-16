@@ -1574,18 +1574,12 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
 
-      # ── Step 11a-pre: Install Firebase CLI (only when needed) ──────────────
-      - name: Install Firebase CLI
+      # ── Step 11a-pre: Setup Fastlane for Firebase delivery ──────────────────
+      - name: Setup Fastlane (delivery)
         if: ${{ inputs.build-delivery == 'firebase' && (inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios)) && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
-        shell: bash
-        run: |
-          if ! command -v firebase &>/dev/null; then
-            echo "Installing firebase-tools..."
-            npm install -g firebase-tools@15.30.1 --no-audit --no-fund
-            firebase --version
-          else
-            echo "Firebase CLI already available: $(firebase --version)"
-          fi
+        uses: ./.toolkit/.github/actions/setup-fastlane
+        with:
+          working-directory: .toolkit
 
       # ── Step 11a: Publish the build where a person can download it ─────────
       # A GitHub artifact link 404s for anyone not signed in with repository
@@ -1616,17 +1610,53 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          ARTIFACT="${{ steps.manifest.outputs.artifact-path }}"
+
+          # Firebase delivery uses Fastlane plugin (no CLI needed).
+          if [ "${BUILD_DELIVERY}" = "firebase" ]; then
+            if [ "${{ inputs.platform }}" = "iOS" ] && [ -n "${{ steps.ios-archive.outputs.ipa-path }}" ]; then
+              ARTIFACT="${{ steps.ios-archive.outputs.ipa-path }}"
+            fi
+            test -f "${ARTIFACT}" || { echo "::warning::No artifact to deliver"; exit 0; }
+
+            # Write service account to temp file for Fastlane plugin
+            SA_FILE=$(mktemp)
+            printf '%s' "${FIREBASE_SERVICE_ACCOUNT_JSON}" > "${SA_FILE}"
+            trap 'rm -f "${SA_FILE}"' EXIT
+
+            cd .toolkit
+            if [ "${{ inputs.platform }}" = "iOS" ]; then
+              bundle exec fastlane ios firebase_distribute \
+                app_id:"${FIREBASE_APP_ID}" \
+                ipa_path:"${GITHUB_WORKSPACE}/${ARTIFACT}" \
+                service_account_path:"${SA_FILE}" \
+                groups:"${FIREBASE_TESTER_GROUPS}" \
+                release_notes:"${FIREBASE_RELEASE_NOTES}" || true
+            else
+              bundle exec fastlane android firebase_distribute \
+                app_id:"${FIREBASE_APP_ID}" \
+                apk_path:"${GITHUB_WORKSPACE}/${ARTIFACT}" \
+                service_account_path:"${SA_FILE}" \
+                groups:"${FIREBASE_TESTER_GROUPS}" \
+                release_notes:"${FIREBASE_RELEASE_NOTES}" || true
+            fi
+            cd "${GITHUB_WORKSPACE}"
+
+            # Construct console URL for Discord (Fastlane plugin doesn't output a tester link reliably)
+            PROJECT_ID=$(printf '%s' "${FIREBASE_SERVICE_ACCOUNT_JSON}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("project_id",""))' 2>/dev/null) || PROJECT_ID=""
+            if [ -n "${PROJECT_ID}" ]; then
+              DL_URL="https://console.firebase.google.com/project/${PROJECT_ID}/appdistribution"
+              echo "download-url=${DL_URL}" >> "${GITHUB_OUTPUT}"
+              echo "[publish] ${DL_URL}"
+            fi
+            exit 0
+          fi
+
+          # R2 / local delivery via publish_build.py
           if [ ! -f ".toolkit/scripts/common/publish_build.py" ]; then
             echo "::warning::toolkit checkout unavailable — skipping delivery"
             exit 0
           fi
-          ARTIFACT="${{ steps.manifest.outputs.artifact-path }}"
-          if [ "${BUILD_DELIVERY}" = "firebase" ] && [ "${{ inputs.platform }}" = "iOS" ]; then
-            ARTIFACT="${{ steps.ios-archive.outputs.ipa-path }}"
-            test -f "${ARTIFACT}" || { echo "::error::Signed IPA is missing"; exit 1; }
-          fi
-          # Unguessable enough that a public bucket is not a directory listing:
-          # branch, run number and the commit the build came from.
           KEY="${GITHUB_REF_NAME//\//-}/${GITHUB_RUN_NUMBER}/${GITHUB_SHA:0:7}/$(basename "${ARTIFACT}")"
           python3 .toolkit/scripts/common/publish_build.py \
             --file "${ARTIFACT}" \
