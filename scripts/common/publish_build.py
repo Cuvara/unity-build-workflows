@@ -277,7 +277,6 @@ def publish_firebase(source, key):
             # Upload succeeded but URI not in output. Construct a console
             # fallback so the build stays green — a missing link is not a
             # build failure when the binary reached Firebase.
-            # Extract project ID from service account JSON for the console URL.
             try:
                 project_id = json.loads(creds_json).get("project_id", "")
             except (ValueError, KeyError):
@@ -289,6 +288,13 @@ def publish_firebase(source, key):
                 )
                 print(f"::warning::Could not parse tester link from Firebase CLI — "
                       f"using console URL as fallback.")
+            else:
+                combined = "\n".join(p for p in (proc.stdout, proc.stderr) if p)
+                preview = combined.replace(creds_path, "<credentials>")[:300]
+                return None, (
+                    "Firebase upload succeeded but could not extract tester link "
+                    f"and no project_id in service account. CLI output: {preview}"
+                )
 
         return testing_uri, None
 
