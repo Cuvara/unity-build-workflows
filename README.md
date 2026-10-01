@@ -320,6 +320,7 @@ Current version: **3.0.0** — see [CHANGELOG.md](CHANGELOG.md).
 | [docs/RELEASE_FLOW.md](docs/RELEASE_FLOW.md) | Tag-based release, environments, digest enforcement |
 | [docs/SELF_HOSTED_RUNNER.md](docs/SELF_HOSTED_RUNNER.md) | Runner setup with Docker requirements |
 | **[docs/SELF\_HOSTED\_ORG\_RUNNER.md](docs/SELF_HOSTED_ORG_RUNNER.md)** | **Register your own machine as an organization runner and route builds to it — runner groups, org variables, public-repo risks** |
+| **[docs/MULTI\_RUNNER\_SCHEDULING.md](docs/MULTI_RUNNER_SCHEDULING.md)** | **Several build machines: a runner policy sends each platform to an eligible, available self-hosted runner by priority, with explicit fallback, availability checks and runner groups** |
 | [docs/SECURITY.md](docs/SECURITY.md) | Secret handling, iOS credentials, image trust, fork safety |
 | [docs/DISCORD_NOTIFICATIONS.md](docs/DISCORD_NOTIFICATIONS.md) | Discord build-completion notifications: setup, security, embed format |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Docker, Unity, and iOS errors; cert rotation; Xcode migration |

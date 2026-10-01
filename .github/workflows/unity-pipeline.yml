@@ -131,6 +131,17 @@ on:
         default: ''
         type: string
 
+      runner-policy:
+        description: >-
+          Runner scheduling for this run: 'auto' (default) applies the repository's
+          runner policy (RUNNER_POLICY variable or .github/unity-runner-policy.json)
+          when one exists, and the legacy RUNNER_* resolution otherwise; 'legacy'
+          ignores the policy for this run. A non-empty runner-labels input always
+          wins over both. See docs/MULTI_RUNNER_SCHEDULING.md.
+        required: false
+        default: 'auto'
+        type: string
+
       unity-version:
         description: "Override Unity version (blank = use ProjectSettings/ProjectVersion.txt)."
         required: false
@@ -198,6 +209,15 @@ on:
           self-hosted runner usually already has.
         required: false
 
+      RUNNER_STATUS_TOKEN:
+        description: >-
+          Read-only token the runner scheduler uses to see which self-hosted
+          runners are online and busy (repository: Administration read;
+          organization runners and groups: Self-hosted runners read). Optional:
+          without it a runner policy still schedules, with availability
+          'unknown'. GITHUB_TOKEN cannot read runner status. See
+          docs/MULTI_RUNNER_SCHEDULING.md.
+        required: false
       R2_ACCESS_KEY_ID:
         description: >-
           Cloudflare R2 access key, used only when BUILD_DELIVERY=r2. Optional:
@@ -293,6 +313,13 @@ jobs:
       runner-labels-by-platform: ${{ steps.flow.outputs.runner-labels-by-platform }}
       runner-labels-linux:     ${{ steps.flow.outputs.runner-labels-linux }}
       runner-labels-ios:       ${{ steps.flow.outputs.runner-labels-ios }}
+      # ── Runner selection (ADR 004 stage 2c) — the single source of truth ───
+      # Every Unity job's runs-on, engine and the reason for both. The three
+      # values below it are serializations of the same document.
+      runner-selection:        ${{ steps.runners.outputs.runner-selection }}
+      uses-docker:             ${{ steps.runners.outputs.uses-docker }}
+      runs-on-unitytests:      ${{ steps.runners.outputs.runs-on-unitytests }}
+      runs-on-addressables:    ${{ steps.runners.outputs.runs-on-addressables }}
       activation-strategy:     ${{ steps.flow.outputs.activation-strategy }}
       cache-library:           ${{ steps.flow.outputs.cache-library }}
       cache-gradle:            ${{ steps.flow.outputs.cache-gradle }}
@@ -342,9 +369,12 @@ jobs:
           # Release Set was written with no version at all — so a promotion's
           # --expect-version had nothing to compare against and passed
           # vacuously. Identity fields must be present, not merely checked.
+          # The runner policy is read here too: runner selection happens in this
+          # job, before any build job exists to be scheduled.
           sparse-checkout: |
             **/ProjectSettings/ProjectVersion.txt
             **/ProjectSettings/ProjectSettings.asset
+            ${{ vars.RUNNER_POLICY_FILE || '.github/unity-runner-policy.json' }}
           sparse-checkout-cone-mode: false
 
       - name: Resolve Unity version
@@ -473,6 +503,12 @@ jobs:
           IN_BUILD_ENGINE:              ${{ inputs.build-engine }}
           IN_RUNNER_LABELS:             ${{ inputs.runner-labels }}
           IN_ACTIVATION_STRATEGY:       ${{ inputs.activation-strategy }}
+          # Only tells the resolver a runner policy exists, so its "no runner
+          # named" fallback message does not claim settings were ignored that
+          # the policy is about to honour. Routing is the scheduler's.
+          RUNNER_POLICY:                ${{ vars.RUNNER_POLICY || '' }}
+          RUNNER_POLICY_FILE:           ${{ vars.RUNNER_POLICY_FILE || '.github/unity-runner-policy.json' }}
+          IN_RUNNER_POLICY:             ${{ inputs.runner-policy || 'auto' }}
           NEW_CACHE_LIBRARY_ENABLED:    ${{ vars.CACHE_LIBRARY_ENABLED }}
           NEW_CACHE_GRADLE_ENABLED:     ${{ vars.CACHE_GRADLE_ENABLED }}
           NEW_CACHE_ADDRESSABLES_ENABLED: ${{ vars.CACHE_ADDRESSABLES_ENABLED }}
@@ -483,7 +519,74 @@ jobs:
         run: |
           set -euo pipefail
           echo "Flow resolver: event=${EVENT_NAME} ref=${REF_NAME} base=${BASE_REF:-<none>}"
+          if [[ "${IN_RUNNER_POLICY}" != "legacy" ]] \
+             && { [[ -n "${RUNNER_POLICY}" ]] || [[ -f "${RUNNER_POLICY_FILE}" ]]; }; then
+            export RUNNER_POLICY_PRESENT=true
+          fi
           bash .toolkit/scripts/common/resolve_build_flow.sh
+
+      # ── Runner selection (ADR 004 stage 2c) ────────────────────────────────
+      # One decision per Unity job -- each matrix platform, Unity tests and the
+      # Addressables build -- made here, before any of those jobs exists, because
+      # `runs-on` cannot be chosen from inside the job it schedules.
+      #
+      # resolve_build_flow.sh above owns the legacy answer (RUNNER_TYPE,
+      # BUILD_ENGINE, RUNNER_LABELS, the per-OS labels, RUNNER_DEFAULT_MODE);
+      # runner_scheduler.py consumes it. With no runner policy every job is a
+      # passthrough of that answer, byte for byte. With a policy, the scheduler
+      # looks for a self-hosted runner that can build the job and is available,
+      # falling back only as the policy allows. The result is one JSON document,
+      # `runner-selection`, which the matrix step, the job inputs, the summary
+      # and the final report all read. See docs/MULTI_RUNNER_SCHEDULING.md.
+      - name: Select runners
+        id: runners
+        shell: bash
+        env:
+          IN_PLATFORM:       ${{ inputs.platform || '' }}
+          SEL_ANDROID:       ${{ steps.flow.outputs.build-android }}
+          SEL_WEBGL:         ${{ steps.flow.outputs.build-webgl }}
+          SEL_LINUX64:       ${{ steps.flow.outputs.build-linux64 }}
+          SEL_LINUXSERVER:   ${{ steps.flow.outputs.build-linuxserver }}
+          SEL_WINDOWS64:     ${{ steps.flow.outputs.build-windows64 }}
+          SEL_IOS:           ${{ steps.flow.outputs.build-ios }}
+          SEL_TESTS:         ${{ steps.flow.outputs.run-tests }}
+          SEL_ADDRESSABLES:  ${{ steps.flow.outputs.build-addressables }}
+          RS_LANE:                      pipeline
+          RS_LEGACY_LABELS_BY_PLATFORM: ${{ steps.flow.outputs.runner-labels-by-platform }}
+          RS_LEGACY_LABELS_LINUX:       ${{ steps.flow.outputs.runner-labels-linux }}
+          RS_LEGACY_LABELS_SOURCE:      ${{ steps.flow.outputs.runner-labels-source }}
+          RS_LEGACY_BUILD_ENGINE:       ${{ steps.flow.outputs.build-engine }}
+          RS_LEGACY_ACTIVATION:         ${{ steps.flow.outputs.activation-strategy }}
+          RS_ACTIVATION_DOCKER:         ${{ steps.flow.outputs.activation-strategy-docker }}
+          RS_ACTIVATION_LOCAL:          ${{ steps.flow.outputs.activation-strategy-local }}
+          RS_UNITY_VERSION:             ${{ steps.version.outputs.version }}
+          RS_POLICY_MODE:               ${{ inputs.runner-policy || 'auto' }}
+          RUNNER_POLICY:                ${{ vars.RUNNER_POLICY || '' }}
+          RUNNER_POLICY_FILE:           ${{ vars.RUNNER_POLICY_FILE || '.github/unity-runner-policy.json' }}
+          # Read-only runner-status token. Never echoed: the scheduler sends it
+          # only as an Authorization header and redacts it from every message.
+          RUNNER_STATUS_TOKEN:          ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          jobs=()
+          # `platform: None` is the CI lane: the matrix step builds no player, so
+          # no player job is scheduled either.
+          if [[ "${IN_PLATFORM}" != "None" ]]; then
+            [[ "${SEL_ANDROID}" == "true" ]]     && jobs+=(Android)
+            [[ "${SEL_IOS}" == "true" ]]         && jobs+=(iOS)
+            [[ "${SEL_WEBGL}" == "true" ]]       && jobs+=(WebGL)
+            [[ "${SEL_LINUX64}" == "true" ]]     && jobs+=(Linux64)
+            [[ "${SEL_LINUXSERVER}" == "true" ]] && jobs+=(LinuxServer)
+            [[ "${SEL_WINDOWS64}" == "true" ]]   && jobs+=(Windows64)
+          fi
+          [[ "${SEL_TESTS}" == "true" ]]         && jobs+=(UnityTests)
+          [[ "${SEL_ADDRESSABLES}" == "true" ]]  && jobs+=(Addressables)
+          RS_JOBS="$(IFS=,; echo "${jobs[*]:-}")"
+          export RS_JOBS
+          # Unity tests and Addressables are always recorded, so the jobs that
+          # read their runs-on resolve even when this run does not schedule them.
+          export RS_INACTIVE_JOBS="UnityTests,Addressables"
+          python3 .toolkit/scripts/common/runner_scheduler.py
 
       # ── Build matrix ───────────────────────────────────────────────────────
       # The platform set is DATA, not nine hardcoded jobs. Nine `if:`-gated jobs
@@ -509,9 +612,10 @@ jobs:
           APP_VERSION:   ${{ steps.meta.outputs.app-version }}
           RETENTION_DAYS:   ${{ steps.flow.outputs.artifact-retention-days }}
           RETENTION_SOURCE: ${{ steps.flow.outputs.artifact-retention-source }}
-          # Per-platform runs-on, resolved by the same helper the runner plan
-          # prints, so the table and the routing cannot disagree.
-          RUNNER_LABELS_BY_PLATFORM: ${{ steps.flow.outputs.runner-labels-by-platform }}
+          # Per-platform runs-on and engine, read from the runner selection the
+          # `runners` step made -- the same document the summary prints, so the
+          # table and the routing cannot disagree.
+          RUNNER_SELECTION: ${{ steps.runners.outputs.runner-selection }}
           SEL_ANDROID:     ${{ steps.flow.outputs.build-android }}
           SEL_WEBGL:       ${{ steps.flow.outputs.build-webgl }}
           SEL_LINUX64:     ${{ steps.flow.outputs.build-linux64 }}
@@ -685,6 +789,11 @@ jobs:
           labels_of() {
             RL_PLATFORM="$1" python3 "${_rl_script}"
           }
+          # Any other field of the platform's selection (empty when nothing
+          # selected one; the build job then falls back to the run-wide value).
+          field_of() {
+            RL_PLATFORM="$1" RL_FIELD="$2" python3 "${_rl_script}"
+          }
 
           # Sanitize a product name for use in artifact filenames:
           # preserve original casing, strip spaces and filesystem-unsafe
@@ -699,10 +808,13 @@ jobs:
           add() {
             [ "$1" = "true" ] || return 0
             local platform="$2" artifact="$3" suffix="$4" validator="$5"
-            local slug lower_artifact name label labels
+            local slug lower_artifact name label labels engine activation selected
             slug=$(slug_of "${platform}")
             label=$(label_of "${platform}")
             labels=$(labels_of "${platform}")
+            engine=$(field_of "${platform}" buildEngine)
+            activation=$(field_of "${platform}" activationStrategy)
+            selected=$(field_of "${platform}" selectedTarget)
             lower_artifact=$(printf '%s' "${artifact}" | tr '[:upper:]' '[:lower:]')
             # Artifact naming: {product}_{version}_{build}_{env}_{platform}_{type}
             # The type suffix is appended only where it distinguishes two real
@@ -711,7 +823,7 @@ jobs:
               Android|iOS) name="${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_${slug}_${lower_artifact}" ;;
               *)           name="${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_${slug}" ;;
             esac
-            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\",\"runner-labels\":\"${labels}\"},"
+            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\",\"runner-labels\":\"${labels}\",\"build-engine\":\"${engine}\",\"activation-strategy\":\"${activation}\",\"runner-selected\":\"${selected}\"},"
             if [ -n "${validator}" ]; then
               VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"validator\":\"${validator}\",\"node\":\"${suffix}\"},"
             fi
@@ -844,19 +956,6 @@ jobs:
             echo "| Runner Labels | \`${RUNNER_LABELS_CSV:-unknown}\` |"
             echo "| Build Engine | \`${BUILD_ENGINE:-unknown}\` |"
             echo "| Execution Strategy | \`${EXECUTION_STRATEGY:-unknown}\` |"
-            # Eight settings feed one decision and nothing printed the answer.
-            # This is that answer, per platform, before anything is built.
-            if [ -n "${RUNNER_PLAN:-}" ] && [ "${RUNNER_PLAN}" != "[]" ]; then
-              {
-                echo ""
-                echo "### Runner plan"
-                echo ""
-                echo "| Platform | runs-on | Engine | Labels from | Note |"
-                echo "|---|---|---|---|---|"
-                printf '%s' "${RUNNER_PLAN}" | jq -r '.[] |
-                  "| \(.platform) | `\(.runsOn | join(", "))` | \(.engine) | \(.labelsSource) | \(.note) |"'
-              } >> "$GITHUB_STEP_SUMMARY"
-            fi
             echo "| Activation Strategy | \`${ACTIVATION_STRATEGY:-unknown}\` |"
             echo "| Platforms | ${PLATFORMS} |"
             echo "| Tests | \`${TESTS}\` |"
@@ -866,6 +965,20 @@ jobs:
             echo "| Cache | \`${CACHE}\` |"
             echo "| Artifact | \`${ARTIFACT}\` |"
             echo "| Clean Build | \`${CLEAN_BUILD:-false}\` (source: \`${CLEAN_BUILD_SOURCE:-default}\`) |"
+            # Eight settings feed one decision and nothing printed the answer.
+            # This is the legacy resolver's answer, per platform. It used to be
+            # written from inside the table above, which split that table in
+            # two. The final routing -- after any runner policy -- is the
+            # "Runner selection" table the `runners` step writes.
+            if [ -n "${RUNNER_PLAN:-}" ] && [ "${RUNNER_PLAN}" != "[]" ]; then
+              echo ""
+              echo "### Runner plan (legacy resolution)"
+              echo ""
+              echo "| Platform | runs-on | Engine | Labels from | Note |"
+              echo "|---|---|---|---|---|"
+              printf '%s' "${RUNNER_PLAN}" | jq -r '.[] |
+                "| \(.platform) | `\(.runsOn | join(", "))` | \(.engine) | \(.labelsSource) | \(.note) |"'
+            fi
           } >> "$GITHUB_STEP_SUMMARY" || true
 
   # ════════════════════════════════════════════════════════════════════════════
@@ -947,9 +1060,13 @@ jobs:
   validate-license:
     name: Validate Unity License
     needs: [resolve-config]
+    # Any Unity job on the docker engine needs the license, not only a run whose
+    # global engine is docker: a runner policy can put one platform in docker
+    # while the rest build with local Unity. Without a policy uses-docker is
+    # exactly `build-engine == 'docker'`.
     if: >-
       needs.resolve-config.result == 'success' &&
-      needs.resolve-config.outputs.build-engine == 'docker'
+      needs.resolve-config.outputs.uses-docker == 'true'
     runs-on: ubuntu-latest
     outputs:
       license-valid: ${{ steps.check.outputs.valid }}
@@ -1048,7 +1165,7 @@ jobs:
       # token that attempt fails on every run.
       post-test-check-run: ${{ vars.POST_TEST_CHECK_RUN == 'true' }}
       runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels-linux }}
+      runner-labels:       ${{ needs.resolve-config.outputs.runs-on-unitytests || needs.resolve-config.outputs.runner-labels-linux }}
       build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
       activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
@@ -1178,7 +1295,7 @@ jobs:
       project-path:        ${{ needs.resolve-config.outputs.project-path }}
       environment:         ${{ needs.resolve-config.outputs.environment }}
       runner-mode:         ${{ inputs.runner-mode || needs.resolve-config.outputs.runner-mode }}
-      runner-labels:       ${{ needs.resolve-config.outputs.runner-labels-linux }}
+      runner-labels:       ${{ needs.resolve-config.outputs.runs-on-addressables || needs.resolve-config.outputs.runner-labels-linux }}
       build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
       activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
@@ -1250,8 +1367,12 @@ jobs:
       # Per platform, not one list for the whole matrix: a single shared
       # runs-on sent Android to the machine iOS needed, and back again.
       runner-labels:       ${{ matrix.runner-labels }}
-      build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
-      activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
+      # Engine and activation follow the row as well: a runner policy can send
+      # one platform to a local-Unity machine while the rest stay in docker.
+      # Without a policy every row carries the run-wide value, unchanged.
+      build-engine:        ${{ matrix.build-engine || needs.resolve-config.outputs.build-engine }}
+      activation-strategy: ${{ matrix.activation-strategy || needs.resolve-config.outputs.activation-strategy }}
+      runner-selected:     ${{ matrix.runner-selected || '' }}
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       build-addressables:  false
       android-export-type: ${{ needs.resolve-config.outputs.android-export-type }}
@@ -1913,6 +2034,30 @@ jobs:
               print(f"::error::Pipeline failed at {failed_stage}. See the matching job logs.")
               sys.exit(1)
           PY
+
+      # Where every Unity job was sent and why, rendered from the same
+      # runner-selection document stage 01 routed on. Reporting only: a failure
+      # here must never turn a green run red.
+      - name: Checkout toolkit (runner selection report)
+        if: always()
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref:        ${{ inputs.toolkit-ref }}
+          path:       .toolkit
+          sparse-checkout: scripts/common
+
+      - name: Runner selection report
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          RUNNER_SELECTION: ${{ needs.resolve-config.outputs.runner-selection }}
+        run: |
+          if [[ -f .toolkit/scripts/common/runner_scheduler.py ]]; then
+            python3 .toolkit/scripts/common/runner_scheduler.py --render >/dev/null || true
+          fi
 
   # ════════════════════════════════════════════════════════════════════════════
   # JOB 12: notify-discord

@@ -1,6 +1,7 @@
 # ADR 004 — Runner selection: make the decision visible before changing it
 
-**Status:** accepted (stages 1–2 implemented)
+**Status:** accepted (stages 1, 2 and 2c implemented; 2b delivered inside a
+runner policy; 3 and 4 in part. See [Stage 2c](#stage-2c--a-runner-scheduler-minor))
 **Date:** 2026-09-14
 
 ## Context
@@ -146,6 +147,102 @@ BUILD_ENGINE_WINDOWS=local
 
 The `github-hosted + local` rejection has to become per-platform rather than
 disappear: it is still true for the platforms left on GitHub's runners.
+
+### Stage 2c — a runner scheduler (minor)
+
+Stages 1–2 answer *which labels*. They cannot answer *which machine*:
+- `runs-on: [a, b]` is an AND, so there is no priority or fallback;
+- nothing knows whether a runner is online or busy;
+- nothing checks a runner can actually build the job.
+
+A studio with two Macs and a Linux Docker host has no way to say "the first Mac
+that is up; Android on the Docker host, GitHub-hosted if it is down".
+
+**Decision.** Add `scripts/common/runner_scheduler.py`, run in stage 01 between the
+flow resolver and the matrix step. It makes one decision per Unity job: each
+matrix platform, Unity tests and Addressables. The decision is made before the
+job exists, because `runs-on` cannot be chosen from inside the job it schedules.
+
+- **Self-hosted is the primary path.** The scheduler *finds* a self-hosted runner.
+  GitHub-hosted is a managed provider: availability `managed`, never `idle`, and
+  only used when the policy allows it. The modes are `self-hosted-only`,
+  `self-hosted-preferred` (default) and `github-hosted`.
+- **Separate stages.**
+  1. requirements
+  2. discovery: an `InventoryProvider`, with `runner_inventory.py` for the
+     GitHub API and a snapshot provider for tests
+  3. capability
+  4. availability
+  5. priority
+  6. fallback
+  7. `runs-on`
+
+  A provider can be replaced without touching policy.
+- **Ownership.**
+  - `resolve_build_flow.sh` keeps the legacy answer, and the scheduler consumes
+    it rather than re-deriving it. The resolver gained only the per-engine
+    activation outputs and a policy-aware log line.
+  - `resolve_platform_executor.allowed_runner_os()` is the platform-safety table,
+    derived from the build steps that actually exist. This is partial stage 4,
+    and it settles Windows64 for scheduling: Linux under docker, Windows or macOS
+    under local.
+  - `matrix_runner_labels.py` only serializes.
+- **One source of truth.** The `runner-selection` JSON document. Everything
+  downstream reads it:
+  - matrix rows (`runs-on`, engine, activation, selected target)
+  - Unity tests and Addressables `runs-on`
+  - the license gate
+  - the summary and the final report
+- **Fallback is deterministic** and never reaches an ineligible target:
+
+  | `on-busy` | Order |
+  |---|---|
+  | `wait` | idle primary → busy primary → idle fallback → busy fallback |
+  | `next` | idle primary → idle fallback → busy primary → busy fallback |
+
+- **Policy cannot weaken platform safety.** An incompatible target written for a
+  platform is a policy error. A generic default list is filtered instead.
+- **Stage 2b, inside a policy.** A row may use `local` while the run uses
+  `docker`, so engine and activation travel per matrix row. The license gate
+  follows "any docker job".
+- **Stage 3, in part.** With a policy, "nothing eligible" fails stage 01 with a
+  report instead of queueing.
+- **Availability is advisory.** Detection is not reservation, and GitHub still
+  schedules. The build job's first step prints the selected target next to
+  `runner.name`. Without a `RUNNER_STATUS_TOKEN` (`GITHUB_TOKEN` cannot read
+  runner state), availability is `unknown`, and `on-unavailable: first` picks the
+  first eligible self-hosted target without ever jumping to GitHub-hosted.
+- **The standalone workflows route through it as well.**
+  `unity-build-{android,webgl,linux,ios}.yml`, `unity-test{,-ios}.yml` and
+  `unity-release-ios.yml` each have a `resolve-runner` job.
+  - That job runs on GitHub-hosted `ubuntu-latest` only when a policy is opted in
+    by variable (`RUNNER_POLICY` / `RUNNER_POLICY_FILE`) and no explicit label
+    was passed.
+  - Otherwise it is skipped, and the Unity job uses the explicit label, else
+    today's literal. A project without a policy therefore gains no GitHub-hosted
+    job.
+
+**Hardening before release.** Found by the pre-merge audit:
+- **Group membership is never inferred from labels.** It is read from the group
+  endpoints, and each group is confirmed, not-found or unknown.
+  - **Unknown:** availability `unknown`, no member pinning, `runs-on` = group +
+    labels.
+  - **Not found:** an actionable ineligibility.
+- **The tier order includes `unknown`**, right after `idle` in each list.
+  GitHub-hosted ranks after every idle or unknown self-hosted fallback target.
+- **An inherited `default` that cannot serve a job safely** falls back to that
+  job's legacy routing, and the legacy labels are themselves checked. An explicit
+  platform section still fails.
+- **Unity and Xcode share one rule:** declared lists match exactly; undeclared is
+  unknown and never satisfies a requirement.
+- **Duplicate ids are rejected while parsing.**
+
+**Compatibility.** With no policy, every `runs-on`, engine and activation is
+byte-identical. This is pinned by `tests/test_runner_selection_golden.py` against
+a baseline captured before the change. `ios-runner-label` defaults to `''`
+instead of `macos-unity-xcode`, which resolves to the same label. In the
+standalone workflows, the Unity job's `runs-on` without a policy is exactly the
+pre-scheduler literal, and no extra job runs.
 
 ### Stage 3 — fail fast instead of queueing (major)
 

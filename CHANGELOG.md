@@ -12,6 +12,110 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **Multi-runner scheduling** (ADR 004 stage 2c). An optional **runner policy**
+  (`.github/unity-runner-policy.json`, or the `RUNNER_POLICY` variable) schedules
+  every Unity job independently: each matrix platform, Unity tests and
+  Addressables. See [docs/MULTI_RUNNER_SCHEDULING.md](docs/MULTI_RUNNER_SCHEDULING.md).
+  - **Self-hosted first.** Modes are `self-hosted-only`, `self-hosted-preferred`
+    (default) and `github-hosted`. GitHub-hosted is a managed provider (availability
+    `managed`), used only when the policy allows it.
+  - **Runner model:** runners, label pools and runner groups, each with
+    capabilities (`os`, `platforms`, `build-engines`, `unity`, `xcode`, labels).
+    Selection is capability → availability → priority → explicit fallback, with
+    `on-busy: wait|next` and a deterministic tier order.
+  - **Availability** comes from the GitHub runner API (repository, organization
+    and runner-group endpoints) through the optional `RUNNER_STATUS_TOKEN` secret.
+    It is bounded by timeouts and a 30 s budget, and degrades to `unknown`
+    (`on-unavailable: first|fail`) when the API cannot be read.
+  - **Platform safety cannot be configured away.** iOS never goes to Linux, Docker
+    or GitHub-hosted, and Windows64 never goes to docker on a Windows host.
+    Incompatible platform entries are policy errors.
+  - **When nothing is eligible**, stage 01 fails with the required capabilities,
+    every candidate's status and reason, and suggested actions, instead of
+    queueing indefinitely.
+  - **One `runner-selection` JSON output** drives the matrix rows, the Unity tests
+    and Addressables `runs-on`, the license gate, the stage-01 summary and the
+    final report. Each build job prints the selected target next to the runner
+    that was actually assigned.
+- **Per-row build engine and activation.** A policy can build iOS with local Unity
+  while the rest of the run uses docker. Stage 01b (license) runs when *any* job
+  uses docker.
+- **Standalone workflows schedule too.** `unity-build-{android,webgl,linux,ios}.yml`,
+  `unity-test.yml`, `unity-test-ios.yml` and `unity-release-ios.yml` gain a
+  `resolve-runner` job and an optional `runner-label` input (`ios-runner-label`
+  for `unity-build-ios.yml`).
+  - The job runs on GitHub-hosted `ubuntu-latest` **only** when `RUNNER_POLICY`
+    or `RUNNER_POLICY_FILE` is set as a variable and no explicit label is passed.
+  - Without that, it is skipped and the Unity job's `runs-on` is the
+    pre-scheduler literal, with no extra job.
+- **Runner groups are never guessed.** Membership comes only from the runner-group
+  endpoints.
+  - **Unconfirmed membership:** availability `unknown`, no member is pinned, and
+    `runs-on` is the group plus labels.
+  - **A group that does not exist:** an actionable ineligibility.
+- **Safe fallback for an inherited `default`.** A job without its own policy
+  section, whose `default` has nothing it can use (e.g. Linux-only `default` +
+  iOS), keeps its legacy routing.
+  - The legacy labels are checked first: iOS is never sent to Linux, Windows or
+    GitHub-hosted.
+  - An inherited `build-engine` no longer applies to iOS, Unity tests,
+    Addressables or the standalone lanes.
+- **One rule for Unity and Xcode versions.** A requirement is met only by a
+  declared list containing that exact version. Undeclared or `[]` is unknown and
+  does not satisfy it. GitHub-hosted satisfies only the project's own Unity
+  version, and never Xcode.
+- **Duplicate ids are rejected:**
+  - runner ids, pool ids, platform sections and any repeated key
+  - a target listed twice
+  - repeated pool members
+
+  The error names the collection and the id.
+- **Ranking of `unknown` availability:**
+  - right after `idle` within its list
+  - GitHub-hosted only after every idle or unknown self-hosted fallback target
+  - with `on-unavailable: fail`, `unknown` targets are not selectable
+- **New inputs.** `unity-pipeline.yml` gains a `runner-policy` input
+  (`auto` | `legacy`) and an optional `RUNNER_STATUS_TOKEN` secret. The dispatch
+  forms are unchanged: they are at GitHub's documented input limit, and their
+  `runner-labels` input already pins every job.
+- **New files:**
+  - `scripts/common/runner_scheduler.py`
+  - `scripts/common/runner_inventory.py`
+  - `schemas/unity-runner-policy.schema.json`
+  - `examples/runner-policy/*.json`
+  - `resolve_platform_executor.allowed_runner_os()`, the platform/engine/lane →
+    runner-OS table
+  - `resolve_build_flow.sh` outputs `activation-strategy-docker` and
+    `activation-strategy-local`
+
+### Changed
+
+- `ios-runner-label` (`unity-build-ios.yml`, `unity-build.yml`) now defaults to
+  `''`, meaning "runner policy, else `macos-unity-xcode`". Without a policy it
+  resolves to the same label as before, and an explicitly passed value still wins.
+- The stage-01 summary no longer splits its configuration table: the legacy
+  runner plan now follows the table.
+- `docs/REPOSITORY_VARIABLES.md` and `docs/SELF_HOSTED_*.md` corrected to match
+  the resolver:
+  - the self-hosted label default is `RUNNER_LINUX_LABEL`, else `self-hosted,linux`,
+    not `self-hosted,windows`
+  - with no machine named, the run falls back to GitHub-hosted + docker
+  - the `none` sentinel
+  - the per-OS labels are active routing, not superseded
+  - stale line references removed
+
+### Compatibility
+
+With no runner policy, every job's `runs-on`, build engine and activation are
+byte-identical to 6.3.0. This is pinned by `tests/test_runner_selection_golden.py`
+against a baseline captured before the change. No variable is deprecated.
+
+---
+
+## [Unreleased]
+
+### Added
+
 - **Unity environment preflight (`scripts/unity-preflight.sh` → `scripts/common/unity_preflight.py`).** Makes a machine or agent worktree ready to build a project:
   - finds the Unity project (the given directory, or the single project up to two levels below a worktree root);
   - reads the exact editor version and changeset from `ProjectSettings/ProjectVersion.txt`;

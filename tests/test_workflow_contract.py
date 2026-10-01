@@ -548,8 +548,17 @@ class TestSparseCheckoutHonoursProjectPath:
     in a subdirectory checks out nothing and the step fails.
     """
 
+    # Root-anchored on purpose, and not project files: the runner policy is a
+    # repository-level file (`.github/unity-runner-policy.json` or
+    # RUNNER_POLICY_FILE), resolved from the repository root by contract.
+    REPO_ROOT_FILES = ("RUNNER_POLICY_FILE",)
+
     def _sparse_patterns(self, workflow: dict):
         for step in iter_steps(workflow):
+            if (step.get("with") or {}).get("repository"):
+                # Another repository (the toolkit): its layout is fixed and
+                # has nothing to do with the consumer's project-path.
+                continue
             patterns = (step.get("with") or {}).get("sparse-checkout")
             if patterns:
                 for line in str(patterns).splitlines():
@@ -567,6 +576,8 @@ class TestSparseCheckoutHonoursProjectPath:
                 if "/" not in pattern:
                     continue  # unanchored already: matches at any depth
                 if pattern.startswith("**/") or "project-path" in pattern:
+                    continue
+                if any(name in pattern for name in self.REPO_ROOT_FILES):
                     continue
                 offenders.append(f"  {path.name} :: {step_name} :: {pattern}")
 

@@ -282,10 +282,21 @@ on:
       # ── Runner / Build-Engine separation (V2) ─────────────────────────────────
       runner-labels:
         description: |
-          JSON array string of runs-on labels (e.g. ["ubuntu-latest"] or
-          ["self-hosted","windows"]). Resolver-provided; drives runs-on directly.
+          JSON runs-on target: an array of labels (e.g. ["ubuntu-latest"] or
+          ["self-hosted","windows"]), or a runner-group object
+          ({"group":"ios-runners","labels":["macOS"]}) when the runner policy
+          selected a group. Resolver/scheduler-provided; drives runs-on directly.
         required: false
         default: '["ubuntu-latest"]'
+        type: string
+
+      runner-selected:
+        description: |
+          The runner, pool or provider the runner scheduler selected for this job
+          (informational). Printed next to the runner that actually picked the
+          job up: selection is not a reservation, so they can differ.
+        required: false
+        default: ''
         type: string
 
       build-engine:
@@ -466,6 +477,33 @@ jobs:
       configuration:          ${{ steps.set-outputs.outputs.configuration }}
 
     steps:
+
+      # ── Step 0: Runner identity ────────────────────────────────────────────
+      # The runner scheduler chose a target in stage 01; GitHub then assigned a
+      # runner. Detection is not reservation -- another job can take the chosen
+      # machine in between, and a pool target is matched by labels -- so record
+      # who actually ran this, next to what was selected.
+      - name: Runner identity
+        shell: bash
+        env:
+          SELECTED:    ${{ inputs.runner-selected }}
+          RUNS_ON:     ${{ inputs.runner-labels }}
+          ENGINE:      ${{ inputs.build-engine }}
+          RUNNER_NAME: ${{ runner.name }}
+          RUNNER_OS:   ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          echo "Selected target: ${SELECTED:-<not recorded>}"
+          echo "runs-on:         ${RUNS_ON}"
+          echo "Assigned runner: ${RUNNER_NAME} (${RUNNER_OS}/${RUNNER_ARCH})"
+          echo "Build engine:    ${ENGINE}"
+          {
+            echo "### Runner"
+            echo ""
+            echo "| Selected | Assigned | OS | Engine |"
+            echo "|---|---|---|---|"
+            echo "| \`${SELECTED:-n/a}\` | \`${RUNNER_NAME}\` | ${RUNNER_OS}/${RUNNER_ARCH} | ${ENGINE} |"
+          } >> "${GITHUB_STEP_SUMMARY}" || true
 
       # ── Step 1: Guard — iOS requires macOS runner ──────────────────────────
       # If platform=iOS and the runner is not macOS, set result=blocked and

@@ -160,6 +160,12 @@ Set up a weekly cleanup job:
 **"No runner matching labels found"** — Check the runner's registered labels
 match `RUNNER_LABELS` exactly (after normalization).
 
+**More than one build machine?** Register each one with a label unique to it (its
+name) plus what it can build (e.g. `unity-docker`). Then describe them in a
+runner policy, and each Unity job is sent to an eligible, available machine in
+the order you choose, with an explicit fallback. See
+[MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md).
+
 **"Cannot connect to Docker daemon"** — Ensure Docker is running and the
 runner user is in the `docker` group.
 
@@ -171,6 +177,8 @@ runner user is in the `docker` group.
 
 ## See also
 
+- [MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md) — several runners:
+  priority, fallback, pools, groups, availability.
 - [RUNNER_AND_BUILD_ENGINE.md](RUNNER_AND_BUILD_ENGINE.md) — Runner vs Build
   Engine architecture, all three execution strategies, licensing per mode.
 - [REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md#runner) — `RUNNER_TYPE` /

@@ -132,6 +132,24 @@ CI Runner (macos-13)
 
 The two lanes are **mutually exclusive** — each platform resolves to exactly one executor.
 
+### Runner scheduling (which machine runs a lane)
+
+The lanes say *what kind* of machine a platform needs. Which concrete machine
+runs it is decided in stage 01 by `scripts/common/runner_scheduler.py`, one job at
+a time:
+
+```
+resolve_build_flow.sh  ──legacy answer──▶  runner_scheduler.py  ──runner-selection──▶  matrix rows → runs-on
+                                             │  requirements ← resolve_platform_executor.allowed_runner_os()
+                                             │  inventory    ← runner_inventory.py (GitHub runner API, optional)
+                                             └  capability → availability → priority → fallback
+```
+
+With no runner policy, it passes the legacy answer through unchanged. With one,
+it picks a self-hosted runner first and uses GitHub-hosted only when the policy
+allows. See [MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md) and
+[ADR 004](adr/004-runner-selection.md).
+
 ## Supported Platforms
 
 | Platform | Executor | Runner OS | Support |

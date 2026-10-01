@@ -2,7 +2,9 @@ name: Unity Build
 
 # Orchestrator for all supported Unity platforms.
 # Docker platforms (Android, WebGL, Linux64, LinuxServer): run inside containers on ubuntu-latest.
-# iOS: runs natively on ios-runner-label runner (default: macos-unity-xcode — self-hosted macOS).
+# iOS: runs natively on the ios-runner-label runner, else the runner policy's choice
+# (when opted in via the RUNNER_POLICY / RUNNER_POLICY_FILE variable), else
+# macos-unity-xcode (self-hosted macOS) -- see unity-build-ios.yml.
 # Supported platforms: Android, WebGL, Linux64, LinuxServer, iOS
 
 on:
@@ -93,12 +95,14 @@ on:
         default: ''
       ios-runner-label:
         description: >
-          Self-hosted runner label for macOS Unity+Xcode builds (iOS only).
-          Must be a macOS runner with Unity iOS Build Support installed.
-          GitHub-hosted macos-latest is NOT supported.
+          Runner label(s) for the macOS Unity+Xcode iOS job, comma-separated.
+          Empty (default) uses the repository's runner policy when one exists,
+          otherwise the self-hosted `macos-unity-xcode` label as before. A value
+          here wins over the policy. Must be a macOS runner with Unity iOS Build
+          Support; GitHub-hosted macos-latest is NOT supported.
         type: string
         required: false
-        default: macos-unity-xcode
+        default: ''
       workflow-repository:
         description: >
           Repository that owns this workflow (owner/repo). Must be the
@@ -134,6 +138,11 @@ on:
     secrets:
       UNITY_LICENSE:
         required: true
+      RUNNER_STATUS_TOKEN:
+        description: >-
+          Optional read-only token for runner availability, passed to every
+          platform workflow's runner selection. See docs/MULTI_RUNNER_SCHEDULING.md.
+        required: false
       UNITY_EMAIL:
         required: false
       UNITY_PASSWORD:
@@ -404,6 +413,7 @@ jobs:
       UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
 
   # ─── 4. BUILD ──────────────────────────────────────────────────────────────────
   build-android:

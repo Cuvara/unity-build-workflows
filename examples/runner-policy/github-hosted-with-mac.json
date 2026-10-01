@@ -1,0 +1,15 @@
+{
+  "$schema": "../../schemas/unity-runner-policy.schema.json",
+  "version": 1,
+  "mode": "github-hosted",
+
+  "runners": {
+    "studio-mac": { "labels": ["self-hosted", "macOS", "studio-mac"] }
+  },
+
+  "default": {},
+
+  "platforms": {
+    "iOS": { "mode": "self-hosted-only", "priority": ["studio-mac"] }
+  }
+}

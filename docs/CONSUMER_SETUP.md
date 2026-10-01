@@ -342,6 +342,16 @@ For the full variable reference, the legacy → new migration table, and validat
 rules, see [BRANCH\_FLOW\_CONTRACT.md](BRANCH_FLOW_CONTRACT.md) and
 [REPOSITORY\_VARIABLES.md](REPOSITORY_VARIABLES.md).
 
+### Several build machines (optional)
+
+If you build on more than one self-hosted runner (e.g. two Macs for iOS and a
+Linux Docker host for Android), add `.github/unity-runner-policy.json`. Each
+platform is then sent to an eligible, available runner in the priority order you
+give, with an explicit fallback. Optionally add a read-only `RUNNER_STATUS_TOKEN`
+secret so the scheduler can see which runners are online and busy. Without a
+policy nothing changes. See
+[MULTI\_RUNNER\_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md).
+
 ---
 
 ## Step 5: (If Using Addressables) Add the AddressableBuilder Script
