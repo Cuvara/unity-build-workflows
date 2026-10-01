@@ -43,6 +43,10 @@ python3 scripts/docker/run_unity_container.py \
   --project-path . --unity-version 6000.0.26f1 --target-platform Android \
   --environment development --build-config-path BuildConfig
 # add --dry-run to print the docker command without running it
+
+# Ensure a Unity project's exact editor + platform modules are installed on this machine
+# (Unity CLI / Hub; prints UNITY_EDITOR=...; --check never installs) — docs/UNITY_PREFLIGHT.md
+eval "$(bash scripts/unity-preflight.sh --project <unity-project-or-worktree> --platform Android)"
 ```
 
 CI (`.github/workflows/ci.yml`) is exactly two gates — pytest and `bash -n` — plus an

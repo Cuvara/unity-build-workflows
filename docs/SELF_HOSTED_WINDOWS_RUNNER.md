@@ -115,6 +115,13 @@ Install Unity Editor **6000.0.26f1** (the version SSOT in
 > All modules listed above must be installed — missing a module causes Unity to
 > exit with `Error: target platform not supported`.
 
+**Scripted alternative.** If the Unity CLI (or Unity Hub) and Python 3.8+ are
+installed, the editor and modules can be installed from the project's own
+`ProjectVersion.txt` instead of by hand. Run this from Git Bash as the runner's
+user:
+`bash scripts/unity-preflight.sh --project <project> --platform Android,WebGL,Linux64`.
+See [UNITY_PREFLIGHT.md](UNITY_PREFLIGHT.md).
+
 ### 3.3 Git
 
 Install [Git for Windows](https://git-scm.com/download/win) (Git Bash bundled).

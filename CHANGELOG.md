@@ -112,6 +112,26 @@ against a baseline captured before the change. No variable is deprecated.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Unity environment preflight (`scripts/unity-preflight.sh` → `scripts/common/unity_preflight.py`).** Makes a machine or agent worktree ready to build a project:
+  - finds the Unity project (the given directory, or the single project up to two levels below a worktree root);
+  - reads the exact editor version and changeset from `ProjectSettings/ProjectVersion.txt`;
+  - installs that editor, plus the modules for the requested platforms, through the Unity CLI (`unity`), falling back to the Unity Hub headless CLI;
+  - verifies the result and prints `UNITY_EDITOR` and related keys as eval-able env, JSON, or `$GITHUB_OUTPUT` lines.
+
+  Behaviour:
+  - Idempotent; a different installed version is never substituted.
+  - An explicit `UNITY_EDITOR` is honoured and checked against the project version.
+  - Installs are serialised by a machine-wide OS file lock, so parallel agents install once.
+  - Check-only mode: `--check`.
+  - The bash launcher locates Python 3.8+ and exits 3 with install instructions when only the Windows Store placeholder exists.
+  - On non-macOS hosts iOS is reported as "player build NOT POSSIBLE"; Xcode is checked, never installed.
+
+  Agents use it once per worktree via `eval "$(bash <toolkit>/scripts/unity-preflight.sh --project . --platform …)"`. The docs include an agent-instructions snippet and a check-only Claude Code `SessionStart` hook for consumer projects. No workflow calls it yet; existing build lanes are unchanged. See [docs/UNITY_PREFLIGHT.md](docs/UNITY_PREFLIGHT.md).
+
 ## [6.3.0] — 2026-09-16
 
 ### Added

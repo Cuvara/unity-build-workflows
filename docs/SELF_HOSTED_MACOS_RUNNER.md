@@ -98,6 +98,11 @@ xcodebuild -version   # confirm the version matches BuildConfig xcodeVersion
    ```
    If this path is missing, the iOS module is not installed.
 
+Scripted alternative to steps 2–4: with the Unity CLI (or Unity Hub) installed,
+`bash scripts/unity-preflight.sh --project <project> --platform iOS`
+installs the editor version from the project's `ProjectVersion.txt` plus iOS
+Build Support, and checks Xcode. See [UNITY_PREFLIGHT.md](UNITY_PREFLIGHT.md).
+
 The build step locates Unity at the default Hub path:
 `/Applications/Unity/Hub/Editor/6000.0.26f1/Unity.app/Contents/MacOS/Unity`.
 
