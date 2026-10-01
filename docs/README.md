@@ -57,6 +57,7 @@ drift apart quietly.
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom → cause |
 | [UNITY_PERSONAL_DOCKER_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md) | The licensing setup that trips everyone up |
 | [UNITY_VERSION_UPGRADE.md](UNITY_VERSION_UPGRADE.md) | Moving the project to a new Unity version |
+| [UNITY_PREFLIGHT.md](UNITY_PREFLIGHT.md) | Installing the project's exact editor and platform modules on a machine or agent worktree, via the Unity CLI |
 | [SECURITY.md](SECURITY.md) | Secret handling, container hardening, what never reaches a log |
 
 ## Infrastructure
