@@ -690,6 +690,66 @@ jobs:
             *)            echo "::error::Unsupported platform: ${{ inputs.platform }}"; exit 1 ;;
           esac
 
+      # ── Step 4b: Unity preflight (native self-hosted lanes only) ──────────
+      # build-engine=local runs the runner's own Unity, which used to be looked
+      # up at the Unity Hub default path from inputs.unity-version and failed
+      # if nobody had installed it by hand. scripts/unity-preflight.sh now
+      # provisions the exact editor ProjectVersion.txt names, plus the modules
+      # for this platform, through the Unity CLI, and reports the executable.
+      # Every native Unity step below runs THAT executable
+      # (steps.unity-preflight.outputs.unity_editor) — never a path rebuilt here.
+      # Docker lanes are untouched: their editor is inside the image.
+      - name: Checkout toolkit (Unity preflight)
+        id: preflight-toolkit
+        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') && steps.ios-guard.outputs.blocked != 'true' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+          clean: false
+
+      - name: Unity preflight (provision editor + modules)
+        id: unity-preflight
+        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') && steps.ios-guard.outputs.blocked != 'true' }}
+        shell: bash
+        env:
+          PROJECT_PATH:     ${{ inputs.project-path }}
+          PLATFORM:         ${{ inputs.platform }}
+          EXPECTED_VERSION: ${{ inputs.unity-version }}
+          # A runner cannot answer a UAC prompt: install without elevation, and
+          # let preflight fail up front if the install root is not writable.
+          # The root itself is runner configuration (UNITY_PREFLIGHT_INSTALL_ROOT
+          # in the runner's .env) — see docs/UNITY_PREFLIGHT.md.
+          UNITY_NO_ELEVATE: '1'
+        run: |
+          set -Eeuo pipefail
+          args=(--project "${PROJECT_PATH}" --cli unity --format github-actions
+                --install-cli-to "${UNITY_PREFLIGHT_CLI_HOME:-${RUNNER_TOOL_CACHE}/unity-cli}")
+          # An Addressables-only build needs the editor but no platform module.
+          if [[ "${PLATFORM}" != "Addressables" ]]; then
+            args+=(--platform "${PLATFORM}")
+          fi
+          # Outputs (unity_editor, unity_version, ...) go to GITHUB_OUTPUT; the
+          # same values come back on stdout as shell-quoted KEY=value lines.
+          RESULT="$(bash .toolkit/scripts/unity-preflight.sh "${args[@]}")"
+          eval "${RESULT}"
+          # ProjectVersion.txt is the authority. unity-pipeline already refuses a
+          # pin that disagrees with it; refuse here too rather than build with
+          # an editor other than the one the caller believes it is using.
+          if [[ -n "${EXPECTED_VERSION}" && "${EXPECTED_VERSION}" != "${UNITY_VERSION}" ]]; then
+            echo "::error title=Unity version mismatch::unity-version input is ${EXPECTED_VERSION}, but ${UNITY_PROJECT_PATH}/ProjectSettings/ProjectVersion.txt requires ${UNITY_VERSION}."
+            exit 1
+          fi
+          echo "Unity ${UNITY_VERSION} for ${PLATFORM}: ${UNITY_EDITOR} (${UNITY_EDITOR_SOURCE})"
+          {
+            echo "### Unity preflight"
+            echo ""
+            echo "| Version | Platform | Editor | Source | Installed now |"
+            echo "|---|---|---|---|---|"
+            echo "| ${UNITY_VERSION} | ${PLATFORM} | \`${UNITY_EDITOR}\` | ${UNITY_EDITOR_SOURCE} | ${UNITY_INSTALLED:-nothing} |"
+          } >> "${GITHUB_STEP_SUMMARY}" || true
+
       # ── Step 5: Resolve activation strategy (docker lane only) ────────────
       # Self-hosted lanes are pre-activated via Unity Hub — no secrets needed.
       - name: Resolve activation strategy
@@ -817,25 +877,16 @@ jobs:
         id: addressables-pre-selfhosted
         if: ${{ inputs.build-addressables == true && inputs.platform != 'Addressables' && inputs.build-engine == 'local' && steps.ios-guard.outputs.blocked != 'true' }}
         shell: bash
+        env:
+          # The editor Unity preflight resolved for this job (Step 4b).
+          UNITY_EDITOR: ${{ steps.unity-preflight.outputs.unity_editor }}
         run: |
           set -euo pipefail
-          UNITY_VERSION="${{ inputs.unity-version }}"
           PROJECT="${{ inputs.project-path }}"
 
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            UNITY_BIN="C:/Program Files/Unity/Hub/Editor/${UNITY_VERSION}/Editor/Unity.exe"
-            if [ ! -f "$UNITY_BIN" ]; then
-              UNITY_BIN="C:/Program Files/Unity ${UNITY_VERSION}/Editor/Unity.exe"
-            fi
-          else
-            UNITY_BIN="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity"
-            if [ ! -f "$UNITY_BIN" ]; then
-              UNITY_BIN="/Applications/Unity ${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity"
-            fi
-          fi
-
-          if [ ! -f "$UNITY_BIN" ]; then
-            echo "::error::Unity not found for version ${UNITY_VERSION} on ${{ runner.os }}. Check Unity Hub installation."
+          UNITY_BIN="${UNITY_EDITOR:-}"
+          if [ -z "$UNITY_BIN" ] || [ ! -f "$UNITY_BIN" ]; then
+            echo "::error::Unity preflight did not provide an editor executable (got '${UNITY_BIN}') on ${{ runner.os }}."
             exit 1
           fi
 
@@ -1130,26 +1181,29 @@ jobs:
           Write-Host "[docker-windows] Build succeeded."
 
       # ── Step 9c: Build with local Unity (self-hosted-windows lane) ─────────
-      # Uses cmd shell per spec. Locates Unity.exe from Unity Hub default paths.
-      # No Docker, no UNITY_LICENSE/SERIAL — Unity Hub handles activation.
+      # Uses cmd shell per spec. Runs the Unity.exe Unity preflight resolved
+      # (Step 4b). No Docker, no UNITY_LICENSE/SERIAL — the runner's own
+      # activation applies.
       - name: Build with local Unity (Windows)
         id: build-windows
         if: ${{ inputs.build-engine == 'local' && runner.os == 'Windows' && steps.ios-guard.outputs.blocked != 'true' }}
         shell: cmd
+        env:
+          UNITY_EDITOR: ${{ steps.unity-preflight.outputs.unity_editor }}
         run: |
           @echo off
           setlocal EnableDelayedExpansion
 
-          set "UNITY_VERSION=${{ inputs.unity-version }}"
           set "PROJECT=${{ inputs.project-path }}"
 
-          :: Locate Unity.exe via Unity Hub default install path
-          set "UNITY_EXE=C:\Program Files\Unity\Hub\Editor\!UNITY_VERSION!\Editor\Unity.exe"
-          if not exist "!UNITY_EXE!" (
-            set "UNITY_EXE=C:\Program Files\Unity !UNITY_VERSION!\Editor\Unity.exe"
+          :: The editor Unity preflight provisioned for this project's exact version.
+          set "UNITY_EXE=%UNITY_EDITOR%"
+          if "!UNITY_EXE!"=="" (
+            echo ::error::Unity preflight did not provide an editor executable.
+            exit /b 1
           )
           if not exist "!UNITY_EXE!" (
-            echo ::error::Unity.exe not found for version !UNITY_VERSION!. Verify Unity Hub installation at default paths.
+            echo ::error::Unity preflight reported !UNITY_EXE!, which does not exist.
             exit /b 1
           )
           echo Unity executable: !UNITY_EXE!
@@ -1215,23 +1269,21 @@ jobs:
 
       # ── Step 9d: Build with local Unity (self-hosted-macos lane) ──────────
       # Primary lane for iOS. Also handles Android/WebGL/Addressables on macOS.
-      # No Docker, no UNITY_LICENSE — Unity Hub handles activation.
+      # No Docker, no UNITY_LICENSE — the runner's own activation applies.
+      # Runs the editor Unity preflight resolved (Step 4b).
       - name: Build with local Unity (macOS)
         id: build-macos
         if: ${{ inputs.build-engine == 'local' && runner.os == 'macOS' && steps.ios-guard.outputs.blocked != 'true' }}
         shell: bash
+        env:
+          UNITY_EDITOR: ${{ steps.unity-preflight.outputs.unity_editor }}
         run: |
           set -euo pipefail
-          UNITY_VERSION="${{ inputs.unity-version }}"
           PROJECT="${{ inputs.project-path }}"
 
-          # Locate Unity binary via Unity Hub default install path
-          UNITY_BIN="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity"
-          if [ ! -f "$UNITY_BIN" ]; then
-            UNITY_BIN="/Applications/Unity ${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity"
-          fi
-          if [ ! -f "$UNITY_BIN" ]; then
-            echo "::error::Unity not found for version ${UNITY_VERSION}. Verify Unity Hub installation at default paths."
+          UNITY_BIN="${UNITY_EDITOR:-}"
+          if [ -z "$UNITY_BIN" ] || [ ! -f "$UNITY_BIN" ]; then
+            echo "::error::Unity preflight did not provide an editor executable (got '${UNITY_BIN}')."
             exit 1
           fi
           echo "Unity binary: ${UNITY_BIN}"
@@ -1872,7 +1924,7 @@ jobs:
 
           echo "result=${RESULT}"                          >> "$GITHUB_OUTPUT"
           echo "artifact-name=${ARTIFACT_NAME}"           >> "$GITHUB_OUTPUT"
-          echo "unity-version-used=${{ inputs.unity-version }}" >> "$GITHUB_OUTPUT"
+          echo "unity-version-used=${{ steps.unity-preflight.outputs.unity_version || inputs.unity-version }}" >> "$GITHUB_OUTPUT"
           echo "build-duration-seconds=${BUILD_DURATION:-0}"    >> "$GITHUB_OUTPUT"
           echo "manifest-artifact-name=${MANIFEST_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
           echo "configuration=${CONFIGURATION}"            >> "$GITHUB_OUTPUT"
