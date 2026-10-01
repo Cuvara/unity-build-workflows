@@ -233,7 +233,7 @@ builds. They are independent, and three of the four combinations are supported:
 
 | Requirement | Detail | Enforced at |
 |---|---|---|
-| Unity at the Hub default path | `C:\Program Files\Unity\Hub\Editor\<version>\Editor\Unity.exe`, or `C:\Program Files\Unity <version>\Editor\Unity.exe` | `reusable-build-platform.yml:794`, `:797`; hard error `:800` |
+| Unity for the project's exact version | Installed by hand, or provisioned by the job's Unity preflight step (Python 3.8+, writable `UNITY_PREFLIGHT_INSTALL_ROOT`) | `reusable-build-platform.yml` step `unity-preflight`; [UNITY_PREFLIGHT.md](UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes) |
 | The **exact** version from `ProjectVersion.txt` | a different installed version fails that path check | resolver → `unity-version` |
 | **`PlayerBuilder.Build`** in an Editor assembly, global namespace | the lane substitutes it when `build-method` is empty; `-buildTarget` alone builds nothing and still exits 0 | `:842-843` (Windows), `:903` (bash) |
 | `AddressableBuilder.Build`, if you build Addressables | called directly | `:806` |
@@ -388,7 +388,7 @@ Production releases should pin by digest, not by the mutable tag:
 | Activation fails, `0 entitlements` | credentials without the `.ulf` | set all three secrets (§3) |
 | Activation fails, `TimeStamp validation failed` | `.ulf` without credentials | same |
 | Green run, empty `unity-build-<Platform>` artifact | self-hosted lane with no `PlayerBuilder.Build` | §6.2 |
-| `Unity.exe not found for version <v>` | Editor absent, not at the Hub path, or a different version than `ProjectVersion.txt` | install that exact version |
+| Unity preflight step failed | No Python, an unwritable install root, a failed download, or a version pin that differs from `ProjectVersion.txt` | follow the remediation the step prints |
 | Job stays *Queued*, runner Idle | label mismatch, or an org runner group that disallows public repos | §6.4, §6.3 |
 | `image-namespace input is required` | Path B without a published image namespace | §7, or move to Path A |
 | `Wrong Docker container mode … Server.Os=windows` | `BUILD_ENGINE=docker` on a Windows engine; `unityci/editor` images are Linux | switch Docker Desktop to Linux containers |

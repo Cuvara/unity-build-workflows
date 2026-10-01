@@ -665,3 +665,99 @@ class TestLauncher:
                               timeout=60, env=env)
         assert proc.returncode == 0, proc.stderr
         assert parse_env(proc.stdout)["UNITY_EDITOR"] == str(exe)
+
+
+# ---------------------------------------------------------------------------
+# CI provisioning: install root, no-elevation gate, Unity CLI bootstrap
+# ---------------------------------------------------------------------------
+
+class TestCiProvisioning:
+    def test_install_root_is_applied_before_installing(self, tmp_path, machine):
+        root = tmp_path / "runner-editors"
+        proc = machine.run(make_project(tmp_path), "--platform", "Android",
+                           "--install-root", str(root))
+        assert proc.returncode == 0, proc.stderr
+        editor = Path(parse_env(proc.stdout)["UNITY_EDITOR"])
+        assert root in editor.parents, "the editor must land under the requested install root"
+        assert json.loads(machine.state.read_text(encoding="utf-8"))["install_path"] == str(root)
+
+    def test_install_root_is_not_touched_when_nothing_is_missing(self, tmp_path, machine):
+        machine.add_editor(VERSION, ANDROID_FULL)
+        proc = machine.run(make_project(tmp_path), "--platform", "Android",
+                           "--install-root", str(tmp_path / "unused"))
+        assert proc.returncode == 0, proc.stderr
+        assert not any("install-path" in c for c in machine.calls())
+        assert not (tmp_path / "unused").exists()
+
+    def test_failure_to_set_install_root_stops_before_installing(self, tmp_path, machine):
+        proc = machine.run(make_project(tmp_path), "--install-root", str(tmp_path / "root"),
+                           mode="install_path_fail")
+        assert proc.returncode == up.EXIT_FAILED
+        assert "Setting the editor install path failed" in proc.stderr
+        assert machine.install_calls() == []
+
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="needs POSIX permissions and a non-root user")
+    def test_unwritable_root_without_elevation_fails_before_installing(self, tmp_path, machine):
+        locked = tmp_path / "Program Files"
+        locked.mkdir()
+        locked.chmod(0o555)
+        try:
+            state = json.loads(machine.state.read_text(encoding="utf-8"))
+            state["install_path"] = str(locked)
+            machine.state.write_text(json.dumps(state), encoding="utf-8")
+            proc = machine.run(make_project(tmp_path), "--platform", "Android",
+                               extra_env={"UNITY_NO_ELEVATE": "1"})
+        finally:
+            locked.chmod(0o755)
+        assert proc.returncode == up.EXIT_PREREQ
+        assert "not writable" in proc.stderr and "UNITY_PREFLIGHT_INSTALL_ROOT" in proc.stderr
+        assert machine.install_calls() == []
+
+    @pytest.mark.skipif(BASH is None or os.name == "nt", reason="fake installer is a POSIX script")
+    def test_missing_cli_is_bootstrapped_once_into_the_cli_home(self, tmp_path, machine):
+        cli_home = tmp_path / "tool" / "unity-cli"
+        curl_log = tmp_path / "curl.log"
+        fake_bin = tmp_path / "fake-bin"
+        fake_bin.mkdir()
+        # Stands in for `curl -fsSL https://unity.com/install.sh`: prints an
+        # installer that drops the (fake) CLI into $UNITY_CLI_HOME/bin.
+        curl = fake_bin / "curl"
+        curl.write_text(
+            "#!/bin/sh\n"
+            f'echo "$@" >> "{curl_log}"\n'
+            "cat <<'INSTALLER'\n"
+            'mkdir -p "$UNITY_CLI_HOME/bin"\n'
+            f"printf '#!/bin/sh\nexec \"{sys.executable}\" \"{FAKE_CLI}\" \"$@\"\n' "
+            '> "$UNITY_CLI_HOME/bin/unity"\n'
+            'chmod +x "$UNITY_CLI_HOME/bin/unity"\n'
+            "INSTALLER\n", encoding="utf-8")
+        curl.chmod(0o755)
+        env = {"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+        argv = [sys.executable, str(SCRIPT), "--project", str(make_project(tmp_path)),
+                "--cli", "unity", "--install-cli-to", str(cli_home),
+                "--lock-dir", str(machine.lock_dir)]
+
+        def run():
+            return subprocess.run(argv, capture_output=True, text=True, timeout=60,
+                                  env=machine.env(extra=env))
+
+        first = run()
+        assert first.returncode == 0, first.stderr
+        assert "https://unity.com/install.sh" in curl_log.read_text(encoding="utf-8")
+        assert (cli_home / "bin" / "unity").is_file()
+        second = run()
+        assert second.returncode == 0, second.stderr
+        assert len(curl_log.read_text(encoding="utf-8").splitlines()) == 1, "CLI reinstalled"
+
+    @pytest.mark.skipif(sys.platform != "linux", reason="default CLI locations exist on dev hosts")
+    def test_check_mode_never_bootstraps_the_cli(self, tmp_path, machine):
+        cli_home = tmp_path / "tool" / "unity-cli"
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "--project", str(make_project(tmp_path)),
+             "--cli", "unity", "--install-cli-to", str(cli_home), "--check"],
+            capture_output=True, text=True, timeout=60,
+            env=machine.env(extra={"PATH": str(tmp_path / "empty")}),
+        )
+        assert proc.returncode == up.EXIT_PREREQ
+        assert not cli_home.exists()

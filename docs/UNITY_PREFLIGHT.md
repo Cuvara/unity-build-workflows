@@ -221,8 +221,11 @@ The Hub has no module listing and no verify command. Preflight reads the
 installed). It does not trust the Hub's exit code: after every install it
 re-detects the editor and modules, and fails if they are not there.
 
-If neither CLI is found, preflight exits 3 and prints how to install one. It
-does not install a CLI itself:
+If neither CLI is found, preflight exits 3 and prints how to install one. With
+`--install-cli-to <dir>` (or `UNITY_PREFLIGHT_CLI_HOME`), preflight instead runs
+Unity's installer under the install lock, with `UNITY_CLI_HOME=<dir>`, and uses
+`<dir>/bin/unity`. CI does this; local runs only do it when asked. The
+installer is:
 
 ```bash
 # macOS / Linux
@@ -239,7 +242,9 @@ against `1.0.0-beta.11`.
 
 ## Where Unity is installed
 
-Editors go wherever the CLI's install path points. Check it with
+Editors go wherever the CLI's install path points, unless `--install-root` /
+`UNITY_PREFLIGHT_INSTALL_ROOT` asks for a specific directory (see
+[In CI](#in-ci-self-hosted-native-lanes)). Check it with
 `unity install-path --get` or `"Unity Hub" -- --headless ip -g`. The default is
 the Hub location, e.g. `C:\Program Files\Unity\Hub\Editor\<version>`.
 Preflight never changes it.
@@ -370,25 +375,67 @@ Inside the toolkit's Docker images Unity is already installed and
 `UNITY_EDITOR=/usr/bin/unity-editor` is set. Preflight treats that as an
 override and installs nothing.
 
-## Reuse in CI
+## In CI: self-hosted native lanes
 
-Nothing in the pipeline calls preflight yet. The Docker lane bakes the editor
-into its image, and the self-hosted lanes still expect a pre-installed editor at
-the default Hub path (`SELF_HOSTED_WINDOWS_RUNNER.md`,
-`SELF_HOSTED_MACOS_RUNNER.md`). A self-hosted job can adopt it as a step before
-the build:
+`reusable-build-platform.yml` runs preflight on every **self-hosted native
+build** (`build-engine: local` on a Windows or macOS runner), after the
+scheduler has picked the runner and before Unity starts:
 
-```yaml
-- name: Unity preflight
-  id: unity
-  shell: bash
-  run: >
-    bash .ci/unity-build-workflows/scripts/unity-preflight.sh
-    --project . --platform "${{ matrix.platform }}" --format github-actions
-# later steps: ${{ steps.unity.outputs.unity_editor }}
+```text
+scheduler → runner → checkout → toolkit checkout (.toolkit) → Unity preflight → existing build
 ```
 
-Use `--check` there if the runner must never install on its own.
+| Lane | Preflight | Editor |
+|---|---|---|
+| Docker (`build-engine: docker`, any runner) | never | the one inside the GameCI / unityci image |
+| Native Windows / macOS (`build-engine: local`) | always | the one preflight reports |
+
+- **Inputs:** the step passes the job's `project-path` and `platform`. An
+  Addressables-only job asks for the editor alone. The module list comes from
+  preflight's own platform table, not from the YAML.
+- **Version:** the version comes from `ProjectVersion.txt`. If the
+  `unity-version` input disagrees with it, the step fails ("Unity version
+  mismatch") rather than building with another editor. `unity-version-used`
+  reports preflight's version.
+- **Editor propagation:** the step writes `unity_editor` (and the other keys)
+  to `$GITHUB_OUTPUT`. The Addressables pre-step and both native build steps
+  run exactly `steps.unity-preflight.outputs.unity_editor`. No Hub path is
+  rebuilt from the version any more. If preflight fails, the job stops there
+  and Unity never starts.
+- **Unity CLI:** if the runner has no Unity CLI, preflight installs it once
+  with Unity's own installer into `$UNITY_PREFLIGHT_CLI_HOME`, defaulting to
+  `$RUNNER_TOOL_CACHE/unity-cli`. Later jobs reuse it. The Hub is never used
+  as a fallback in CI (`--cli unity`).
+- **No elevation:** the step sets `UNITY_NO_ELEVATE=1`. A runner cannot answer
+  a UAC prompt, so before installing anything preflight checks that the
+  install root is writable by the runner account. If it isn't, the step fails
+  (exit 3) and names the fix.
+- **Idempotent and concurrent:** an editor or module already present is
+  reused. Jobs that start together on one machine share preflight's install
+  lock and install once.
+
+### Runner prerequisites
+
+| Prerequisite | Why | How |
+|---|---|---|
+| Python 3.8+ | preflight, and the build job's existing `python3` steps | python.org / `winget install Python.Python.3.12` / Homebrew |
+| Bash | the step runs in `shell: bash` | Git for Windows; built in on macOS |
+| A writable install root | installs must not need UAC/sudo | the runner's `.env`: `UNITY_PREFLIGHT_INSTALL_ROOT=D:\unity-editors` (Windows) or `=/Users/runner/unity-editors` (macOS) |
+| Unity license activated for the runner account | unchanged: native lanes use the machine's own activation | `SELF_HOSTED_WINDOWS_RUNNER.md` §4, `SELF_HOSTED_MACOS_RUNNER.md` §3 |
+| Xcode (macOS / iOS) | unchanged: preflight checks it, never installs it | `SELF_HOSTED_MACOS_RUNNER.md` §2.1 |
+
+`UNITY_PREFLIGHT_INSTALL_ROOT` sets the Unity CLI's persisted install path for
+the runner account. Preflight changes that setting only right before an
+install, and only when it differs. A runner that already has its editors in a
+writable place needs nothing. A runner that keeps the default
+`C:\Program Files\Unity\Hub\Editor` works while its editors are already
+installed there. The first install that is actually needed fails with the
+writability message instead of hanging on UAC.
+
+Variables in the runner's `.env` file reach every job on that runner. Other
+useful ones are `UNITY_PREFLIGHT_LOCK_DIR` (a shared lock directory when
+several runner services on one machine use different OS accounts) and
+`UNITY_PREFLIGHT_CLI_HOME`.
 
 ## Testing
 

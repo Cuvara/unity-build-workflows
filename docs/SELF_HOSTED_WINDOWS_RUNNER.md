@@ -39,8 +39,9 @@ container this is handled by the `personal-combined` strategy (see
 | Personal/free licence with no serial | `UNITY_SERIAL` does not exist for Personal; local Hub activation avoids the online activation step entirely |
 
 **In this lane:**
-- Unity Hub and Unity Editor are **pre-installed and pre-activated on the runner
-  machine** — no activation occurs in CI.
+- Unity is **pre-activated on the runner machine** — no activation occurs in
+  CI. The editor itself is installed by hand or, when missing, by Unity
+  preflight at the start of the job ([UNITY_PREFLIGHT.md](UNITY_PREFLIGHT.md)).
 - No `UNITY_LICENSE`, `UNITY_EMAIL`, or `UNITY_PASSWORD` secrets are required.
 - No Docker is required on the runner.
 - The `activation-strategy` input is **ignored** — the pre-activated local
@@ -115,12 +116,18 @@ Install Unity Editor **6000.0.26f1** (the version SSOT in
 > All modules listed above must be installed — missing a module causes Unity to
 > exit with `Error: target platform not supported`.
 
-**Scripted alternative.** If the Unity CLI (or Unity Hub) and Python 3.8+ are
-installed, the editor and modules can be installed from the project's own
-`ProjectVersion.txt` instead of by hand. Run this from Git Bash as the runner's
-user:
-`bash scripts/unity-preflight.sh --project <project> --platform Android,WebGL,Linux64`.
-See [UNITY_PREFLIGHT.md](UNITY_PREFLIGHT.md).
+**Installing by hand is optional now.** Each native job runs Unity preflight
+before building. It installs the editor version from the project's
+`ProjectVersion.txt` and the modules for that job's platform through the Unity
+CLI when they are missing, and the build runs the `Unity.exe` preflight
+reports. It needs:
+- Python 3.8+;
+- an install root the runner account can write **without UAC**, set in the
+  runner's `.env` as `UNITY_PREFLIGHT_INSTALL_ROOT=D:\unity-editors`.
+
+`C:\Program Files` is not writable by a standard runner account. Editors
+already installed by hand are reused. See
+[UNITY_PREFLIGHT.md § In CI](UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes).
 
 ### 3.3 Git
 
@@ -254,8 +261,9 @@ Build step shell selection:
     "%UNITY_EXE%" -batchmode -buildTarget %BUILD_TARGET% ...
 ```
 
-Unity Editor is located by the step at the default Hub installation path:
-`C:\Program Files\Unity\Hub\Editor\6000.0.26f1\Editor\Unity.exe`.
+`UNITY_EXE` is the editor that the job's Unity preflight step reported
+(`steps.unity-preflight.outputs.unity_editor`). That's the exact version from
+`ProjectVersion.txt`, installed by preflight if it was missing.
 
 ---
 
@@ -361,7 +369,7 @@ either re-register with `--labels self-hosted,windows` or change
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `Unity.exe not found at expected path` | Editor not installed via Hub, or wrong version | Install Unity **6000.0.26f1** via Unity Hub |
+| `Unity preflight did not provide an editor executable` / preflight step failed | The preflight step's own error says why: no Python, an unwritable install root, a failed download, or a version mismatch | Follow the remediation in that step's log; see [UNITY_PREFLIGHT.md § In CI](UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes) |
 | `Editor version mismatch` | A different Editor version is on PATH | Ensure only `6000.0.26f1` is installed, or set `UNITY_EXE` env var on the runner to the correct path |
 | `No valid Unity license` at build | Unity not activated, or runner service runs as a different user than Hub activation | Sign in to Unity Hub under the **same Windows user** the runner service runs as; re-activate |
 
