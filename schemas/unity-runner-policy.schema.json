@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/OWNER/unity-build-workflows/schemas/unity-runner-policy.schema.json",
+  "title": "UnityRunnerPolicy",
+  "description": "Runner scheduling policy for unity-build-workflows (ADR 004 stage 2c). Read from the RUNNER_POLICY repository variable (inline JSON) or the file named by RUNNER_POLICY_FILE (default .github/unity-runner-policy.json). Self-hosted runners are the primary execution path; GitHub-hosted is a managed provider the policy may allow. scripts/common/runner_scheduler.py enforces the same rules and also rejects anything that would weaken platform safety. See docs/MULTI_RUNNER_SCHEDULING.md.",
+  "type": "object",
+  "additionalProperties": false,
+
+  "definitions": {
+    "nonEmptyString": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "labelList": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/nonEmptyString" }
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["self-hosted-only", "self-hosted-preferred", "github-hosted"],
+      "description": "self-hosted-only: never GitHub-hosted, fail if no eligible self-hosted runner. self-hosted-preferred: self-hosted first, GitHub-hosted only if listed in fallback. github-hosted: use the GitHub-hosted provider directly, no runner discovery."
+    },
+    "job": {
+      "type": "string",
+      "enum": ["Android", "WebGL", "Linux64", "LinuxServer", "Windows64", "iOS", "UnityTests", "Addressables"]
+    },
+    "os": { "type": "string", "enum": ["linux", "macos", "windows"] },
+    "engine": { "type": "string", "enum": ["docker", "local"] },
+    "capabilities": {
+      "os": { "$ref": "#/definitions/os" },
+      "platforms": { "type": "array", "items": { "$ref": "#/definitions/job" } },
+      "build-engines": { "type": "array", "items": { "$ref": "#/definitions/engine" } },
+      "unity": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyString" } },
+      "xcode": { "type": "array", "items": { "$ref": "#/definitions/nonEmptyString" } }
+    },
+    "runner": {
+      "type": "object",
+      "description": "One physical/logical self-hosted runner. The key is its GitHub runner name. GitHub cannot target a runner by name, so `labels` must include a label unique to it (by convention, its name).",
+      "additionalProperties": false,
+      "required": ["labels"],
+      "properties": {
+        "labels": { "allOf": [{ "$ref": "#/definitions/labelList" }, { "minItems": 1 }] },
+        "group": { "type": "string" },
+        "os": { "$ref": "#/definitions/os" },
+        "platforms": { "$ref": "#/definitions/capabilities/platforms" },
+        "build-engines": { "$ref": "#/definitions/capabilities/build-engines" },
+        "unity": { "$ref": "#/definitions/capabilities/unity" },
+        "xcode": { "$ref": "#/definitions/capabilities/xcode" }
+      }
+    },
+    "pool": {
+      "type": "object",
+      "description": "A capability pool: any runner carrying every label (and in `group`, if set). Members are discovered from the inventory and filtered on capability before availability is considered.",
+      "additionalProperties": false,
+      "required": ["labels"],
+      "properties": {
+        "labels": { "allOf": [{ "$ref": "#/definitions/labelList" }, { "minItems": 1 }] },
+        "group": { "type": "string" },
+        "members": {
+          "description": "Optional member preference order (runner names). Unlisted members follow in name order.",
+          "$ref": "#/definitions/labelList"
+        },
+        "os": { "$ref": "#/definitions/os" },
+        "platforms": { "$ref": "#/definitions/capabilities/platforms" },
+        "build-engines": { "$ref": "#/definitions/capabilities/build-engines" },
+        "unity": { "$ref": "#/definitions/capabilities/unity" },
+        "xcode": { "$ref": "#/definitions/capabilities/xcode" }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "$ref": "#/definitions/mode" },
+        "build-engine": { "$ref": "#/definitions/engine" },
+        "priority": {
+          "description": "Runner or pool ids, most preferred first. `github-hosted` is not allowed here.",
+          "$ref": "#/definitions/labelList"
+        },
+        "fallback": {
+          "description": "Runner or pool ids, or `github-hosted` (mode self-hosted-preferred only), tried after the priority list.",
+          "$ref": "#/definitions/labelList"
+        },
+        "require": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "labels": { "$ref": "#/definitions/labelList" },
+            "unity": { "type": "string", "description": "\"project\" = the version in ProjectSettings/ProjectVersion.txt, or a literal version." },
+            "xcode": { "type": "string" }
+          }
+        },
+        "on-busy": { "type": "string", "enum": ["wait", "next"] },
+        "on-unavailable": { "type": "string", "enum": ["first", "fail"] }
+      }
+    }
+  },
+
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "mode": { "$ref": "#/definitions/mode" },
+    "availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "enum": ["auto", "api", "none"], "description": "auto: use the GitHub API when RUNNER_STATUS_TOKEN is set." },
+        "scope": { "type": "string", "enum": ["repo", "org", "both"] },
+        "on-busy": { "type": "string", "enum": ["wait", "next"] },
+        "on-unavailable": { "type": "string", "enum": ["first", "fail"] },
+        "timeout-seconds": { "type": "integer", "minimum": 1, "maximum": 60 }
+      }
+    },
+    "runners": {
+      "type": "object",
+      "propertyNames": { "not": { "const": "github-hosted" } },
+      "additionalProperties": { "$ref": "#/definitions/runner" }
+    },
+    "pools": {
+      "type": "object",
+      "propertyNames": { "not": { "const": "github-hosted" } },
+      "additionalProperties": { "$ref": "#/definitions/pool" }
+    },
+    "github-hosted": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "labels": {
+          "description": "GitHub-hosted image labels for the managed provider. Linux only (docker engine).",
+          "allOf": [{ "$ref": "#/definitions/labelList" }, { "minItems": 1 }]
+        }
+      }
+    },
+    "default": { "$ref": "#/definitions/section" },
+    "platforms": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/definitions/job" },
+      "additionalProperties": { "$ref": "#/definitions/section" }
+    }
+  }
+}

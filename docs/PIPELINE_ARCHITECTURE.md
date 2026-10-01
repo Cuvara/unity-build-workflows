@@ -66,6 +66,12 @@ Notify Discord
 Stages 05 and 06 do not exist in the build pipeline — they live in the release
 pipelines. That separation is the point: see §4.
 
+**Where each stage-02/03 node runs** is decided inside *Resolve Build Config*,
+by the runner scheduler. It makes one decision per platform row, plus Unity tests
+and Addressables, and records them in the `runner-selection` output. It adds no
+node to the graph. Without a runner policy, every node runs where it always has.
+See [MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md).
+
 ---
 
 ## 1a. Three layers — CI, Build, Release

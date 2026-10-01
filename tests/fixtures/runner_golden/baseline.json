@@ -1,0 +1,270 @@
+{
+  "ci-lane-none": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "DEVELOP_BUILD_PLATFORMS": "Android,WebGL",
+      "EVENT_NAME": "push",
+      "IN_PLATFORM": "None",
+      "REF_NAME": "develop"
+    },
+    "rows": {},
+    "runner-labels-by-platform": "{}",
+    "runner-labels-linux": "[\"ubuntu-latest\"]"
+  },
+  "default": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {},
+    "rows": {
+      "Android": "[\"ubuntu-latest\"]",
+      "Linux64": "[\"ubuntu-latest\"]",
+      "LinuxServer": "[\"ubuntu-latest\"]",
+      "WebGL": "[\"ubuntu-latest\"]",
+      "Windows64": "[\"ubuntu-latest\"]",
+      "iOS": "[\"macos-latest\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"ubuntu-latest\"],\"WebGL\":[\"ubuntu-latest\"],\"Linux64\":[\"ubuntu-latest\"],\"LinuxServer\":[\"ubuntu-latest\"],\"Windows64\":[\"ubuntu-latest\"],\"iOS\":[\"macos-latest\"]}",
+    "runner-labels-linux": "[\"ubuntu-latest\"]"
+  },
+  "default-ios-only": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "IN_PLATFORM": "iOS"
+    },
+    "rows": {
+      "iOS": "[\"macos-latest\"]"
+    },
+    "runner-labels-by-platform": "{\"iOS\":[\"macos-latest\"]}",
+    "runner-labels-linux": "[\"ubuntu-latest\"]"
+  },
+  "default-windows-only": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "IN_PLATFORM": "Windows"
+    },
+    "rows": {
+      "Windows64": "[\"ubuntu-latest\"]"
+    },
+    "runner-labels-by-platform": "{\"Windows64\":[\"ubuntu-latest\"]}",
+    "runner-labels-linux": "[\"ubuntu-latest\"]"
+  },
+  "labels-dispatch": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "IN_RUNNER_LABELS": "self-hosted,build-box"
+    },
+    "rows": {
+      "Android": "[\"self-hosted\",\"build-box\"]",
+      "Linux64": "[\"self-hosted\",\"build-box\"]",
+      "LinuxServer": "[\"self-hosted\",\"build-box\"]",
+      "WebGL": "[\"self-hosted\",\"build-box\"]",
+      "Windows64": "[\"self-hosted\",\"build-box\"]",
+      "iOS": "[\"self-hosted\",\"build-box\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"self-hosted\",\"build-box\"],\"WebGL\":[\"self-hosted\",\"build-box\"],\"Linux64\":[\"self-hosted\",\"build-box\"],\"LinuxServer\":[\"self-hosted\",\"build-box\"],\"Windows64\":[\"self-hosted\",\"build-box\"],\"iOS\":[\"self-hosted\",\"build-box\"]}",
+    "runner-labels-linux": "[\"self-hosted\",\"build-box\"]"
+  },
+  "labels-dispatch-json": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "IN_RUNNER_LABELS": "[\"self-hosted\",\"macOS\"]"
+    },
+    "rows": {
+      "Android": "[\"self-hosted\",\"macOS\"]",
+      "Linux64": "[\"self-hosted\",\"macOS\"]",
+      "LinuxServer": "[\"self-hosted\",\"macOS\"]",
+      "WebGL": "[\"self-hosted\",\"macOS\"]",
+      "Windows64": "[\"self-hosted\",\"macOS\"]",
+      "iOS": "[\"self-hosted\",\"macOS\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"self-hosted\",\"macOS\"],\"WebGL\":[\"self-hosted\",\"macOS\"],\"Linux64\":[\"self-hosted\",\"macOS\"],\"LinuxServer\":[\"self-hosted\",\"macOS\"],\"Windows64\":[\"self-hosted\",\"macOS\"],\"iOS\":[\"self-hosted\",\"macOS\"]}",
+    "runner-labels-linux": "[\"self-hosted\",\"macOS\"]"
+  },
+  "labels-none-sentinel": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "NEW_BUILD_ENGINE": "local",
+      "NEW_RUNNER_LABELS": "none",
+      "NEW_RUNNER_TYPE": "self-hosted"
+    },
+    "rows": {
+      "Android": "[\"ubuntu-latest\"]",
+      "Linux64": "[\"ubuntu-latest\"]",
+      "LinuxServer": "[\"ubuntu-latest\"]",
+      "WebGL": "[\"ubuntu-latest\"]",
+      "Windows64": "[\"ubuntu-latest\"]",
+      "iOS": "[\"macos-latest\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"ubuntu-latest\"],\"WebGL\":[\"ubuntu-latest\"],\"Linux64\":[\"ubuntu-latest\"],\"LinuxServer\":[\"ubuntu-latest\"],\"Windows64\":[\"ubuntu-latest\"],\"iOS\":[\"macos-latest\"]}",
+    "runner-labels-linux": "[\"ubuntu-latest\"]"
+  },
+  "labels-variable": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "NEW_RUNNER_LABELS": "self-hosted,build-box"
+    },
+    "rows": {
+      "Android": "[\"self-hosted\",\"build-box\"]",
+      "Linux64": "[\"self-hosted\",\"build-box\"]",
+      "LinuxServer": "[\"self-hosted\",\"build-box\"]",
+      "WebGL": "[\"self-hosted\",\"build-box\"]",
+      "Windows64": "[\"self-hosted\",\"build-box\"]",
+      "iOS": "[\"self-hosted\",\"build-box\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"self-hosted\",\"build-box\"],\"WebGL\":[\"self-hosted\",\"build-box\"],\"Linux64\":[\"self-hosted\",\"build-box\"],\"LinuxServer\":[\"self-hosted\",\"build-box\"],\"Windows64\":[\"self-hosted\",\"build-box\"],\"iOS\":[\"self-hosted\",\"build-box\"]}",
+    "runner-labels-linux": "[\"self-hosted\",\"build-box\"]"
+  },
+  "legacy-mode-auto": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "VAR_DEFAULT_RUNNER_MODE": "auto"
+    },
+    "rows": {
+      "Android": "[\"ubuntu-latest\"]",
+      "Linux64": "[\"ubuntu-latest\"]",
+      "LinuxServer": "[\"ubuntu-latest\"]",
+      "WebGL": "[\"ubuntu-latest\"]",
+      "Windows64": "[\"ubuntu-latest\"]",
+      "iOS": "[\"macos-latest\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"ubuntu-latest\"],\"WebGL\":[\"ubuntu-latest\"],\"Linux64\":[\"ubuntu-latest\"],\"LinuxServer\":[\"ubuntu-latest\"],\"Windows64\":[\"ubuntu-latest\"],\"iOS\":[\"macos-latest\"]}",
+    "runner-labels-linux": "[\"ubuntu-latest\"]"
+  },
+  "legacy-mode-docker": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "NEW_RUNNER_DEFAULT_MODE": "docker"
+    },
+    "rows": {
+      "Android": "[\"ubuntu-latest\"]",
+      "Linux64": "[\"ubuntu-latest\"]",
+      "LinuxServer": "[\"ubuntu-latest\"]",
+      "WebGL": "[\"ubuntu-latest\"]",
+      "Windows64": "[\"ubuntu-latest\"]",
+      "iOS": "[\"macos-latest\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"ubuntu-latest\"],\"WebGL\":[\"ubuntu-latest\"],\"Linux64\":[\"ubuntu-latest\"],\"LinuxServer\":[\"ubuntu-latest\"],\"Windows64\":[\"ubuntu-latest\"],\"iOS\":[\"macos-latest\"]}",
+    "runner-labels-linux": "[\"ubuntu-latest\"]"
+  },
+  "legacy-mode-macos": {
+    "activation-strategy": "none",
+    "build-engine": "local",
+    "env": {
+      "VAR_DEFAULT_RUNNER_MODE": "self-hosted-macos"
+    },
+    "rows": {
+      "Android": "[\"self-hosted\",\"macOS\"]",
+      "Linux64": "[\"self-hosted\",\"macOS\"]",
+      "LinuxServer": "[\"self-hosted\",\"macOS\"]",
+      "WebGL": "[\"self-hosted\",\"macOS\"]",
+      "Windows64": "[\"self-hosted\",\"macOS\"]",
+      "iOS": "[\"self-hosted\",\"macOS\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"self-hosted\",\"macOS\"],\"WebGL\":[\"self-hosted\",\"macOS\"],\"Linux64\":[\"self-hosted\",\"macOS\"],\"LinuxServer\":[\"self-hosted\",\"macOS\"],\"Windows64\":[\"self-hosted\",\"macOS\"],\"iOS\":[\"self-hosted\",\"macOS\"]}",
+    "runner-labels-linux": "[\"self-hosted\",\"macOS\"]"
+  },
+  "legacy-mode-windows": {
+    "activation-strategy": "none",
+    "build-engine": "local",
+    "env": {
+      "NEW_RUNNER_DEFAULT_MODE": "self-hosted-windows"
+    },
+    "rows": {
+      "Android": "[\"self-hosted\",\"windows\"]",
+      "Linux64": "[\"self-hosted\",\"windows\"]",
+      "LinuxServer": "[\"self-hosted\",\"windows\"]",
+      "WebGL": "[\"self-hosted\",\"windows\"]",
+      "Windows64": "[\"self-hosted\",\"windows\"]",
+      "iOS": "[\"self-hosted\",\"windows\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"self-hosted\",\"windows\"],\"WebGL\":[\"self-hosted\",\"windows\"],\"Linux64\":[\"self-hosted\",\"windows\"],\"LinuxServer\":[\"self-hosted\",\"windows\"],\"Windows64\":[\"self-hosted\",\"windows\"],\"iOS\":[\"self-hosted\",\"windows\"]}",
+    "runner-labels-linux": "[\"self-hosted\",\"windows\"]"
+  },
+  "selfhosted-docker-per-os": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "NEW_BUILD_ENGINE": "docker",
+      "NEW_RUNNER_LINUX_LABEL": "self-hosted,linux,docker",
+      "NEW_RUNNER_MACOS_LABEL": "self-hosted,macOS",
+      "NEW_RUNNER_TYPE": "self-hosted"
+    },
+    "rows": {
+      "Android": "[\"self-hosted\",\"linux\",\"docker\"]",
+      "Linux64": "[\"self-hosted\",\"linux\",\"docker\"]",
+      "LinuxServer": "[\"self-hosted\",\"linux\",\"docker\"]",
+      "WebGL": "[\"self-hosted\",\"linux\",\"docker\"]",
+      "Windows64": "[\"self-hosted\",\"linux\",\"docker\"]",
+      "iOS": "[\"self-hosted\",\"macOS\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"self-hosted\",\"linux\",\"docker\"],\"WebGL\":[\"self-hosted\",\"linux\",\"docker\"],\"Linux64\":[\"self-hosted\",\"linux\",\"docker\"],\"LinuxServer\":[\"self-hosted\",\"linux\",\"docker\"],\"Windows64\":[\"self-hosted\",\"linux\",\"docker\"],\"iOS\":[\"self-hosted\",\"macOS\"]}",
+    "runner-labels-linux": "[\"self-hosted\",\"linux\",\"docker\"]"
+  },
+  "selfhosted-local-named": {
+    "activation-strategy": "none",
+    "build-engine": "local",
+    "env": {
+      "NEW_BUILD_ENGINE": "local",
+      "NEW_RUNNER_LABELS": "mac-build",
+      "NEW_RUNNER_TYPE": "self-hosted"
+    },
+    "rows": {
+      "Android": "[\"mac-build\"]",
+      "Linux64": "[\"mac-build\"]",
+      "LinuxServer": "[\"mac-build\"]",
+      "WebGL": "[\"mac-build\"]",
+      "Windows64": "[\"mac-build\"]",
+      "iOS": "[\"mac-build\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"mac-build\"],\"WebGL\":[\"mac-build\"],\"Linux64\":[\"mac-build\"],\"LinuxServer\":[\"mac-build\"],\"Windows64\":[\"mac-build\"],\"iOS\":[\"mac-build\"]}",
+    "runner-labels-linux": "[\"mac-build\"]"
+  },
+  "selfhosted-local-per-os": {
+    "activation-strategy": "none",
+    "build-engine": "local",
+    "env": {
+      "NEW_BUILD_ENGINE": "local",
+      "NEW_RUNNER_LINUX_LABEL": "farm,linux",
+      "NEW_RUNNER_MACOS_LABEL": "farm,macOS",
+      "NEW_RUNNER_TYPE": "self-hosted",
+      "NEW_RUNNER_WINDOWS_LABEL": "farm,windows"
+    },
+    "rows": {
+      "Android": "[\"farm\",\"linux\"]",
+      "Linux64": "[\"farm\",\"linux\"]",
+      "LinuxServer": "[\"farm\",\"linux\"]",
+      "WebGL": "[\"farm\",\"linux\"]",
+      "Windows64": "[\"farm\",\"windows\"]",
+      "iOS": "[\"farm\",\"macOS\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"farm\",\"linux\"],\"WebGL\":[\"farm\",\"linux\"],\"Linux64\":[\"farm\",\"linux\"],\"LinuxServer\":[\"farm\",\"linux\"],\"Windows64\":[\"farm\",\"windows\"],\"iOS\":[\"farm\",\"macOS\"]}",
+    "runner-labels-linux": "[\"farm\",\"linux\"]"
+  },
+  "selfhosted-no-labels": {
+    "activation-strategy": "auto",
+    "build-engine": "docker",
+    "env": {
+      "NEW_BUILD_ENGINE": "local",
+      "NEW_RUNNER_TYPE": "self-hosted"
+    },
+    "rows": {
+      "Android": "[\"ubuntu-latest\"]",
+      "Linux64": "[\"ubuntu-latest\"]",
+      "LinuxServer": "[\"ubuntu-latest\"]",
+      "WebGL": "[\"ubuntu-latest\"]",
+      "Windows64": "[\"ubuntu-latest\"]",
+      "iOS": "[\"macos-latest\"]"
+    },
+    "runner-labels-by-platform": "{\"Android\":[\"ubuntu-latest\"],\"WebGL\":[\"ubuntu-latest\"],\"Linux64\":[\"ubuntu-latest\"],\"LinuxServer\":[\"ubuntu-latest\"],\"Windows64\":[\"ubuntu-latest\"],\"iOS\":[\"macos-latest\"]}",
+    "runner-labels-linux": "[\"ubuntu-latest\"]"
+  }
+}

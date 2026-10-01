@@ -137,6 +137,109 @@ def resolve_executor(target_platform: str, runner_os: str = None) -> str:
     )
 
 
+# ── Runner OS compatibility (runner scheduling) ────────────────────────────
+#
+# Which runner operating systems can execute a job, given the build engine and
+# the workflow lane that runs it. This is the hard platform-safety gate the
+# runner scheduler (runner_scheduler.py) applies before it looks at any policy:
+# a policy may narrow this set, never widen it.
+#
+# The table is derived from the steps that actually exist, not from what Unity
+# could do in principle:
+#
+#   pipeline lane (reusable-build-platform.yml / reusable-unity-tests.yml)
+#     docker  — game-ci container actions run on Linux only; a Windows host in
+#               Linux-container mode is driven by a separate `docker run` step
+#               that supports Android/WebGL/Linux64/LinuxServer and nothing else.
+#     local   — Unity Hub build steps exist for Windows and macOS only. There is
+#               no Linux + local step, so Linux is not a local target.
+#     iOS     — macOS + local, always. There is no docker path for Xcode.
+#
+#   standalone-docker lane (unity-build-{android,webgl,linux}.yml, unity-test.yml)
+#     run-unity-container is a bash `docker run`: Linux + docker only.
+#
+#   standalone-native lane (unity-build-ios.yml, unity-release-ios.yml,
+#   unity-test-ios.yml)
+#     iOS on macOS + local only.
+#
+# resolve_executor() above is the legacy single-runner contract and is left
+# untouched; its callers and tests predate per-engine routing.
+
+LANE_PIPELINE: str = "pipeline"
+LANE_STANDALONE_DOCKER: str = "standalone-docker"
+LANE_STANDALONE_NATIVE: str = "standalone-native"
+LANES = (LANE_PIPELINE, LANE_STANDALONE_DOCKER, LANE_STANDALONE_NATIVE)
+
+ENGINE_DOCKER: str = "docker"
+ENGINE_LOCAL: str = "local"
+ENGINES = (ENGINE_DOCKER, ENGINE_LOCAL)
+
+OS_LINUX: str = "linux"
+OS_MACOS: str = "macos"
+OS_WINDOWS: str = "windows"
+RUNNER_OSES = (OS_LINUX, OS_MACOS, OS_WINDOWS)
+
+# Matrix platform names, plus the two non-player Unity jobs of the pipeline.
+JOB_UNITY_TESTS: str = "UnityTests"
+JOB_ADDRESSABLES: str = "Addressables"
+PLAYER_JOBS = ("Android", "WebGL", "Linux64", "LinuxServer", "Windows64", "iOS")
+SCHEDULABLE_JOBS = PLAYER_JOBS + (JOB_UNITY_TESTS, JOB_ADDRESSABLES)
+
+_DOCKER_ON_WINDOWS = frozenset({"Android", "WebGL", "Linux64", "LinuxServer"})
+_STANDALONE_DOCKER_JOBS = frozenset({"Android", "WebGL", "Linux64", "LinuxServer", JOB_UNITY_TESTS})
+
+_NONE: frozenset = frozenset()
+
+
+def allowed_runner_os(job: str, engine: str, lane: str = LANE_PIPELINE) -> frozenset:
+    """Return the runner operating systems that can execute `job` with `engine`.
+
+    An empty set means the combination is unsupported and must be rejected
+    before scheduling. Unknown job, engine or lane names raise ValueError: a
+    typo in a policy must fail, not silently schedule nothing.
+    """
+    if job not in SCHEDULABLE_JOBS:
+        raise ValueError(
+            f"Unknown job '{job}'. Schedulable jobs: {', '.join(SCHEDULABLE_JOBS)}."
+        )
+    if engine not in ENGINES:
+        raise ValueError(f"Unknown build engine '{engine}'. Allowed: {', '.join(ENGINES)}.")
+    if lane not in LANES:
+        raise ValueError(f"Unknown lane '{lane}'. Allowed: {', '.join(LANES)}.")
+
+    if lane == LANE_STANDALONE_NATIVE:
+        if job == "iOS" and engine == ENGINE_LOCAL:
+            return frozenset({OS_MACOS})
+        return _NONE
+
+    if lane == LANE_STANDALONE_DOCKER:
+        if job in _STANDALONE_DOCKER_JOBS and engine == ENGINE_DOCKER:
+            return frozenset({OS_LINUX})
+        return _NONE
+
+    # pipeline lane
+    if job == "iOS":
+        return frozenset({OS_MACOS}) if engine == ENGINE_LOCAL else _NONE
+    if engine == ENGINE_LOCAL:
+        return frozenset({OS_WINDOWS, OS_MACOS})
+    if job in _DOCKER_ON_WINDOWS:
+        return frozenset({OS_LINUX, OS_WINDOWS})
+    return frozenset({OS_LINUX})
+
+
+def unsupported_combination_reason(job: str, engine: str, lane: str = LANE_PIPELINE) -> str:
+    """Human-readable reason for an empty allowed_runner_os() result."""
+    if job == "iOS" and engine == ENGINE_DOCKER:
+        return _ios_on_linux_error("iOS") + " (build-engine=docker has no iOS path)"
+    if lane == LANE_STANDALONE_DOCKER:
+        return (f"The standalone docker lane runs `{job}` only with build-engine=docker "
+                f"on a Linux runner.")
+    if lane == LANE_STANDALONE_NATIVE:
+        return (f"The standalone native lane builds iOS only, with build-engine=local "
+                f"on a macOS runner; `{job}` with build-engine={engine} is not supported.")
+    return f"`{job}` with build-engine={engine} is not supported on the {lane} lane."
+
+
 # ── CLI entry point ────────────────────────────────────────────────────────
 
 def main() -> None:

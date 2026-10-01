@@ -215,11 +215,19 @@ gh variable set RUNNER_LABELS  --repo "$ORG/<CONSUMER_REPO>" --body "self-hosted
 
 `RUNNER_LABELS` must match the registered labels exactly after comma-split, trim
 and dedup, or the job queues forever with *no runner matching labels found*. It
-also has a trap worth knowing: when `RUNNER_TYPE=self-hosted` is set and
-`RUNNER_LABELS` is left empty, the resolver falls back to the hardcoded
-`self-hosted,windows` regardless of the runner's actual OS
-(`scripts/common/resolve_build_flow.sh:588`). A Linux or macOS self-hosted runner
-therefore **must** set `RUNNER_LABELS` explicitly.
+is also the switch that names a machine. If `RUNNER_LABELS` and every per-OS
+label (`RUNNER_{LINUX,WINDOWS,MACOS}_LABEL`) are empty, the resolver falls back
+to GitHub-hosted + docker, even with `RUNNER_TYPE=self-hosted`, and warns.
+(Before 5.2.0 it silently used `self-hosted,windows` instead.)
+
+**Several machines, or runner groups?** A runner policy can target a group
+directly (`"group": "unity-windows"` on a pool or runner becomes
+`runs-on: {group, labels}`). With an org-scoped `RUNNER_STATUS_TOKEN`
+(organization **Self-hosted runners: read**) and `availability.scope: org`, it
+also sees which group members are online and busy. Without such a token, group
+membership is *unknown*. The scheduler then never guesses members from labels
+and never pins a runner: it targets the group itself. See
+[MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md#4-runner-groups).
 
 Per-run override, without touching any variable:
 
@@ -233,8 +241,9 @@ gh workflow run unity-build.yml --repo "$ORG/<CONSUMER_REPO>" --ref develop \
 
 > The legacy single-axis variable `RUNNER_DEFAULT_MODE=self-hosted-windows` still
 > works and maps to `RUNNER_TYPE=self-hosted` + `BUILD_ENGINE=local` with labels
-> `self-hosted,windows` (`resolve_build_flow.sh:538-541`), but the resolver logs a
-> deprecation note. Use the two-axis variables in a new setup.
+> `self-hosted,windows` (the legacy-mode mapping in
+> `scripts/common/resolve_build_flow.sh`), but the resolver logs a deprecation
+> note. Use the two-axis variables in a new setup.
 
 ### What actually moves to your machine
 

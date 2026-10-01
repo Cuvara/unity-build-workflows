@@ -155,6 +155,32 @@ option** for Personal licenses too — it's just more setup.
    comma-split/trim/dedup) or the job queues indefinitely with "no runner
    matching labels found."
 
+## Multi-Runner Scheduling
+
+`RUNNER_TYPE`, `BUILD_ENGINE` and `RUNNER_LABELS` describe **one** runner
+pool for the whole run. When you have several machines — a Mac for iOS, a Linux
+Docker host for Android, a Windows box for IL2CPP — add a **runner policy**
+(`.github/unity-runner-policy.json` or the `RUNNER_POLICY` variable) and the
+runner scheduler picks a runner **per Unity job**:
+
+- **self-hosted first**: it looks for a self-hosted runner that can build the job
+  (capabilities: OS, engine, platforms, Unity, Xcode, labels) and is online and
+  idle, in the priority order you give;
+- **explicit fallback**: other runners or pools, and GitHub-hosted only if you
+  allow it (`mode: self-hosted-preferred` + `"fallback": ["github-hosted"]`);
+- **platform safety is not configurable**: iOS never goes to Linux, Docker or
+  GitHub-hosted, and Windows64 never goes to Docker on a Windows host;
+- **availability** comes from the GitHub runner API when you provide the
+  read-only `RUNNER_STATUS_TOKEN` secret; without it, scheduling uses declared
+  capabilities with availability `unknown`;
+- **per-row engine**: a policy can build iOS with `local` Unity while the rest of
+  the run uses `docker`.
+
+The two axes on this page stay independent. The policy decides *where* each job
+runs (and may set its engine). With no policy, everything on this page applies
+exactly as written. The full guide, with Android and iOS examples, is
+[MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md).
+
 ## Known limitations
 
 - **`self-hosted` + `docker`** needs Docker Desktop (or Docker Engine) running
@@ -174,6 +200,8 @@ option** for Personal licenses too — it's just more setup.
 
 ## See also
 
+- [MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md) — runner policy:
+  priority, fallback, pools, groups, availability, per-job routing.
 - [REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md#runner) — variable
   reference, defaults, and the legacy `RUNNER_DEFAULT_MODE` migration table.
 - [BRANCH_FLOW_CONTRACT.md](BRANCH_FLOW_CONTRACT.md) — full resolver

@@ -658,7 +658,14 @@ elif [[ "${_machine_named}" == "false" ]]; then
     _labels_forced_github="true"
     if [[ -n "${_rt_explicit}" && "${_rt_explicit}" != "github-hosted" ]] \
        || [[ -n "${_be_explicit}" && "${_be_explicit}" != "docker" ]]; then
-        log_warn "RUNNER_LABELS is empty, so no runner is named: falling back to github-hosted + docker (RUNNER_TYPE='${_rt_explicit:-unset}', BUILD_ENGINE='${_be_explicit:-unset}' ignored). Set RUNNER_LABELS to the label your machine carries."
+        if [[ "${RUNNER_POLICY_PRESENT:-false}" == "true" ]]; then
+            # With a runner policy the per-job machines come from the policy
+            # (runner_scheduler.py); only the run-wide defaults -- what a job the
+            # policy does not cover gets -- fall back here.
+            log_info "RUNNER_LABELS is empty: run-wide defaults fall back to github-hosted + docker (RUNNER_TYPE='${_rt_explicit:-unset}', BUILD_ENGINE='${_be_explicit:-unset}'); jobs the runner policy covers are scheduled by it."
+        else
+            log_warn "RUNNER_LABELS is empty, so no runner is named: falling back to github-hosted + docker (RUNNER_TYPE='${_rt_explicit:-unset}', BUILD_ENGINE='${_be_explicit:-unset}' ignored). Set RUNNER_LABELS to the label your machine carries."
+        fi
     fi
 else
     if [[ -n "${_rt_explicit}" ]]; then
@@ -727,12 +734,19 @@ case "${runner_type}:${build_engine}" in
 esac
 
 # --- activation-strategy -------------------------------------------------------
-if [[ "${build_engine}" == "local" ]]; then
-    activation_strategy="none"
-elif [[ -n "${IN_ACTIVATION_STRATEGY}" ]]; then
-    activation_strategy="${IN_ACTIVATION_STRATEGY}"
+# Resolved for both engines: the run uses the one matching its build engine, and
+# the runner scheduler hands the other to a job its policy moves across engines
+# (e.g. a local iOS row in a docker run) -- so the rule lives here only.
+activation_strategy_local="none"
+if [[ -n "${IN_ACTIVATION_STRATEGY}" ]]; then
+    activation_strategy_docker="${IN_ACTIVATION_STRATEGY}"
 else
-    activation_strategy="auto"
+    activation_strategy_docker="auto"
+fi
+if [[ "${build_engine}" == "local" ]]; then
+    activation_strategy="${activation_strategy_local}"
+else
+    activation_strategy="${activation_strategy_docker}"
 fi
 
 # --- backward bridge: derive legacy runner-mode for unmigrated consumers ------
@@ -1362,6 +1376,8 @@ emit "execution-strategy"      "${execution_strategy}"
 emit "runner-labels"           "${runner_labels_json}"
 emit "runner-labels-csv"       "${runner_labels_csv}"
 emit "activation-strategy"     "${activation_strategy}"
+emit "activation-strategy-docker" "${activation_strategy_docker}"
+emit "activation-strategy-local"  "${activation_strategy_local}"
 emit "runner-type-source"      "${runner_type_source}"
 emit "build-engine-source"     "${build_engine_source}"
 emit "runner-labels-source"    "${runner_labels_source}"

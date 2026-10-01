@@ -225,10 +225,20 @@ resolver computes a label list and the job consumes it verbatim
 runs-on: ${{ fromJSON(inputs.runner-labels != '' && inputs.runner-labels || '["ubuntu-latest"]') }}
 ```
 
-`runner-labels` comes from `RUNNER_LABELS`, or — for the legacy
-`runner-mode: self-hosted-windows` path — from the hardcoded
-`self-hosted,windows` mapping at `resolve_build_flow.sh:538-541`. So the labels
-the job asks for are those two, not the three this document previously showed.
+`runner-labels` comes from `RUNNER_LABELS`, from `RUNNER_WINDOWS_LABEL` for
+Windows64 under `BUILD_ENGINE=local`, or, on the legacy
+`RUNNER_DEFAULT_MODE=self-hosted-windows` path, from the `self-hosted,windows`
+legacy-mode mapping in `scripts/common/resolve_build_flow.sh`. With a runner
+policy, it comes from the runner the scheduler selected for that platform
+([MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md)). Either way the labels
+the job asks for are the ones you registered, not the three this document
+previously showed.
+
+**Scheduling several Windows machines.** Give each runner a label unique to it
+(its name, e.g. `--labels self-hosted,windows,win-build-01`), list them in a
+policy's `platforms.Windows64.priority`, and set `"build-engine": "local"`.
+Windows64 never goes to docker on a Windows host. The docker Windows path builds
+only Android, WebGL, Linux64 and LinuxServer.
 
 Build step shell selection:
 

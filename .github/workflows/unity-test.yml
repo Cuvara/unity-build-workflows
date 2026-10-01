@@ -3,6 +3,14 @@ name: Unity Test
 on:
   workflow_call:
     inputs:
+      runner-label:
+        description: >-
+          Runner label(s) for the Unity job, comma-separated. Empty (default)
+          uses the repository's runner policy when one exists, otherwise
+          `ubuntu-latest` as before. A value here wins over the policy.
+        type: string
+        required: false
+        default: ''
       project-path:
         description: Path to the Unity project root relative to the consumer repo root
         type: string
@@ -80,6 +88,12 @@ on:
         default: tools/unity-build-workflows
 
     secrets:
+      RUNNER_STATUS_TOKEN:
+        description: >-
+          Optional read-only token for runner availability (repository
+          Administration: read, or organization Self-hosted runners: read).
+          See docs/MULTI_RUNNER_SCHEDULING.md.
+        required: false
       UNITY_LICENSE:
         required: false
       UNITY_EMAIL:
@@ -96,9 +110,129 @@ on:
         value: ${{ jobs.test.outputs.test-report-artifact }}
 
 jobs:
+  # ── Runner selection (ADR 004 stage 2c) ──────────────────────────────────
+  # Chooses the runner the Unity job below runs on, before that job exists:
+  # runs-on cannot be decided from inside the job it schedules.
+  #
+  # This job runs on GitHub-hosted ubuntu-latest, and ONLY when a runner policy
+  # is opted in through a repository/organization variable (RUNNER_POLICY or
+  # RUNNER_POLICY_FILE) and no explicit runner label was passed. Otherwise it is
+  # skipped and the Unity job below uses the explicit label, else
+  # `ubuntu-latest` -- exactly the routing this workflow had before runner
+  # scheduling, with no extra GitHub-hosted job. When it runs,
+  # runner_scheduler.py looks for an eligible, available self-hosted runner on
+  # the standalone-docker lane; if it cannot, it fails here with a report instead of
+  # leaving the Unity job queued. See docs/MULTI_RUNNER_SCHEDULING.md.
+  resolve-runner:
+    name: Select runner
+    if: ${{ (vars.RUNNER_POLICY != '' || vars.RUNNER_POLICY_FILE != '') && inputs.runner-label == '' }}
+    runs-on: ubuntu-latest
+    outputs:
+      runs-on:         ${{ steps.select.outputs.runs-on }}
+      selected-target: ${{ steps.select.outputs.selected-target }}
+    steps:
+      - name: Checkout runner policy
+        uses: actions/checkout@v4
+        with:
+          path: project
+          lfs: false
+          persist-credentials: ${{ inputs.integration-mode == 'submodule' }}
+          # The policy file only -- and in submodule mode the toolkit's gitlink,
+          # so the scheduler can be checked out when a policy applies.
+          sparse-checkout: |
+            ${{ vars.RUNNER_POLICY_FILE || '.github/unity-runner-policy.json' }}
+            ${{ inputs.integration-mode == 'submodule' && inputs.toolkit-path || vars.RUNNER_POLICY_FILE || '.github/unity-runner-policy.json' }}
+          sparse-checkout-cone-mode: false
+
+      - name: Decide whether a runner policy applies
+        id: need
+        shell: bash
+        env:
+          RUNNER_POLICY:      ${{ vars.RUNNER_POLICY || '' }}
+          RUNNER_POLICY_FILE: ${{ vars.RUNNER_POLICY_FILE || '.github/unity-runner-policy.json' }}
+          EXPLICIT_LABEL:     ${{ inputs.runner-label }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${EXPLICIT_LABEL}" ]] \
+             && { [[ -n "${RUNNER_POLICY}" ]] || [[ -f "project/${RUNNER_POLICY_FILE}" ]]; }; then
+            echo "scheduler=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "scheduler=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout toolkit (remote mode)
+        if: steps.need.outputs.scheduler == 'true' && inputs.integration-mode != 'submodule'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.workflow-repository }}
+          ref:        ${{ inputs.workflow-ref }}
+          path:       .ci/unity-build-workflows
+          sparse-checkout: scripts/common
+          persist-credentials: false
+
+      - name: Select runner
+        id: select
+        shell: bash
+        env:
+          SCHEDULER:              ${{ steps.need.outputs.scheduler }}
+          INTEGRATION_MODE:       ${{ inputs.integration-mode }}
+          TOOLKIT_PATH_INPUT:     ${{ inputs.toolkit-path }}
+          RS_JOBS:                UnityTests
+          RS_LANE:                standalone-docker
+          RS_LEGACY_BUILD_ENGINE: docker
+          RS_LEGACY_ACTIVATION:   auto
+          RS_FALLBACK_LABELS:     ubuntu-latest
+          RS_EXPLICIT_LABELS:     ${{ inputs.runner-label }}
+          RS_UNITY_VERSION:       ${{ inputs.unity-version }}
+          RUNNER_POLICY:          ${{ vars.RUNNER_POLICY || '' }}
+          RUNNER_POLICY_FILE:     ${{ vars.RUNNER_POLICY_FILE || '.github/unity-runner-policy.json' }}
+          # Read-only runner-status token; sent only as an Authorization header.
+          RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "${SCHEDULER}" != "true" ]]; then
+            # No policy applies: the caller's explicit label, else the label this
+            # workflow has always used. Nothing to schedule, nothing to fetch.
+            if [[ -n "${RS_EXPLICIT_LABELS}" ]]; then
+              labels="${RS_EXPLICIT_LABELS}"; why="explicit runner label input"
+            else
+              labels="${RS_FALLBACK_LABELS}"; why="no runner policy applies"
+            fi
+            labels="${labels//[\[\]\"]/}"
+            json="["; sep=""
+            for label in ${labels//,/ }; do json+="${sep}\"${label}\""; sep=","; done
+            json+="]"
+            echo "Runner selection: runs-on=${json} (${why})"
+            echo "runs-on=${json}" >> "$GITHUB_OUTPUT"
+            echo "selected-target=${labels}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${INTEGRATION_MODE:-remote}" == "submodule" ]]; then
+            TP="${TOOLKIT_PATH_INPUT:-tools/unity-build-workflows}"
+            if [[ "$TP" == /* ]] || [[ "$TP" == *..* ]]; then
+              echo "::error::toolkit-path must be a relative path with no '..' components. Got: '$TP'"
+              exit 1
+            fi
+            git -C project submodule update --init --depth 1 -- "${TP}"
+            TOOLKIT="$(pwd)/project/${TP}"
+          else
+            TOOLKIT="$(pwd)/.ci/unity-build-workflows"
+          fi
+          if [[ ! -f "${TOOLKIT}/scripts/common/runner_scheduler.py" ]]; then
+            echo "::error title=Runner scheduler missing::A runner policy applies, but the toolkit at '${TOOLKIT}' has no scripts/common/runner_scheduler.py. Check workflow-repository/workflow-ref (remote mode) or toolkit-path (submodule mode), or pass the runner label explicitly."
+            exit 1
+          fi
+          # The policy file is resolved from the consumer checkout's root.
+          cd project
+          python3 "${TOOLKIT}/scripts/common/runner_scheduler.py"
+
   test:
     name: Run Tests (${{ inputs.test-level }})
-    runs-on: ubuntu-latest
+    needs: [resolve-runner]
+    # Skipped resolver (no policy opted in, or an explicit label) is the
+    # normal case, not a failure.
+    if: ${{ !cancelled() && (needs.resolve-runner.result == 'success' || needs.resolve-runner.result == 'skipped') }}
+    runs-on: ${{ needs.resolve-runner.result == 'success' && fromJSON(needs.resolve-runner.outputs.runs-on) || inputs.runner-label || 'ubuntu-latest' }}
     outputs:
       tests-passed: ${{ steps.check-results.outputs.tests-passed }}
       test-report-artifact: ${{ steps.set-artifact-name.outputs.artifact-name }}

@@ -1,0 +1,31 @@
+{
+  "$schema": "../../schemas/unity-runner-policy.schema.json",
+  "version": 1,
+  "mode": "self-hosted-preferred",
+  "availability": { "source": "auto", "scope": "repo", "on-busy": "wait", "on-unavailable": "first" },
+
+  "runners": {
+    "ios-build-01": { "labels": ["self-hosted", "macOS", "ios-build-01"], "platforms": ["iOS"],
+                      "build-engines": ["local"], "xcode": ["16"], "unity": ["6000.0.26f1"] },
+    "ios-build-02": { "labels": ["self-hosted", "macOS", "ios-build-02"], "platforms": ["iOS"],
+                      "build-engines": ["local"], "xcode": ["16"], "unity": ["6000.0.26f1"] },
+    "android-build-01": { "labels": ["self-hosted", "linux", "android-build-01"],
+                          "build-engines": ["docker"] }
+  },
+
+  "pools": {
+    "linux-docker-pool": { "labels": ["self-hosted", "linux", "unity-docker"], "os": "linux" }
+  },
+
+  "platforms": {
+    "iOS": {
+      "mode": "self-hosted-only",
+      "priority": ["ios-build-01", "ios-build-02"],
+      "require": { "unity": "project", "xcode": "16" }
+    },
+    "Android": {
+      "priority": ["android-build-01", "linux-docker-pool"],
+      "fallback": ["github-hosted"]
+    }
+  }
+}
