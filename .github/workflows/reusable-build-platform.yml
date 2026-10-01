@@ -390,6 +390,15 @@ on:
       APP_STORE_CONNECT_PRIVATE_KEY:
         description: App Store Connect API private key (.p8 content). Required for iOS Fastlane upload.
         required: false
+      ANDROID_KEYSTORE_PASS:
+        description: >-
+          Password of the project's custom Android keystore. Exposed only to the
+          native (build-engine=local) build steps, where PlayerBuilder applies it
+          for the build. Optional.
+        required: false
+      ANDROID_KEY_PASS:
+        description: Password of the key alias. Optional — defaults to ANDROID_KEYSTORE_PASS.
+        required: false
 
     outputs:
       result:
@@ -1195,6 +1204,9 @@ jobs:
         shell: cmd
         env:
           UNITY_EDITOR: ${{ steps.unity-preflight.outputs.unity_editor }}
+          # Read by PlayerBuilder for a project with a custom Android keystore.
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
         run: |
           @echo off
           setlocal EnableDelayedExpansion
@@ -1282,6 +1294,9 @@ jobs:
         shell: bash
         env:
           UNITY_EDITOR: ${{ steps.unity-preflight.outputs.unity_editor }}
+          # Read by PlayerBuilder for a project with a custom Android keystore.
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
         run: |
           set -euo pipefail
           PROJECT="${{ inputs.project-path }}"

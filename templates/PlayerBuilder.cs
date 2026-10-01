@@ -19,9 +19,17 @@
 //   BUILD_OUTPUT_DIR    always "build"; the artifact upload takes build/
 //   ANDROID_APP_BUNDLE  "true" for an .aab, otherwise an .apk
 //   -buildTarget        already applied by Unity before this method runs
-//   Nothing else. Android signing is a POST-BUILD host step
-//   (scripts/android/sign_android_build.sh) on the unity-build-android.yml
-//   path, so no keystore variables reach the Editor here — do not read them.
+//   ANDROID_KEYSTORE_PASS / ANDROID_KEY_PASS
+//                       only on the native lanes, from the optional secrets of
+//                       the same names. Used only when the project signs with
+//                       its own keystore (Player Settings > Publishing
+//                       Settings > Custom Keystore): Unity never saves keystore
+//                       passwords in the project, so batchmode cannot sign
+//                       without them. Applied in memory for this build; never
+//                       written to disk or logged.
+//   Projects without a custom keystore get Unity's debug signing, as before;
+//   release signing on the unity-build-android.yml path is still a post-build
+//   host step (scripts/android/sign_android_build.sh).
 
 using System;
 using System.IO;
@@ -75,6 +83,10 @@ public static class PlayerBuilder
             if (target == BuildTarget.Android)
             {
                 EditorUserBuildSettings.buildAppBundle = appBundle;
+                if (!ApplyAndroidKeystorePasswords())
+                {
+                    return;
+                }
             }
 
             string targetDir = Path.Combine(outputRoot, target.ToString());
@@ -110,6 +122,40 @@ public static class PlayerBuilder
         {
             Fail($"Unhandled exception: {e}");
         }
+    }
+
+    /// <summary>
+    /// A project that signs with its own keystore needs its passwords, which
+    /// Unity keeps only in memory. Applies ANDROID_KEYSTORE_PASS /
+    /// ANDROID_KEY_PASS when the project has a custom keystore; fails with the
+    /// fix when they are missing, instead of Unity's "Can not sign the
+    /// application". Returns false after failing.
+    /// </summary>
+    private static bool ApplyAndroidKeystorePasswords()
+    {
+        if (!PlayerSettings.Android.useCustomKeystore)
+        {
+            return true;
+        }
+
+        string storePass = Environment.GetEnvironmentVariable("ANDROID_KEYSTORE_PASS");
+        string keyPass = Environment.GetEnvironmentVariable("ANDROID_KEY_PASS");
+        if (string.IsNullOrEmpty(storePass))
+        {
+            Fail("This project signs Android builds with its own keystore ("
+                 + PlayerSettings.Android.keystoreName + ", alias "
+                 + PlayerSettings.Android.keyaliasName + "), but no password reached "
+                 + "the build. Add repository secrets ANDROID_KEYSTORE_PASS (and "
+                 + "ANDROID_KEY_PASS if the alias password differs) and pass them "
+                 + "to unity-pipeline.yml.");
+            return false;
+        }
+
+        PlayerSettings.Android.keystorePass = storePass;
+        PlayerSettings.Android.keyaliasPass = string.IsNullOrEmpty(keyPass) ? storePass : keyPass;
+        Debug.Log("[PlayerBuilder] Signing with the project's keystore "
+                  + $"({PlayerSettings.Android.keystoreName}, alias {PlayerSettings.Android.keyaliasName}).");
+        return true;
     }
 
     /// <summary>Product name for each target, with the extension CI expects.</summary>

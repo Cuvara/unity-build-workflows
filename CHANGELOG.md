@@ -8,6 +8,23 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Custom Android keystore on self-hosted native lanes.** Found on a real
+  self-hosted Mac: a project with Player Settings > Custom Keystore enabled
+  failed with "Can not sign the application … please provide passwords!".
+  Unity never stores keystore passwords in the project.
+  - `unity-pipeline.yml` and `reusable-build-platform.yml` accept two optional
+    secrets, `ANDROID_KEYSTORE_PASS` and `ANDROID_KEY_PASS`. They are exposed
+    only to the two native build steps, through `env:`, and never echoed.
+  - `templates/PlayerBuilder.cs` applies them in memory when the project uses
+    a custom keystore. If they are missing, it fails with a message naming the
+    keystore. Projects without a custom keystore are unchanged.
+  - Consumers pass the secrets from their caller. See
+    [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md).
+
 ## [6.5.1] — 2026-10-01
 
 ### Fixed
