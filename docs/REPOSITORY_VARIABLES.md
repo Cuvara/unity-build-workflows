@@ -196,10 +196,23 @@ architecture, diagrams, and licensing guidance per mode.
 | `BUILD_ENGINE` | `docker`, `local` | `docker` | all flows | HOW Unity builds. |
 | `RUNNER_LABELS` | comma-separated labels | *(derived, see below)* | all flows | `runs-on` labels for the job. |
 
-`RUNNER_LABELS` default when unset is derived from `RUNNER_TYPE`:
+`RUNNER_LABELS` is **the switch that names a machine**. When it is unset (or
+set to `none`, `off` or `disabled`) and none of the per-OS labels below is set
+either, no self-hosted machine has been named, so the run falls back to
+`github-hosted` + `docker` + `ubuntu-latest`. This happens even if
+`RUNNER_TYPE=self-hosted` or `BUILD_ENGINE=local` is set, and a warning says so.
+GitHub queues a job whose labels match no runner indefinitely rather than failing
+it, so a build on GitHub's runners is the better default. `none` exists because
+GitHub rejects an empty variable value (`422 Variable value cannot be empty`).
+
+When a machine *is* named, an unset `RUNNER_LABELS` defaults to:
 
 - `RUNNER_TYPE=github-hosted` → `ubuntu-latest`
-- `RUNNER_TYPE=self-hosted` → `self-hosted,windows`
+- `RUNNER_TYPE=self-hosted` → `RUNNER_LINUX_LABEL`, else `self-hosted,linux`
+
+(Before 5.2.0 the self-hosted default was `self-hosted,windows` for every
+project. Its only remnant is the legacy `RUNNER_DEFAULT_MODE=self-hosted-windows`
+mapping below.)
 
 ```
 RUNNER_TYPE=github-hosted
@@ -213,9 +226,16 @@ Each of the three settings above is resolved independently, in this order:
 
 1. `workflow_dispatch` input (`runner-type` / `build-engine` / `runner-labels`)
 2. Repository variable (`RUNNER_TYPE` / `BUILD_ENGINE` / `RUNNER_LABELS`)
-3. Legacy `RUNNER_DEFAULT_MODE` mapping (see migration table below) — only
-   consulted when neither of the above is set
+3. Legacy `RUNNER_DEFAULT_MODE` mapping (see migration table below). It is
+   consulted only when **neither** `RUNNER_TYPE` nor `BUILD_ENGINE` is set by
+   step 1 or 2, and it then decides both of them. An explicit `RUNNER_LABELS`
+   still overrides the labels it would imply.
 4. Toolkit default (`github-hosted` / `docker` / derived labels)
+
+A **runner policy** (`RUNNER_POLICY` / `RUNNER_POLICY_FILE`, below) takes over
+routing for the jobs it covers. It is consulted after a non-empty `runner-labels`
+dispatch input, which pins every job, and before steps 2–4. See
+[MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md#14-configuration-reference).
 
 ### Supported combinations
 
@@ -261,17 +281,42 @@ Explicit `RUNNER_TYPE`/`BUILD_ENGINE`/`RUNNER_LABELS` (repo variable or
 nothing behaves exactly as before: `github-hosted` + `docker` +
 `ubuntu-latest`.
 
-### Superseded label variables
+### Per-OS label variables
 
-`RUNNER_WINDOWS_LABEL`, `RUNNER_MACOS_LABEL`, and `RUNNER_LINUX_LABEL` are
-kept as fallback outputs for anything not yet migrated to `RUNNER_LABELS`, but
-new setups should configure `RUNNER_LABELS` directly.
+`RUNNER_WINDOWS_LABEL`, `RUNNER_MACOS_LABEL`, and `RUNNER_LINUX_LABEL` route
+each platform of the build matrix to the machine that can build it (since
+5.2.0). Labels follow the **executor**, not the target platform's OS:
 
-| Variable | Default | Notes |
+| | `BUILD_ENGINE=docker` | `BUILD_ENGINE=local` |
 |---|---|---|
-| `RUNNER_WINDOWS_LABEL` | `self-hosted-windows` | Fallback label; prefer `RUNNER_LABELS`. |
-| `RUNNER_MACOS_LABEL` | `self-hosted-macos` | Fallback label; prefer `RUNNER_LABELS`. |
-| `RUNNER_LINUX_LABEL` | `ubuntu-latest` | Fallback label; prefer `RUNNER_LABELS`. |
+| Android / WebGL / Linux / Windows64 | `RUNNER_LINUX_LABEL` | Windows64 → `RUNNER_WINDOWS_LABEL`, others → `RUNNER_LINUX_LABEL` |
+| iOS | `RUNNER_MACOS_LABEL` | `RUNNER_MACOS_LABEL` |
+
+An explicit `RUNNER_LABELS` overrides all three, for the one-machine-does-everything
+setup. Setting any of them counts as naming a machine (see the switch above).
+
+| Variable | Default (`github-hosted`) | Default (`self-hosted`) |
+|---|---|---|
+| `RUNNER_WINDOWS_LABEL` | `windows-latest` | `self-hosted,windows` |
+| `RUNNER_MACOS_LABEL` | `macos-latest` | `self-hosted,macOS` |
+| `RUNNER_LINUX_LABEL` | `ubuntu-latest` | `self-hosted,linux` |
+
+### Runner policy (multi-runner scheduling)
+
+Optional. When present it schedules each Unity job individually: self-hosted
+runners first, with priority, capability matching, availability and explicit
+fallback. When absent, everything above applies unchanged. Full guide:
+[MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md).
+
+| Name | Kind | Default | Notes |
+|---|---|---|---|
+| `RUNNER_POLICY` | variable | *(unset)* | The policy as inline JSON. Wins over the file. Must be a repository or organization variable, not environment-scoped. |
+| `RUNNER_POLICY_FILE` | variable | `.github/unity-runner-policy.json` | Path of the policy file in the repository, relative to its root. The pipeline reads the default path even when this is unset; the **standalone** workflows apply a policy only when this or `RUNNER_POLICY` is set, so their extra GitHub-hosted resolver job runs only for projects that opted in. |
+| `RUNNER_STATUS_TOKEN` | **secret** | *(unset)* | Read-only token for runner online/busy state: repository **Administration: read** (fine-grained) or `repo` (classic); for organization runners and groups, organization **Self-hosted runners: read** or `admin:org`. `GITHUB_TOKEN` cannot read runner status. Without it, scheduling uses declared capabilities with availability `unknown`. Never store it as a variable. |
+
+The `runner-policy` input of `unity-pipeline.yml` (`auto` | `legacy`) ignores the
+policy for a run when a caller sets it to `legacy`. On the dispatch forms, a
+`runner-labels` value pins every job and bypasses the policy the same way.
 
 ## CACHE
 
@@ -459,9 +504,11 @@ ARTIFACT_COMPRESSION=zip
 
 ### Self-hosted runner + local build engine
 
-- Set `RUNNER_TYPE=self-hosted`, `BUILD_ENGINE=local`, and confirm
-  `RUNNER_LABELS` matches the label(s) of your provisioned runner(s) (default
-  `self-hosted,windows`).
+- Set `RUNNER_TYPE=self-hosted`, `BUILD_ENGINE=local`, and set
+  `RUNNER_LABELS` (or the per-OS labels) to the label(s) of your provisioned
+  runner(s). With no label set, the run falls back to GitHub-hosted + docker.
+  With several machines, prefer a runner policy
+  ([MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md)).
 - **Disable caches that are already local:** set `CACHE_LIBRARY_ENABLED=false`
   and `CACHE_GRADLE_ENABLED=false`. The `Library/` and Gradle caches persist
   on the runner's disk — uploading them to GitHub Actions cache wastes

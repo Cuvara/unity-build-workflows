@@ -87,6 +87,24 @@ Legacy names are deprecated but must keep working; the resolver logs a migration
 (`docker` | `local`) answers *how* Unity builds. Three combinations are supported and the fourth is
 rejected up front — `docs/RUNNER_AND_BUILD_ENGINE.md`. Don't collapse them into one input.
 
+### Runner scheduling — which machine runs each Unity job
+
+`scripts/common/runner_scheduler.py` runs in stage 01 after `resolve_build_flow.sh` and makes one
+decision per Unity job (each matrix platform, `UnityTests`, `Addressables`). It emits the
+`runner-selection` JSON, which is the single source of truth for `runs-on`: matrix rows read it
+through `matrix_runner_labels.py`, which only serializes. With no runner policy every job is a
+passthrough of the legacy answer, and `tests/test_runner_selection_golden.py` pins that byte for
+byte against `tests/fixtures/runner_golden/baseline.json`. Keep the ownership boundaries:
+- `resolve_build_flow.sh` owns legacy defaults (consume them, don't re-derive them)
+- `resolve_platform_executor.allowed_runner_os()` owns platform safety
+- `runner_inventory.py` owns the GitHub API
+
+Self-hosted is the primary path; GitHub-hosted is an opt-in managed provider. The standalone
+Unity workflows each have a `resolve-runner` job with the same contract. That job runs (on
+`ubuntu-latest`) only when `RUNNER_POLICY`/`RUNNER_POLICY_FILE` is set, so projects without a
+policy gain no GitHub-hosted job. Runner-group membership is never inferred from labels.
+`docs/MULTI_RUNNER_SCHEDULING.md`, ADR 004 stage 2c.
+
 ### Two executor lanes, chosen by platform
 
 `docker-unity` (ubuntu-latest, Android/WebGL/Linux64/LinuxServer) and `macos-unity-xcode`

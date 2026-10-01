@@ -1,0 +1,20 @@
+{
+  "$schema": "../../schemas/unity-runner-policy.schema.json",
+  "version": 1,
+  "mode": "self-hosted-only",
+  "availability": { "scope": "org", "on-busy": "next" },
+
+  "pools": {
+    "mac-pool":     { "labels": ["self-hosted", "macOS", "unity"], "group": "unity-mac" },
+    "linux-pool":   { "labels": ["self-hosted", "linux", "unity-docker"], "group": "unity-linux" },
+    "windows-pool": { "labels": ["self-hosted", "windows", "unity"], "group": "unity-windows",
+                      "build-engines": ["local"] }
+  },
+
+  "default": { "priority": ["linux-pool"] },
+
+  "platforms": {
+    "iOS":       { "priority": ["mac-pool"], "require": { "labels": ["xcode-16"] } },
+    "Windows64": { "build-engine": "local", "priority": ["windows-pool"], "fallback": ["mac-pool"] }
+  }
+}

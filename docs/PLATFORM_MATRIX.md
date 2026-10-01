@@ -23,7 +23,9 @@
 **¹ iOS runner label** — the default label `macos-unity-xcode` is a self-hosted
 runner registered to the consumer's GitHub organisation.  The consumer may
 override it by setting the `ios-runner-label` workflow input to any label that
-maps to a macOS machine with Xcode and Unity iOS Build Support installed.
+maps to a macOS machine with Xcode and Unity iOS Build Support installed, or
+schedule across several Macs with a runner policy
+([MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md)).
 
 GitHub-hosted macOS runners (`macos-latest`, `macos-14`) are **NOT claimed as
 supported** unless the consumer independently validates the full build + sign +
