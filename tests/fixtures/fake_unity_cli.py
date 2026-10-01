@@ -50,9 +50,17 @@ def save_state(state):
     os.replace(str(tmp), str(path))
 
 
-def executable_for(version):
+def executable_for(version, info=None):
+    """Where an editor's executable is: recorded at install time, else the fake root."""
+    if info and info.get("location"):
+        return Path(info["location"])
     name = "Unity.exe" if os.name == "nt" else "Unity"
     return Path(os.environ["FAKE_UNITY_ROOT"], version, "Editor", name)
+
+
+def install_root(state):
+    """The persisted install path (`install-path --set`), like the real CLI's setting."""
+    return state.get("install_path") or os.environ["FAKE_UNITY_ROOT"]
 
 
 def envelope(command, data=None, errors=None, code=0):
@@ -109,20 +117,30 @@ def main(argv):
             "version": version,
             "alias": version,
             "architecture": info.get("architecture", "x86_64"),
-            "location": str(executable_for(version)),
+            "location": str(executable_for(version, info)),
             "modules": "",
             "default": False,
         } for version, info in editors.items()]
         return envelope("editors", data)
+
+    if args and args[0] == "install-path":
+        if "--set" in args:
+            new_root = option_values(args, "--set", "-s")[0]
+            if mode == "install_path_fail":
+                return fail("install-path", f"Cannot set install path to {new_root}")
+            state["install_path"] = new_root
+            save_state(state)
+            return envelope("install-path", {"path": new_root})
+        return envelope("install-path", {"path": install_root(state)})
 
     if args[:2] == ["editors", "verify"]:
         version = args[2]
         info = editors.get(version)
         if info is None:
             return fail("editors verify", f"No installed editor found for version {version}.")
-        ok = executable_for(version).is_file()
+        ok = executable_for(version, info).is_file()
         components = [{"component": "editor", "kind": "editor",
-                       "status": "ok" if ok else "missing", "path": str(executable_for(version))}]
+                       "status": "ok" if ok else "missing", "path": str(executable_for(version, info))}]
         components += [{"component": m, "kind": "module", "status": "ok", "path": ""}
                        for m in info.get("modules", [])]
         return envelope("editors verify", {"version": version, "ok": ok, "components": components},
@@ -152,12 +170,14 @@ def main(argv):
         time.sleep(float(os.environ.get("FAKE_UNITY_INSTALL_DELAY", "0")))
         if mode != "install_noop":
             state = load_state()
+            name = "Unity.exe" if os.name == "nt" else "Unity"
+            exe = Path(install_root(state), version, "Editor", name)
             state.setdefault("editors", {})[version] = {
                 "architecture": "x86_64",
                 "modules": with_children(modules),
                 "changeset": (option_values(args, "-c", "--changeset") or [""])[0],
+                "location": str(exe),
             }
-            exe = executable_for(version)
             exe.parent.mkdir(parents=True, exist_ok=True)
             exe.write_text("fake editor\n", encoding="utf-8")
             save_state(state)

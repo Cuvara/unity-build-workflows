@@ -57,7 +57,7 @@ The self-hosted lane runs Unity directly; there is no container. Verified agains
 
 | Requirement | Detail | Where enforced |
 |---|---|---|
-| Unity Editor installed at the Hub default path | `C:\Program Files\Unity\Hub\Editor\<UNITY_VERSION>\Editor\Unity.exe`, or the fallback `C:\Program Files\Unity <UNITY_VERSION>\Editor\Unity.exe` | `:794`, `:797` — anything else is a hard error at `:800` |
+| Unity Editor for the project's exact version | Installed by hand, or provisioned by the job's Unity preflight step (needs Python 3.8+ and a writable `UNITY_PREFLIGHT_INSTALL_ROOT`); the build runs the editor preflight reports | `reusable-build-platform.yml` step `unity-preflight`; [UNITY_PREFLIGHT.md § In CI](UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes) |
 | The **exact** Editor version the project pins | `UNITY_VERSION` comes from the consumer's `ProjectSettings/ProjectVersion.txt`; a different installed version fails the path check | resolver → `inputs.unity-version` |
 | A `PlayerBuilder.Build` method in the project | `-buildTarget` only switches the active target; an `-executeMethod` that calls `BuildPipeline.BuildPlayer` is what produces a build. When `build-method` is empty the lane substitutes `PlayerBuilder.Build`. Copy [`templates/PlayerBuilder.cs`](../templates/PlayerBuilder.cs) if the project has none | `:842-843` (Windows), `:903` (bash) |
 | An `AddressableBuilder.Build` method, if you build Addressables | The Addressables-only path calls it directly | `:806` |
@@ -271,7 +271,7 @@ gh workflow run unity-build.yml --repo "<ORG>/<CONSUMER_REPO>" --ref develop \
 |---|---|---|
 | Job stays *Queued*, runner shows Idle | **On a free plan: the repo is public and `Default` has `allows_public_repositories=false`** — the most likely cause, and no label change fixes it | See §3: make the repo private, or accept the flag's consequences |
 | Job stays *Queued* | Requested labels are not all present on the runner, or the repo is not in the runner group | Compare `RUNNER_LABELS` with `gh api /orgs/<ORG>/actions/runners`; check the group's repository access |
-| `Unity.exe not found for version <v>` | Editor not installed, or not at the Hub default path, or a different version than `ProjectVersion.txt` | Install that exact version via Unity Hub |
+| Unity preflight step failed | No Python, an unwritable install root, a failed download, or a `unity-version` pin that differs from `ProjectVersion.txt` (the step log names which) | Follow the step's remediation; [UNITY_PREFLIGHT.md § In CI](UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes) |
 | Build "succeeds" with no player in `build/` | The project has no `PlayerBuilder.Build`; `-buildTarget` alone builds nothing | Add the method (§1) or pass `build-method` |
 | `error CS0246` / missing packages on first run | Fresh `Library/` — the first build resolves packages and is slow | Let it finish; later runs reuse `Library/` |
 | Runner disappears after one job | Expected with `--ephemeral` | Re-register, or drop `--ephemeral` on a private repo |

@@ -8,6 +8,32 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Self-hosted runners provision Unity themselves.** On native lanes
+  (`build-engine: local`, Windows/macOS), `reusable-build-platform.yml` now runs
+  `scripts/unity-preflight.sh` after checkout:
+  - it installs the exact editor from `ProjectVersion.txt` plus the job
+    platform's modules through the Unity CLI when missing;
+  - the Addressables pre-step and both native build steps run the editor it
+    reports (`steps.unity-preflight.outputs.unity_editor`) instead of a Unity
+    Hub path rebuilt from `unity-version`.
+
+  CI behaviour:
+  - A `unity-version` pin that disagrees with `ProjectVersion.txt` fails the
+    step, and a failed preflight stops the job before Unity starts.
+  - Installs run without elevation (`UNITY_NO_ELEVATE=1`) into the runner's
+    `UNITY_PREFLIGHT_INSTALL_ROOT`; an unwritable root fails up front instead of
+    waiting on UAC.
+  - A missing Unity CLI is installed once into `$RUNNER_TOOL_CACHE/unity-cli`
+    with Unity's installer.
+  - Docker lanes are unchanged.
+
+  New preflight options: `--install-root` / `UNITY_PREFLIGHT_INSTALL_ROOT` and
+  `--install-cli-to` / `UNITY_PREFLIGHT_CLI_HOME`. See
+  [docs/UNITY_PREFLIGHT.md](docs/UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes).
 ## [6.4.0] — 2026-10-01
 
 ### Added

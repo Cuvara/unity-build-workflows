@@ -50,6 +50,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
@@ -510,6 +511,18 @@ class UnityCliBackend:
         return self._argv("install-modules", "-e", version, "--child-modules",
                           "--accept-eula", "--yes", "-m", *modules)
 
+    def get_install_root(self) -> str:
+        result = self._query("install-path", "--get")
+        payload = result.payload if isinstance(result.payload, dict) else {}
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        if not _envelope_ok(result) or not data.get("path"):
+            raise PreflightError(describe_cli_failure("Reading the editor install path", result, []),
+                                 EXIT_FAILED)
+        return str(data["path"])
+
+    def set_install_root(self, path: str) -> CliResult:
+        return self._query("install-path", "--set", path)
+
     def verify(self, version: str) -> Tuple[bool, str]:
         result = self._query("editors", "verify", version)
         payload = result.payload if isinstance(result.payload, dict) else {}
@@ -608,6 +621,18 @@ class HubBackend:
     def install_modules_argv(self, version: str, modules: Sequence[str]) -> List[str]:
         return self._argv("install-modules", "--version", version, "--childModules", "-m", *modules)
 
+    def get_install_root(self) -> str:
+        result = _run(self._argv("ip", "-g"), QUERY_TIMEOUT)
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if result.returncode != 0 or not lines:
+            raise PreflightError(
+                describe_cli_failure("Reading the editor install path (Unity Hub)", result, []),
+                EXIT_FAILED)
+        return lines[-1]
+
+    def set_install_root(self, path: str) -> CliResult:
+        return _run(self._argv("ip", "-s", path), QUERY_TIMEOUT)
+
     def verify(self, version: str) -> Tuple[bool, str]:
         # No verify command in the Hub CLI; re-detection plus the executable
         # check in the caller is the verification.
@@ -644,9 +669,16 @@ def _resolve_explicit(path: str, label: str) -> str:
     )
 
 
-def find_unity_cli(explicit: Optional[str], host_os: str) -> Optional[str]:
+def _cli_in_home(cli_home: Optional[str], host_os: str) -> Path:
+    name = "unity.exe" if host_os == "windows" else "unity"
+    return Path(cli_home or "", "bin", name)
+
+
+def find_unity_cli(explicit: Optional[str], host_os: str, cli_home: Optional[str] = None) -> Optional[str]:
     if explicit:
         return _resolve_explicit(explicit, "Unity CLI")
+    if cli_home and _cli_in_home(cli_home, host_os).is_file():
+        return str(_cli_in_home(cli_home, host_os))
     found = shutil.which("unity")
     if found:
         return found
@@ -672,18 +704,70 @@ def find_unity_hub(explicit: Optional[str], host_os: str) -> Optional[str]:
     return shutil.which("unityhub")
 
 
-def select_backend(choice: str, unity_cli: Optional[str], unity_hub: Optional[str], host_os: str):
+def select_backend(choice: str, unity_cli: Optional[str], unity_hub: Optional[str], host_os: str,
+                   cli_home: Optional[str] = None):
     """Return a backend, or None when no CLI is available."""
     if choice in ("auto", "unity"):
-        path = find_unity_cli(unity_cli, host_os)
+        path = find_unity_cli(unity_cli, host_os, cli_home)
         if path:
             return UnityCliBackend(path)
-        if choice == "unity":
+        if choice == "unity" or cli_home:
+            # With a CLI home the caller bootstraps the Unity CLI rather than
+            # falling back to whatever Hub happens to be installed.
             return None
     path = find_unity_hub(unity_hub, host_os)
     if path:
         return HubBackend(path)
     return None
+
+
+# Unity's official installer for the standalone CLI (the commands its own
+# documentation gives). UNITY_CLI_HOME makes the binary land in <home>/bin.
+UNITY_CLI_INSTALLER = {
+    "windows": ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                "-Command", "irm https://unity.com/install.ps1 | iex"],
+    "posix": ["bash", "-c", "set -o pipefail; curl -fsSL https://unity.com/install.sh | bash"],
+}
+
+
+def bootstrap_unity_cli(cli_home: str, host_os: str) -> str:
+    """Install the Unity CLI into cli_home with Unity's installer; return the binary."""
+    argv = UNITY_CLI_INSTALLER["windows" if host_os == "windows" else "posix"]
+    _log(f"Unity CLI not found; installing it into {cli_home} with Unity's installer ...")
+    result = _run(argv, QUERY_TIMEOUT, {"UNITY_CLI_CHANNEL": "beta", "UNITY_CLI_HOME": cli_home})
+    binary = _cli_in_home(cli_home, host_os)
+    if result.returncode != 0 or not binary.is_file():
+        raise PreflightError(
+            describe_cli_failure("Installing the Unity CLI", result,
+                                 [f"Expected binary:\n  {binary}"])
+            + "\n\nInstall it on the runner manually:\n" + UNITY_CLI_INSTALL_HINT,
+            EXIT_PREREQ,
+        )
+    _log(f"Unity CLI installed: {binary}")
+    return str(binary)
+
+
+def _nearest_existing(path: Path) -> Path:
+    current = path
+    while not current.exists() and current.parent != current:
+        current = current.parent
+    return current
+
+
+def assert_install_root_writable(root: str, reason: str) -> None:
+    """Fail before installing when the install root is not writable without elevation."""
+    target = _nearest_existing(Path(root))
+    try:
+        with tempfile.TemporaryFile(dir=str(target)):
+            pass
+    except OSError as exc:
+        raise PreflightError(
+            f"The editor install path is not writable by this account:\n  {root}\n"
+            f"({exc})\n\n{reason}\n"
+            "Point installs at a directory this account owns: set UNITY_PREFLIGHT_INSTALL_ROOT\n"
+            "(or pass --install-root), e.g. in the self-hosted runner's .env file.",
+            EXIT_PREREQ,
+        )
 
 
 # -- Machine-wide install lock ------------------------------------------------
@@ -879,7 +963,24 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
 
     result["UNITY_XCODE"] = _xcode_status(host_os, platforms, warnings)
 
-    backend = select_backend(args.cli, args.unity_cli, args.unity_hub, host_os)
+    cli_home = args.install_cli_to or os.environ.get("UNITY_PREFLIGHT_CLI_HOME") or None
+    install_root = args.install_root or os.environ.get("UNITY_PREFLIGHT_INSTALL_ROOT") or None
+    lock_dir = Path(args.lock_dir or os.environ.get("UNITY_PREFLIGHT_LOCK_DIR") or default_lock_dir(host_os))
+    owner = {
+        "pid": os.getpid(),
+        "host": socket.gethostname(),
+        "project": str(project),
+        "version": version,
+        "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+
+    backend = select_backend(args.cli, args.unity_cli, args.unity_hub, host_os, cli_home)
+    if backend is None and cli_home and args.cli != "hub" and not args.check:
+        with InstallLock(lock_dir, args.lock_timeout, owner):
+            # Re-check: a concurrent preflight may have installed it meanwhile.
+            cli_path = find_unity_cli(args.unity_cli, host_os, cli_home) \
+                or bootstrap_unity_cli(cli_home, host_os)
+        backend = UnityCliBackend(cli_path)
 
     override = args.unity_editor or os.environ.get("UNITY_EDITOR") or ""
     if override:
@@ -924,7 +1025,8 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
         raise PreflightError(
             f"Unity CLI not found: preflight needs {wanted} to detect and install editors.\n\n"
             f"Install it:\n{UNITY_CLI_INSTALL_HINT}\n\n"
-            "Preflight does not install the CLI itself.",
+            "Or pass --install-cli-to <dir> (UNITY_PREFLIGHT_CLI_HOME) to let preflight\n"
+            "install the Unity CLI there with Unity's installer.",
             EXIT_PREREQ,
         )
     result["UNITY_CLI_BACKEND"] = backend.name
@@ -948,20 +1050,13 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
         result["UNITY_EDITOR_SOURCE"] = "override" if override else ("existing" if editor else "")
         raise NotReady(result)
 
-    lock_dir = Path(args.lock_dir or os.environ.get("UNITY_PREFLIGHT_LOCK_DIR") or default_lock_dir(host_os))
-    owner = {
-        "pid": os.getpid(),
-        "host": socket.gethostname(),
-        "project": str(project),
-        "version": version,
-        "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
-    }
     with InstallLock(lock_dir, args.lock_timeout, owner):
         # Another process may have installed while this one waited.
         editor = _find_editor(backend, version, host_arch)
         plan = _plan(backend, editor, version, changeset, requirements)
         installed: List[str] = []
         if plan["argv"] is not None:
+            prepare_install_root(backend, install_root)
             context = [
                 f"Requested Unity version:\n  {version}",
                 "Platforms:\n  " + (", ".join(platforms) or "(editor only)"),
@@ -987,6 +1082,36 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
         editor = _find_editor(backend, version, host_arch)
         return _finish(backend, version, editor, requirements, override, result,
                        installed=installed, verify=bool(installed))
+
+
+def prepare_install_root(backend, install_root: Optional[str]) -> None:
+    """Make sure the next install lands somewhere this account can write.
+
+    The install root is a persisted per-user CLI setting (`install-path`); it is
+    only changed when the caller asks for a root explicitly, and only right
+    before an install. Without elevation (UNITY_NO_ELEVATE, as on CI runners) an
+    unwritable root is reported here instead of failing inside the installer.
+    """
+    if install_root:
+        try:
+            Path(install_root).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise PreflightError(f"Cannot create the editor install root {install_root}: {exc}",
+                                 EXIT_PREREQ)
+        assert_install_root_writable(install_root, "Requested install root.")
+        current = backend.get_install_root()
+        if not _same_path(current, install_root):
+            _log(f"Setting the {backend.name} editor install path: {current} -> {install_root}")
+            outcome = backend.set_install_root(install_root)
+            if not _envelope_ok(outcome) or not _same_path(backend.get_install_root(), install_root):
+                raise PreflightError(
+                    describe_cli_failure("Setting the editor install path", outcome,
+                                         [f"Requested install root:\n  {install_root}"]),
+                    EXIT_FAILED)
+    elif os.environ.get("UNITY_NO_ELEVATE"):
+        assert_install_root_writable(
+            backend.get_install_root(),
+            "UNITY_NO_ELEVATE is set, so the installer will not ask for elevation.")
 
 
 class NotReady(Exception):
@@ -1158,6 +1283,14 @@ Examples:
     parser.add_argument("--unity-editor", default=None,
                         help="Use this editor executable instead of resolving one (env UNITY_EDITOR). "
                              "Must match the project version when the CLI knows it.")
+    parser.add_argument("--install-root", default=None,
+                        help="Install editors under this directory (env UNITY_PREFLIGHT_INSTALL_ROOT). "
+                             "Sets the CLI's persisted install path, only when something must be "
+                             "installed. Use a runner-writable directory on CI. Default: the CLI's "
+                             "configured install path.")
+    parser.add_argument("--install-cli-to", default=None,
+                        help="If the Unity CLI is missing, install it into this directory with "
+                             "Unity's installer and use <dir>/bin/unity (env UNITY_PREFLIGHT_CLI_HOME).")
     parser.add_argument("--lock-dir", default=None,
                         help="Directory for the machine-wide install lock (env UNITY_PREFLIGHT_LOCK_DIR).")
     parser.add_argument("--lock-timeout", type=float, default=7200.0,
