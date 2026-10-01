@@ -523,6 +523,15 @@ class UnityCliBackend:
     def set_install_root(self, path: str) -> CliResult:
         return self._query("install-path", "--set", path)
 
+    def register_editor(self, application: str) -> bool:
+        """`editors add` an installed but unregistered editor (Unity.exe / Unity.app)."""
+        result = self._query("editors", "add", application)
+        if _envelope_ok(result):
+            return True
+        payload = result.payload if isinstance(result.payload, dict) else {}
+        codes = {e.get("code") for e in payload.get("errors") or [] if isinstance(e, dict)}
+        return codes == {"EDITORS_ADD_ALREADY_IN_LIST"}
+
     def verify(self, version: str) -> Tuple[bool, str]:
         result = self._query("editors", "verify", version)
         payload = result.payload if isinstance(result.payload, dict) else {}
@@ -754,20 +763,128 @@ def _nearest_existing(path: Path) -> Path:
     return current
 
 
-def assert_install_root_writable(root: str, reason: str) -> None:
-    """Fail before installing when the install root is not writable without elevation."""
-    target = _nearest_existing(Path(root))
+def _write_error(root: str) -> Optional[str]:
+    """Why this account cannot create files under root, or None if it can."""
     try:
-        with tempfile.TemporaryFile(dir=str(target)):
+        with tempfile.TemporaryFile(dir=str(_nearest_existing(Path(root)))):
             pass
     except OSError as exc:
+        return str(exc)
+    return None
+
+
+def assert_install_root_writable(root: str, reason: str) -> None:
+    """Fail before installing when the install root is not writable without elevation."""
+    error = _write_error(root)
+    if error:
         raise PreflightError(
             f"The editor install path is not writable by this account:\n  {root}\n"
-            f"({exc})\n\n{reason}\n"
+            f"({error})\n\n{reason}\n"
             "Point installs at a directory this account owns: set UNITY_PREFLIGHT_INSTALL_ROOT\n"
             "(or pass --install-root), e.g. in the self-hosted runner's .env file.",
             EXIT_PREREQ,
         )
+
+
+def editor_application(root: str, version: str, host_os: str) -> Path:
+    """Where the CLI/Hub layout puts an editor of `version` under an install root.
+
+    This is the application `editors add` accepts: Unity.app on macOS,
+    Editor/Unity.exe on Windows, Editor/Unity on Linux.
+    """
+    if host_os == "darwin":
+        return Path(root, version, "Unity.app")
+    return Path(root, version, "Editor", "Unity.exe" if host_os == "windows" else "Unity")
+
+
+def editor_home(executable: str, version: str) -> Path:
+    """The per-version editor directory an executable belongs to (modules go there)."""
+    path = Path(executable)
+    for parent in path.parents:
+        if parent.name == version:
+            return parent
+    return path.parent
+
+
+def standard_editor_locations(version: str, host_os: str) -> List[Path]:
+    """Where this toolkit's self-hosted lanes have always looked for an editor.
+
+    These are the Unity Hub default install roots and the legacy per-version
+    folders that reusable-build-platform.yml searched before preflight existed
+    (and that SELF_HOSTED_WINDOWS_RUNNER.md / SELF_HOSTED_MACOS_RUNNER.md tell
+    runner owners to install into). Built from parts: see the native-invocation
+    guard test.
+    """
+    if host_os == "windows":
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        return [editor_application(str(Path(program_files, "Unity", "Hub", "Editor")), version, host_os),
+                Path(program_files, f"Unity {version}", "Editor", "Unity.exe")]
+    if host_os == "darwin":
+        return [editor_application(str(Path("/Applications", "Unity", "Hub", "Editor")), version, host_os),
+                Path("/Applications", f"Unity {version}", "Unity.app")]
+    return []
+
+
+def editor_candidates(backend, version: str, host_os: str,
+                      roots: Sequence[Optional[str]]) -> List[Path]:
+    """Existing editor applications of `version` on disk, in discovery order.
+
+    Order: the given roots (explicit install root, then the runner-managed
+    fallback root), the CLI's configured install path, then the standard
+    locations above. Only exact `<root>/<version>` layouts are considered; the
+    version is confirmed by the CLI after registration, never trusted from the
+    folder name alone.
+    """
+    ordered: List[Path] = [editor_application(r, version, host_os) for r in roots if r]
+    if isinstance(backend, UnityCliBackend):
+        try:
+            ordered.append(editor_application(backend.get_install_root(), version, host_os))
+        except PreflightError:
+            pass
+    ordered.extend(standard_editor_locations(version, host_os))
+    found: List[Path] = []
+    for candidate in ordered:
+        if candidate.exists() and not any(_same_path(str(candidate), str(f)) for f in found):
+            found.append(candidate)
+    return found
+
+
+def _application_of(executable: str) -> str:
+    """The application `editors add` accepts for an executable (the .app on macOS)."""
+    for parent in Path(executable).parents:
+        if parent.suffix == ".app":
+            return str(parent)
+    return executable
+
+
+def discover_editor(backend, version: str, host_os: str, host_arch: str,
+                    roots: Sequence[Optional[str]], register: bool):
+    """Find an installed editor of exactly `version`, registering it if needed.
+
+    Returns (editor or None, unregistered candidates found). The CLI's
+    registry only lists editors registered to the account running it, so an
+    editor installed by another account (an admin with Unity Hub, an earlier
+    runner account) is invisible to it. Such an editor is registered with
+    `editors add` and then re-read from the registry, which confirms its real
+    version; a mismatched candidate is simply not selected.
+    """
+    editor = _find_editor(backend, version, host_arch)
+    if editor is not None or not isinstance(backend, UnityCliBackend):
+        return editor, []
+    candidates = editor_candidates(backend, version, host_os, roots)
+    if not register:
+        return None, candidates
+    for candidate in candidates:
+        _log(f"Found Unity {version} on disk, not registered with the Unity CLI: {candidate}")
+        if not backend.register_editor(str(candidate)):
+            _log(f"  the Unity CLI did not accept {candidate}; skipping it")
+            continue
+        editor = _find_editor(backend, version, host_arch)
+        if editor is not None:
+            _log(f"  registered; reusing it")
+            return editor, candidates
+        _log(f"  registered, but it is not Unity {version}; skipping it")
+    return None, candidates
 
 
 # -- Machine-wide install lock ------------------------------------------------
@@ -991,12 +1108,18 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
                 "from ProjectVersion.txt.",
                 EXIT_PREREQ,
             )
-        known = None
-        if backend is not None:
-            for editor in backend.installed_editors():
-                if _same_path(editor.executable, override):
-                    known = editor
-                    break
+        def registered_as(path: str):
+            for candidate in backend.installed_editors():
+                if _same_path(candidate.executable, path):
+                    return candidate
+            return None
+
+        known = registered_as(override) if backend is not None else None
+        if known is None and isinstance(backend, UnityCliBackend) and not args.check:
+            # Unknown to this account's CLI: register it so the CLI reports its
+            # real version (and modules) instead of trusting the path.
+            if backend.register_editor(_application_of(override)):
+                known = registered_as(override)
         if known is not None and known.version != version:
             raise PreflightError(
                 f"UNITY_EDITOR is Unity {known.version}:\n  {override}\n"
@@ -1032,10 +1155,17 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
     result["UNITY_CLI_BACKEND"] = backend.name
     _log(f"Using {backend.name} CLI: {backend.executable}")
 
-    editor = _find_editor(backend, version, host_arch)
+    editor, on_disk = discover_editor(backend, version, host_os, host_arch,
+                                      [install_root, args.fallback_install_root],
+                                      register=not args.check)
     plan = _plan(backend, editor, version, changeset, requirements)
     if editor is not None:
         print("Editor:\n  available\n", file=sys.stderr)
+    elif on_disk and args.check:
+        print("Editor:\n  found on disk, not registered with the Unity CLI:\n"
+              + "\n".join(f"    {c}" for c in on_disk)
+              + "\n  (a normal run registers and verifies it before installing anything)\n",
+              file=sys.stderr)
     else:
         print("Editor:\n  MISSING\n", file=sys.stderr)
     _report_modules(requirements, plan["installed_modules"])
@@ -1056,7 +1186,16 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
         plan = _plan(backend, editor, version, changeset, requirements)
         installed: List[str] = []
         if plan["argv"] is not None:
-            prepare_install_root(backend, install_root)
+            if editor is None:
+                prepare_install_root(backend, install_root, args.fallback_install_root)
+            elif os.environ.get("UNITY_NO_ELEVATE"):
+                # Modules land inside the existing editor's own directory.
+                assert_install_root_writable(
+                    str(editor_home(editor.executable, version)),
+                    f"Unity {version} is installed here, but its missing modules "
+                    f"({', '.join(plan['modules'])}) cannot be added without elevation.\n"
+                    "Add them as the account that installed the editor, or remove that "
+                    "editor so preflight installs a complete one in a writable root.")
             context = [
                 f"Requested Unity version:\n  {version}",
                 "Platforms:\n  " + (", ".join(platforms) or "(editor only)"),
@@ -1084,14 +1223,23 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
                        installed=installed, verify=bool(installed))
 
 
-def prepare_install_root(backend, install_root: Optional[str]) -> None:
-    """Make sure the next install lands somewhere this account can write.
+def prepare_install_root(backend, install_root: Optional[str],
+                         fallback_root: Optional[str] = None) -> None:
+    """Make sure the next editor install lands somewhere this account can write.
 
     The install root is a persisted per-user CLI setting (`install-path`); it is
     only changed when the caller asks for a root explicitly, and only right
     before an install. Without elevation (UNITY_NO_ELEVATE, as on CI runners) an
-    unwritable root is reported here instead of failing inside the installer.
+    unwritable root falls back to `fallback_root` when one is given, and is
+    reported here otherwise instead of failing inside the installer.
     """
+    if not install_root and fallback_root and os.environ.get("UNITY_NO_ELEVATE"):
+        current = backend.get_install_root()
+        error = _write_error(current)
+        if error:
+            _log(f"Install path {current} is not writable by this account ({error}); "
+                 f"using the fallback install root {fallback_root}")
+            install_root = fallback_root
     if install_root:
         try:
             Path(install_root).mkdir(parents=True, exist_ok=True)
@@ -1288,6 +1436,11 @@ Examples:
                              "Sets the CLI's persisted install path, only when something must be "
                              "installed. Use a runner-writable directory on CI. Default: the CLI's "
                              "configured install path.")
+    parser.add_argument("--fallback-install-root", default=None,
+                        help="With UNITY_NO_ELEVATE set, install a missing editor here when the "
+                             "configured install path is not writable by this account (CI uses "
+                             "a directory in the runner account's home). Ignored when "
+                             "--install-root is given.")
     parser.add_argument("--install-cli-to", default=None,
                         help="If the Unity CLI is missing, install it into this directory with "
                              "Unity's installer and use <dir>/bin/unity (env UNITY_PREFLIGHT_CLI_HOME).")

@@ -22,9 +22,12 @@ Environment:
 """
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
+
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+[abfpx]\d+$")
 
 DEFAULT_AVAILABLE = [
     "android", "android-sdk-ndk-tools", "android-open-jdk-17.0.9+9",
@@ -123,6 +126,29 @@ def main(argv):
         } for version, info in editors.items()]
         return envelope("editors", data)
 
+    if args[:2] == ["editors", "add"]:
+        application = Path(args[2])
+        # Accepted layouts, like the real CLI: <ver>/Editor/Unity[.exe] or
+        # <ver>/Unity.app. The version is the folder name unless the editor
+        # file says otherwise ("version: X"), standing in for the version the
+        # real CLI reads from the binary.
+        if application.suffix == ".app":
+            version, marker = application.parent.name, application / "Contents" / "MacOS" / "Unity"
+        else:
+            version, marker = application.parent.parent.name, application
+        if marker.is_file() and marker.read_text(encoding="utf-8").startswith("version: "):
+            version = marker.read_text(encoding="utf-8").split(":", 1)[1].strip()
+        shaped = application.suffix == ".app" or application.parent.name == "Editor"
+        if not (application.exists() and shaped and VERSION_RE.match(version)):
+            return fail("editors", f"Not a valid Unity Editor application: {application}",
+                        6, "EDITORS_ADD_NOT_VALID_EDITOR")
+        if version in editors:
+            return fail("editors", f"Editor version {version} is already registered in the Hub.",
+                        6, "EDITORS_ADD_ALREADY_IN_LIST")
+        editors[version] = {"architecture": "x86_64", "modules": [], "location": str(application)}
+        save_state(state)
+        return envelope("editors", [{"path": str(application), "ok": True}])
+
     if args and args[0] == "install-path":
         if "--set" in args:
             new_root = option_values(args, "--set", "-s")[0]
@@ -138,7 +164,10 @@ def main(argv):
         info = editors.get(version)
         if info is None:
             return fail("editors verify", f"No installed editor found for version {version}.")
-        ok = executable_for(version, info).is_file()
+        location = executable_for(version, info)
+        if location.suffix == ".app":  # macOS bundle: the binary inside it
+            location = location / "Contents" / "MacOS" / "Unity"
+        ok = location.is_file()
         components = [{"component": "editor", "kind": "editor",
                        "status": "ok" if ok else "missing", "path": str(executable_for(version, info))}]
         components += [{"component": m, "kind": "module", "status": "ok", "path": ""}

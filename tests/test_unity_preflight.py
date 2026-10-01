@@ -761,3 +761,265 @@ class TestCiProvisioning:
         )
         assert proc.returncode == up.EXIT_PREREQ
         assert not cli_home.exists()
+
+
+# ---------------------------------------------------------------------------
+# Runner whose editors were installed by another account (seen on a real
+# self-hosted Mac: /Applications/Unity/Hub/Editor owned by an admin, the
+# runner account's CLI listing nothing).
+# ---------------------------------------------------------------------------
+
+POSIX_NON_ROOT = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permissions and a non-root user")
+
+
+class TestForeignInstalls:
+    def test_unregistered_editor_in_install_root_is_adopted_not_reinstalled(self, tmp_path, machine):
+        exe = machine.editors / VERSION / "Editor" / "Unity"
+        exe.parent.mkdir(parents=True)
+        exe.write_text("installed by another account\n", encoding="utf-8")
+        proc = machine.run(make_project(tmp_path), "--host-os", "linux")
+        assert proc.returncode == 0, proc.stderr
+        out = parse_env(proc.stdout)
+        assert out["UNITY_EDITOR"] == str(exe)
+        assert out["UNITY_EDITOR_SOURCE"] == "existing"
+        assert machine.install_calls() == []
+        assert any(c[2:4] == ["editors", "add"] for c in machine.calls())
+
+    def test_check_mode_does_not_register_anything(self, tmp_path, machine):
+        exe = machine.editors / VERSION / "Editor" / "Unity"
+        exe.parent.mkdir(parents=True)
+        exe.write_text("installed by another account\n", encoding="utf-8")
+        proc = machine.run(make_project(tmp_path), "--host-os", "linux", "--check")
+        assert proc.returncode == up.EXIT_NOT_READY
+        assert not any("add" in c for c in machine.calls())
+
+    @POSIX_NON_ROOT
+    def test_unwritable_root_falls_back_to_the_runner_owned_root(self, tmp_path, machine):
+        locked = tmp_path / "Applications-Unity"
+        locked.mkdir()
+        locked.chmod(0o555)
+        fallback = tmp_path / "home" / "Unity" / "Editors"
+        try:
+            state = json.loads(machine.state.read_text(encoding="utf-8"))
+            state["install_path"] = str(locked)
+            machine.state.write_text(json.dumps(state), encoding="utf-8")
+            proc = machine.run(make_project(tmp_path), "--platform", "iOS", "--host-os", "linux",
+                               "--fallback-install-root", str(fallback),
+                               extra_env={"UNITY_NO_ELEVATE": "1"})
+        finally:
+            locked.chmod(0o755)
+        assert proc.returncode == 0, proc.stderr
+        assert fallback in Path(parse_env(proc.stdout)["UNITY_EDITOR"]).parents
+        assert json.loads(machine.state.read_text(encoding="utf-8"))["install_path"] == str(fallback)
+
+    @POSIX_NON_ROOT
+    def test_writable_configured_root_is_kept_despite_a_fallback(self, tmp_path, machine):
+        proc = machine.run(make_project(tmp_path), "--fallback-install-root", str(tmp_path / "fb"),
+                           extra_env={"UNITY_NO_ELEVATE": "1"})
+        assert proc.returncode == 0, proc.stderr
+        assert "install_path" not in json.loads(machine.state.read_text(encoding="utf-8"))
+        assert not (tmp_path / "fb").exists()
+
+    @POSIX_NON_ROOT
+    def test_module_into_unwritable_existing_editor_fails_before_installing(self, tmp_path, machine):
+        machine.add_editor(VERSION, [])
+        home = machine.editors / VERSION
+        home.chmod(0o555)
+        try:
+            proc = machine.run(make_project(tmp_path), "--platform", "WebGL",
+                               extra_env={"UNITY_NO_ELEVATE": "1"})
+        finally:
+            home.chmod(0o755)
+        assert proc.returncode == up.EXIT_PREREQ
+        assert "cannot be added without elevation" in proc.stderr
+        assert machine.install_calls() == []
+
+
+# ---------------------------------------------------------------------------
+# Editor discovery before installation -- same contract on Windows and macOS.
+# The runner account's CLI registry starts empty; editors exist on disk.
+# ---------------------------------------------------------------------------
+
+def place_editor(root: Path, version: str, host: str, real_version: str = "") -> Path:
+    """Create an editor install in the host's layout; return its executable."""
+    if host == "darwin":
+        exe = root / version / "Unity.app" / "Contents" / "MacOS" / "Unity"
+    else:
+        exe = root / version / "Editor" / "Unity.exe"
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text(f"version: {real_version}\n" if real_version else "editor\n", encoding="utf-8")
+    return exe
+
+
+HOSTS = pytest.mark.parametrize("host", ["windows", "darwin"])
+
+
+def set_cli_install_path(machine, path):
+    state = json.loads(machine.state.read_text(encoding="utf-8"))
+    state["install_path"] = str(path)
+    machine.state.write_text(json.dumps(state), encoding="utf-8")
+
+
+class TestEditorDiscovery:
+    @HOSTS
+    def test_editor_in_install_root_is_reused_not_reinstalled(self, tmp_path, machine, host):
+        root = tmp_path / "runner-editors"
+        exe = place_editor(root, VERSION, host)
+        proc = machine.run(make_project(tmp_path), "--host-os", host,
+                           extra_env={"UNITY_PREFLIGHT_INSTALL_ROOT": str(root)})
+        assert proc.returncode == 0, proc.stderr
+        out = parse_env(proc.stdout)
+        assert Path(out["UNITY_EDITOR"]) == exe
+        assert out["UNITY_EDITOR_SOURCE"] == "existing"
+        assert machine.install_calls() == []
+        # Reuse changes nothing: the install path is only set before an install.
+        assert "install_path" not in json.loads(machine.state.read_text(encoding="utf-8"))
+
+    @HOSTS
+    def test_editor_in_runner_managed_fallback_root_is_reused(self, tmp_path, machine, host):
+        fallback = tmp_path / "home" / "Unity" / "Editors"
+        exe = place_editor(fallback, VERSION, host)
+        proc = machine.run(make_project(tmp_path), "--host-os", host,
+                           "--fallback-install-root", str(fallback))
+        assert proc.returncode == 0, proc.stderr
+        assert Path(parse_env(proc.stdout)["UNITY_EDITOR"]) == exe
+        assert machine.install_calls() == []
+
+    def test_windows_editor_in_standard_hub_location_is_reused(self, tmp_path, machine):
+        program_files = tmp_path / "Program Files"
+        exe = place_editor(program_files / "Unity" / "Hub" / "Editor", VERSION, "windows")
+        proc = machine.run(make_project(tmp_path), "--host-os", "windows",
+                           extra_env={"ProgramFiles": str(program_files)})
+        assert proc.returncode == 0, proc.stderr
+        assert Path(parse_env(proc.stdout)["UNITY_EDITOR"]) == exe
+        assert machine.install_calls() == []
+
+    def test_windows_legacy_per_version_folder_is_reused(self, tmp_path, machine):
+        program_files = tmp_path / "Program Files"
+        exe = program_files / f"Unity {VERSION}" / "Editor" / "Unity.exe"
+        exe.parent.mkdir(parents=True)
+        # Not a <root>/<version> layout: the CLI reads the version from the binary.
+        exe.write_text(f"version: {VERSION}\n", encoding="utf-8")
+        proc = machine.run(make_project(tmp_path), "--host-os", "windows",
+                           extra_env={"ProgramFiles": str(program_files)})
+        assert proc.returncode == 0, proc.stderr
+        assert Path(parse_env(proc.stdout)["UNITY_EDITOR"]) == exe
+        assert machine.install_calls() == []
+
+    def test_standard_locations_are_the_ones_the_lanes_always_used(self):
+        mac = [str(p) for p in up.standard_editor_locations(VERSION, "darwin")]
+        assert mac == [str(Path("/Applications", "Unity", "Hub", "Editor", VERSION, "Unity.app")),
+                       str(Path("/Applications", f"Unity {VERSION}", "Unity.app"))]
+        assert up.standard_editor_locations(VERSION, "linux") == []
+
+    @HOSTS
+    def test_reused_editor_gets_only_the_missing_module(self, tmp_path, machine, host):
+        root = tmp_path / "runner-editors"
+        place_editor(root, VERSION, host)
+        proc = machine.run(make_project(tmp_path), "--host-os", host, "--platform", "WebGL",
+                           extra_env={"UNITY_PREFLIGHT_INSTALL_ROOT": str(root)})
+        assert proc.returncode == 0, proc.stderr
+        (call,) = machine.install_calls()
+        assert call[0] == "install-modules" and call[call.index("-m") + 1:] == ["webgl"]
+        assert parse_env(proc.stdout)["UNITY_EDITOR_SOURCE"] == "existing"
+
+    @HOSTS
+    def test_folder_named_for_the_version_but_holding_another_is_not_used(self, tmp_path, machine, host):
+        root = tmp_path / "runner-editors"
+        place_editor(root, VERSION, host, real_version=OTHER_VERSION)
+        proc = machine.run(make_project(tmp_path), "--host-os", host,
+                           extra_env={"UNITY_PREFLIGHT_INSTALL_ROOT": str(root / "new")})
+        assert proc.returncode == 0, proc.stderr
+        assert [c[:2] for c in machine.install_calls()] == [["install", VERSION]]
+
+    @HOSTS
+    def test_missing_editor_is_installed(self, tmp_path, machine, host):
+        proc = machine.run(make_project(tmp_path), "--host-os", host)
+        assert proc.returncode == 0, proc.stderr
+        assert [c[:2] for c in machine.install_calls()] == [["install", VERSION]]
+
+    @HOSTS
+    @POSIX_NON_ROOT
+    def test_existing_editor_wins_over_an_unwritable_default_root(self, tmp_path, machine, host):
+        locked = tmp_path / "locked-default"
+        locked.mkdir()
+        fallback = tmp_path / "home" / "Unity" / "Editors"
+        exe = place_editor(fallback, VERSION, host)
+        set_cli_install_path(machine, locked)
+        locked.chmod(0o555)
+        try:
+            proc = machine.run(make_project(tmp_path), "--host-os", host,
+                               "--fallback-install-root", str(fallback),
+                               extra_env={"UNITY_NO_ELEVATE": "1"})
+        finally:
+            locked.chmod(0o755)
+        assert proc.returncode == 0, proc.stderr
+        assert Path(parse_env(proc.stdout)["UNITY_EDITOR"]) == exe
+        assert machine.install_calls() == []
+
+    @HOSTS
+    @POSIX_NON_ROOT
+    def test_missing_editor_with_no_writable_root_fails_clearly(self, tmp_path, machine, host):
+        locked = tmp_path / "locked-default"
+        locked.mkdir()
+        set_cli_install_path(machine, locked)
+        locked.chmod(0o555)
+        try:
+            proc = machine.run(make_project(tmp_path), "--host-os", host,
+                               extra_env={"UNITY_NO_ELEVATE": "1"})
+        finally:
+            locked.chmod(0o755)
+        assert proc.returncode == up.EXIT_PREREQ
+        assert "not writable" in proc.stderr
+        assert machine.install_calls() == []
+
+    @HOSTS
+    def test_unregistered_override_is_registered_and_verified(self, tmp_path, machine, host):
+        exe = place_editor(tmp_path / "custom", VERSION, host)
+        proc = machine.run(make_project(tmp_path), "--host-os", host,
+                           extra_env={"UNITY_EDITOR": str(exe)})
+        assert proc.returncode == 0, proc.stderr
+        out = parse_env(proc.stdout)
+        assert out["UNITY_EDITOR"] == str(exe)
+        assert out["UNITY_EDITOR_SOURCE"] == "override"
+        assert out["UNITY_VERSION_VERIFIED"] == "true"
+
+    @HOSTS
+    def test_unregistered_override_of_the_wrong_version_is_rejected(self, tmp_path, machine, host):
+        exe = place_editor(tmp_path / "custom", OTHER_VERSION, host)
+        proc = machine.run(make_project(tmp_path), "--host-os", host,
+                           extra_env={"UNITY_EDITOR": str(exe)})
+        assert proc.returncode == up.EXIT_PREREQ
+        assert OTHER_VERSION in proc.stderr and machine.install_calls() == []
+
+    @pytest.mark.skipif(BASH is None or os.name == "nt", reason="fake installer is a POSIX script")
+    def test_cli_missing_editor_present_installs_only_the_cli(self, tmp_path, machine):
+        # macOS host: Unity's POSIX installer is the one the fake curl stands in for.
+        cli_home = tmp_path / "tool" / "unity-cli"
+        fake_bin = tmp_path / "fake-bin"
+        fake_bin.mkdir()
+        # The "installer" curl prints, line by line.
+        installer = [
+            'mkdir -p "$UNITY_CLI_HOME/bin"',
+            "printf '#!/bin/sh\\nexec \"%s\" \"%s\" \"$@\"\\n' > \"$UNITY_CLI_HOME/bin/unity\""
+            % (sys.executable, FAKE_CLI),
+            'chmod +x "$UNITY_CLI_HOME/bin/unity"',
+        ]
+        (fake_bin / "curl").write_text(
+            "#!/bin/sh\n" + "".join("echo %s\n" % shlex.quote(line) for line in installer),
+            encoding="utf-8")
+        (fake_bin / "curl").chmod(0o755)
+        root = tmp_path / "runner-editors"
+        exe = place_editor(root, VERSION, "darwin")
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "--project", str(make_project(tmp_path)),
+             "--cli", "unity", "--install-cli-to", str(cli_home), "--host-os", "darwin",
+             "--install-root", str(root), "--lock-dir", str(machine.lock_dir)],
+            capture_output=True, text=True, timeout=60,
+            env=machine.env(extra={"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}))
+        assert proc.returncode == 0, proc.stderr
+        assert (cli_home / "bin" / "unity").is_file()
+        assert Path(parse_env(proc.stdout)["UNITY_EDITOR"]) == exe
+        assert machine.install_calls() == []
