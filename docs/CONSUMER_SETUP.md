@@ -194,6 +194,22 @@ gh secret set ANDROID_KEY_ALIAS       --repo "${REPO}" --env production
 gh secret set ANDROID_KEY_PASS        --repo "${REPO}" --env production
 ```
 
+**Project with its own keystore, built on a self-hosted native lane.** If
+Player Settings > Publishing Settings has **Custom Keystore** enabled and the
+keystore file is in the project, a native (`build-engine: local`) build needs
+only the passwords. Unity never stores them in the project. Set them as
+repository secrets, since every environment's build signs, and pass them to
+`unity-pipeline.yml` from your caller:
+
+```bash
+gh secret set ANDROID_KEYSTORE_PASS --repo "${REPO}"
+gh secret set ANDROID_KEY_PASS      --repo "${REPO}"   # only if the alias password differs
+```
+
+`PlayerBuilder.Build` applies them in memory for that build. Without them, the
+build fails with a message naming the keystore, instead of Unity's "Can not
+sign the application".
+
 ---
 
 ### Private git submodules (optional)
