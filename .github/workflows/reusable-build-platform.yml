@@ -724,8 +724,13 @@ jobs:
           UNITY_NO_ELEVATE: '1'
         run: |
           set -Eeuo pipefail
+          # If the CLI's install path is not writable by the runner account (an
+          # editor root created by an admin, e.g. /Applications/Unity/Hub/Editor),
+          # a missing editor goes to the runner account's home instead.
+          # UNITY_PREFLIGHT_INSTALL_ROOT in the runner's .env overrides both.
           args=(--project "${PROJECT_PATH}" --cli unity --format github-actions
-                --install-cli-to "${UNITY_PREFLIGHT_CLI_HOME:-${RUNNER_TOOL_CACHE}/unity-cli}")
+                --install-cli-to "${UNITY_PREFLIGHT_CLI_HOME:-${RUNNER_TOOL_CACHE}/unity-cli}"
+                --fallback-install-root "${USERPROFILE:-${HOME}}/Unity/Editors")
           # An Addressables-only build needs the editor but no platform module.
           if [[ "${PLATFORM}" != "Addressables" ]]; then
             args+=(--platform "${PLATFORM}")

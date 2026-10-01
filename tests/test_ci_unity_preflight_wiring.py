@@ -71,6 +71,7 @@ class TestWiring:
         assert "bash .toolkit/scripts/unity-preflight.sh" in run
         assert "--format github-actions" in run and "--cli unity" in run
         assert "--install-cli-to" in run
+        assert "--fallback-install-root" in run
 
     def test_toolkit_is_checked_out_before_preflight(self):
         checkout = step("preflight-toolkit")
