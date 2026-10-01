@@ -8,6 +8,39 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Unity preflight discovers existing editors before installing one, on Windows
+  and macOS runners.** Found on the first real self-hosted macOS run.
+  - **The bug:** v6.5.0 treated "not in the runner account's Unity CLI
+    registry" as "not installed". That registry is per OS account, so editors
+    an admin installed with Unity Hub were invisible. The run reported the
+    editor MISSING, then failed on the unwritable `/Applications/Unity/Hub/Editor`.
+    The native lanes used to find those editors by path; v6.5.0 had dropped
+    that lookup.
+  - **The fix:** preflight now searches, in order:
+    1. `UNITY_EDITOR`;
+    2. the CLI registry;
+    3. `UNITY_PREFLIGHT_INSTALL_ROOT`;
+    4. the runner-managed fallback root;
+    5. the CLI's install path;
+    6. the standard Unity Hub and legacy locations the lanes always used.
+
+    A match is registered with `unity editors add`, so the CLI confirms its
+    exact version; a mismatched editor is never used. Only then does it install.
+  - **Explicit `UNITY_EDITOR`:** an override unknown to the CLI is now
+    registered and version-checked, instead of being trusted unverified.
+  - **Fallback install root in CI:** a missing editor whose configured install
+    path isn't writable goes to `~/Unity/Editors` (new
+    `--fallback-install-root`) instead of failing.
+  - **Module installs:** before adding a module to an existing editor,
+    preflight checks that the editor's own folder is writable, not the install
+    root's.
+
+  See [docs/UNITY_PREFLIGHT.md § Editor discovery](docs/UNITY_PREFLIGHT.md#editor-discovery).
+
 ## [6.5.0] — 2026-10-01
 
 ### Added

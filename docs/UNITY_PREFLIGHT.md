@@ -240,6 +240,36 @@ $env:UNITY_CLI_CHANNEL='beta'; irm https://unity.com/install.ps1 | iex
 The Unity CLI is still in beta; its command syntax used here was checked
 against `1.0.0-beta.11`.
 
+## Editor discovery
+
+"The Unity CLI does not list it" does not mean "not installed": the CLI's
+registry belongs to the OS account running it. A runner account (a Windows
+service account, a dedicated macOS user) sees nothing that an admin installed
+with Unity Hub. So before installing an editor, preflight looks for one, in
+this order, on every host:
+
+| # | Where | Notes |
+|---|---|---|
+| 1 | `UNITY_EDITOR` / `--unity-editor` | Explicit. If the CLI doesn't know it, preflight registers it so the CLI reports its real version. The wrong version fails (exit 3). Never replaced |
+| 2 | The CLI's registry (`unity editors -i`) | Editors this account already knows |
+| 3 | `UNITY_PREFLIGHT_INSTALL_ROOT` / `--install-root` | Searched first, not only installed into |
+| 4 | `--fallback-install-root` | The runner-managed root CI installs into (`~/Unity/Editors`) |
+| 5 | The CLI's configured install path (`unity install-path --get`) | |
+| 6 | The standard locations this toolkit's lanes always used | Windows: `%ProgramFiles%\Unity\Hub\Editor\<v>\Editor\Unity.exe`, `%ProgramFiles%\Unity <v>\Editor\Unity.exe`; macOS: `/Applications/Unity/Hub/Editor/<v>/Unity.app`, `/Applications/Unity <v>/Unity.app` |
+
+- **Matching:** locations 3–6 are checked for the exact version, as
+  `<root>/<version>/Editor/Unity.exe` on Windows or `<root>/<version>/Unity.app`
+  on macOS. A match is registered with `unity editors add`.
+- **Version check:** the CLI then reads the editor's real version. A folder
+  named for the right version that holds another one is skipped, never used.
+- **Modules:** discovery is about the editor. Modules are checked afterwards,
+  through the CLI. A reused editor gets only its missing modules, and only if
+  its folder is writable; otherwise the step fails with exit 3 and the fix.
+- **When nothing is found:** only then does preflight install, into a
+  writable root (see [In CI](#in-ci-self-hosted-native-lanes)).
+- **`--check`:** reports editors it found on disk but never registers or
+  installs anything.
+
 ## Where Unity is installed
 
 Editors go wherever the CLI's install path points, unless `--install-root` /
@@ -408,8 +438,17 @@ scheduler → runner → checkout → toolkit checkout (.toolkit) → Unity pref
   as a fallback in CI (`--cli unity`).
 - **No elevation:** the step sets `UNITY_NO_ELEVATE=1`. A runner cannot answer
   a UAC prompt, so before installing anything preflight checks that the
-  install root is writable by the runner account. If it isn't, the step fails
-  (exit 3) and names the fix.
+  target is writable by the runner account:
+  - **A new editor:** if the CLI's install path isn't writable (e.g.
+    `/Applications/Unity/Hub/Editor` created by an admin), the editor goes to
+    the runner account's own `~/Unity/Editors` (`--fallback-install-root`)
+    instead. `UNITY_PREFLIGHT_INSTALL_ROOT` overrides both.
+  - **A module for an existing editor:** the module must land in that
+    editor's own folder. If that folder isn't writable, the step fails
+    (exit 3) and names the fix.
+- **Existing editors are found before anything is installed** — see
+  [Editor discovery](#editor-discovery). An editor installed by an admin with
+  Unity Hub is reused, never downloaded a second time.
 - **Idempotent and concurrent:** an editor or module already present is
   reused. Jobs that start together on one machine share preflight's install
   lock and install once.
