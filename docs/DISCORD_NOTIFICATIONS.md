@@ -137,8 +137,10 @@ How the messages split:
 - A message's status is its own platforms' status: an iOS failure turns the
   iOS message red and leaves the Android message green.
 - Addressables is shared by every platform, so it is listed in every message.
-- A run in which no platform built (for example, the quality gate stopped it)
-  posts one message to the default thread.
+- A platform the run set out to build still posts to its own thread when it
+  never ran (for example, a failed Unity Tests stage stopped the quality
+  gate), with the run's status and failed stage. Only a run that planned no
+  platform at all (`platform: None`) posts one message to the default thread.
 - All threads must belong to the channel of `DISCORD_WEBHOOK_URL`: a webhook
   can only post into threads of its own channel.
 
