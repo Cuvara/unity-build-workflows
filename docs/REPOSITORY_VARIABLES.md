@@ -312,6 +312,7 @@ fallback. When absent, everything above applies unchanged. Full guide:
 | Name | Kind | Default | Notes |
 |---|---|---|---|
 | `RUNNER_POLICY` | variable | *(unset)* | The policy as inline JSON. Wins over the file. Must be a repository or organization variable, not environment-scoped. |
+| `DISCORD_CONFIG_FILE` | variable | `.github/discord.json` | Path of the per-platform Discord thread config in the repository, relative to its root. Read by `resolve-config`; missing file = no routing. See [DISCORD_NOTIFICATIONS.md § Per-platform threads](DISCORD_NOTIFICATIONS.md#per-platform-threads-unity-pipelineyml). |
 | `RUNNER_POLICY_FILE` | variable | `.github/unity-runner-policy.json` | Path of the policy file in the repository, relative to its root. The pipeline reads the default path even when this is unset; the **standalone** workflows apply a policy only when this or `RUNNER_POLICY` is set, so their extra GitHub-hosted resolver job runs only for projects that opted in. |
 | `RUNNER_STATUS_TOKEN` | **secret** | *(unset)* | Read-only token for runner online/busy state: repository **Administration: read** (fine-grained) or `repo` (classic); for organization runners and groups, organization **Self-hosted runners: read** or `admin:org`. `GITHUB_TOKEN` cannot read runner status. Without it, scheduling uses declared capabilities with availability `unknown`. Never store it as a variable. |
 

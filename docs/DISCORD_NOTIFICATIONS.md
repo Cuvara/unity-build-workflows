@@ -78,26 +78,56 @@ The action validates the thread ID as a 17–20 digit numeric string (Discord sn
 
 Each platform can post into its own thread — Android builds into an Android
 thread, iOS builds into an iOS thread — and the thread can differ per
-environment. Set repository variables:
+environment. Configure it in a file committed to the project repository:
+
+**`.github/discord.json`** (another path: repository variable `DISCORD_CONFIG_FILE`)
+
+```json
+{
+  "threads": {
+    "development": { "Android": "1555415823538065530", "iOS": "1555415958141804554" },
+    "staging":     { "default": "1555415000000000003" },
+    "production":  { "default": "1555415000000000004" },
+    "*":           { "default": "1555415000000000005" }
+  }
+}
+```
+
+- Environment keys: `development`, `staging`, `production`, or `*` for every
+  environment.
+- Platform keys: `Android`, `iOS`, `WebGL`, `Linux64`, `LinuxServer`,
+  `Windows64`, or `default` for every platform without its own thread.
+- Keys are case-insensitive. Values are thread IDs (17–20 digits).
+- Thread IDs are not secrets, so the file is versioned and reviewed like any
+  other configuration. A new project copies `templates/discord.example.json`
+  and replaces the IDs.
+
+The file is read by the `resolve-config` job at the start of the run. An
+invalid file, an unknown environment or platform key, or a value that is not a
+thread ID is reported as an `::error::` annotation on the run and that entry is
+ignored — a notification setting never fails a build.
+
+**Repository variables override the file** without a commit — useful for a
+temporary redirect:
 
 | Variable | Scope |
 |---|---|
 | `DISCORD_THREAD_ID_<ENV>_<PLATFORM>` | One platform in one environment, e.g. `DISCORD_THREAD_ID_DEVELOPMENT_ANDROID` |
 | `DISCORD_THREAD_ID_<PLATFORM>` | One platform in every environment, e.g. `DISCORD_THREAD_ID_IOS` |
-| `DISCORD_THREAD_ID_<ENV>` | Default thread for one environment, e.g. `DISCORD_THREAD_ID_PRODUCTION` |
+| `DISCORD_THREAD_ID_<ENV>` | Default thread for one environment |
 | `DISCORD_THREAD_ID` | Default thread for everything (the original variable) |
 
 `<PLATFORM>` is `ANDROID`, `IOS`, `WEBGL`, `LINUX64`, `LINUXSERVER` or
-`WINDOWS64`; `<ENV>` is `DEVELOPMENT`, `STAGING` or `PRODUCTION`. For each
-platform the first one set wins, in the order of the table; a platform with no
-thread of its own uses the default thread, and with no default the channel
-root.
+`WINDOWS64`; `<ENV>` is `DEVELOPMENT`, `STAGING` or `PRODUCTION`.
 
-```bash
-REPO=YOUR_ORG/YOUR_REPO
-gh variable set DISCORD_THREAD_ID_DEVELOPMENT_ANDROID --repo "$REPO" --body "1555415823538065530"
-gh variable set DISCORD_THREAD_ID_DEVELOPMENT_IOS     --repo "$REPO" --body "1555415958141804554"
-```
+Lookup for one platform, first set wins:
+
+1. `DISCORD_THREAD_ID_<ENV>_<PLATFORM>`
+2. `DISCORD_THREAD_ID_<PLATFORM>`
+3. file `threads.<env>.<Platform>`
+4. file `threads."*".<Platform>`
+5. the default thread: `DISCORD_THREAD_ID_<ENV>`, `DISCORD_THREAD_ID`,
+   file `threads.<env>.default`, file `threads."*".default` — else the channel root.
 
 How the messages split:
 
