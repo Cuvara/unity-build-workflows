@@ -28,7 +28,7 @@ IOS_THREAD = "222222222222222222"
 DEFAULT_THREAD = "333333333333333333"
 
 FAKE_CURL = """#!/usr/bin/env bash
-n=$(ls "${CURL_LOG_DIR}" | wc -l)
+n=$(find "${CURL_LOG_DIR}" -name "*.url" | wc -l | tr -d " ")
 url="${@: -1}"
 printf '%s' "${url}" > "${CURL_LOG_DIR}/${n}.url"
 cat > "${CURL_LOG_DIR}/${n}.body"
@@ -154,9 +154,9 @@ def resolve(environment, variables):
     lines = out.splitlines()
     i = 0
     while i < len(lines):
-        key, _, value = lines[i].partition("=")
-        if value.startswith("<<"):
-            delim = value[2:]
+        line = lines[i]
+        if "<<" in line and ("=" not in line or line.index("<<") < line.index("=")):
+            key, _, delim = line.partition("<<")
             body = []
             i += 1
             while lines[i] != delim:
@@ -164,6 +164,7 @@ def resolve(environment, variables):
                 i += 1
             result[key] = "\n".join(body)
         else:
+            key, _, value = line.partition("=")
             result[key] = value
         i += 1
     return result
