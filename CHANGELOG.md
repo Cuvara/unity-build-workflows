@@ -8,6 +8,38 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [6.7.1] — 2026-10-02
+
+### Fixed
+
+- **Secrets leaked into the `-logs` artifact.** When Gradle fails, Unity
+  writes the whole process environment into Editor.log — on the native lanes
+  that includes `ANDROID_KEYSTORE_PASS` and `ANDROID_KEY_PASS` (since v6.6.0).
+  GitHub masks secrets on the console, not in files, so the uploaded log held
+  the password in plain text. A new `if: always()` step,
+  `scripts/common/redact_log_secrets.py`, replaces every secret value the build
+  job can see with `***` in all log files before they are summarised or
+  uploaded. See `docs/SECURITY.md` § Secrets in log artifacts. **Rotate any keystore password that was set as a secret while a
+  failed native Android build ran on v6.6.0–v6.7.0.**
+- **iOS release builds through `unity-pipeline.yml` could not sign.** The
+  pipeline's signing step passed `certificate-base64`, `certificate-password`
+  and `provisioning-profile-base64` to `ios-setup-signing`, which declares
+  `ios-distribution-certificate-base64`, `ios-distribution-certificate-password`
+  and `ios-provisioning-profile-base64`, and passed no bundle identifier or team
+  at all — so no certificate was imported and `ExportOptions.plist` could not be
+  generated. The tests only checked that the step existed.
+  - New `scripts/ios/configure_xcode_signing.py` reads team, profile and bundle
+    ID from the provisioning profile and the generated Xcode project, and writes
+    manual signing into the `Unity-iPhone` target before the archive. A project
+    no longer needs `appleDeveloperTeamID` or manual signing in PlayerSettings.
+  - A bundle ID that does not match the profile, or a profile type that does
+    not match `ios-export-method`, fails before `xcodebuild` with the reason.
+  - Cleanup now also removes the installed profile and the keychain by path.
+  - New tests check that every `with:` key of the iOS steps is an input the
+    action declares.
+
+---
+
 ## [6.7.0] — 2026-10-02
 
 ### Added
