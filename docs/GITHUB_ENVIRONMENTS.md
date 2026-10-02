@@ -133,7 +133,10 @@ secret **overrides** the caller-passed secret of the same name, so:
 - Name environment secrets with the toolkit's names (`ANDROID_KEYSTORE_PASS`,
   `ANDROID_KEY_PASS`, `IOS_DISTRIBUTION_CERTIFICATE_BASE64`,
   `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`).
-  Do not rename them in the caller.
+  The caller must still **list each name** (`ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}`):
+  GitHub hands an environment secret to a reusable workflow only for names
+  the caller passes. Empty at repository level, it resolves to the
+  environment value inside the build job. Do not rename them.
 - A secret missing from the environment falls back to the repository secret the
   caller passed. Delete the repository copy once every environment has its own.
 - Unity license, submodule key and other non-signing secrets stay at

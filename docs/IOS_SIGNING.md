@@ -39,7 +39,8 @@ Scope these to a `production` GitHub Environment for branch protection. See [IOS
 (`IOS_DISTRIBUTION_CERTIFICATE_BASE64`, `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`,
 `IOS_PROVISIONING_PROFILE_BASE64`) as **environment secrets** in each of
 `development`, `staging` and `production`, under exactly these names. The
-build job declares its environment and reads them from there. See
+build job declares its environment and reads them from there; the caller
+still lists the three names under `secrets:` (see Step 4 of the guide). See
 [MIGRATING_TO_ENVIRONMENT_SECRETS.md](MIGRATING_TO_ENVIRONMENT_SECRETS.md).
 
 ---
