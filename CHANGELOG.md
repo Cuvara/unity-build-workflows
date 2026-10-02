@@ -12,6 +12,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **iOS Xcode project size reported as ~1 MB.** The manifest measured the
+  `Unity-iPhone.xcodeproj` bundle — only the project description — instead of
+  the Unity iOS export around it (`Classes/`, `Data/`, `Libraries/`), so a
+  650 MB export showed as "1 MB" in Discord and the run summary. `XCODEPROJ`
+  is now a tree artifact like `ADDRESSABLES`: the export directory is the
+  artifact and its size is the sum of the tree.
 - **Firebase App Distribution uploads failed silently on self-hosted
   runners.** The upload runs `bundle exec fastlane` from the toolkit Gemfile,
   but nothing ran `bundle install`, so on a runner without the gems fastlane
