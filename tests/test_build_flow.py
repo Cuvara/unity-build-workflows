@@ -2127,3 +2127,23 @@ class TestRunnerEngine:
             "IN_ACTIVATION_STRATEGY": "manual-license",
         }).stdout)
         assert out["activation-strategy"] == "manual-license"
+
+
+# ── iOS development signing (ios-sign-development) ──────────────────────────
+
+class TestIosSignDevelopment:
+    def test_off_by_default(self):
+        out = parse_outputs(run_flow({"EVENT_NAME": "workflow_dispatch", "IN_PLATFORM": "iOS",
+                                      "IN_ENVIRONMENT": "development"}).stdout)
+        assert out["ios-sign-development"] == "false"
+
+    def test_opt_in(self):
+        out = parse_outputs(run_flow({"EVENT_NAME": "workflow_dispatch", "IN_PLATFORM": "iOS",
+                                      "IN_ENVIRONMENT": "development",
+                                      "NEW_BUILD_IOS_SIGN_DEVELOPMENT": "true"}).stdout)
+        assert out["ios-sign-development"] == "true"
+
+    def test_invalid_value_fails(self):
+        r = run_flow({"EVENT_NAME": "push", "REF_NAME": "develop",
+                      "NEW_BUILD_IOS_SIGN_DEVELOPMENT": "yes"})
+        assert r.returncode != 0 and "BUILD_IOS_SIGN_DEVELOPMENT" in r.stderr

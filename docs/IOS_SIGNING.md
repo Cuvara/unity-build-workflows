@@ -172,6 +172,21 @@ So the project needs no `appleDeveloperTeamID` or manual-signing setup in
 PlayerSettings: the three signing secrets are enough. A bundle ID or profile
 type mismatch fails before `xcodebuild` runs, with the reason in the log.
 
+### Signed development builds
+
+By default only release builds are signed: a development iOS build is an Xcode
+project, which needs a Mac and Xcode to install. Set
+`BUILD_IOS_SIGN_DEVELOPMENT=true` to sign development builds too:
+
+- The build also exports an IPA (`…_development_ios_ipa`), signed with the
+  `IOS_*` secrets of the **`development`** environment.
+- The export method is whatever that environment's profile allows — use an
+  **Ad Hoc** profile (or Development) whose devices include the testers'
+  devices. Release builds keep `ios-export-method` (default `app-store`).
+- With `BUILD_DELIVERY=firebase` the IPA goes to Firebase App Distribution, so
+  testers get the same install link as for Android. Only devices registered in
+  the profile can install it.
+
 ## Manual Signing vs. Automatic Signing
 
 ### Manual Signing (Recommended for CI)
