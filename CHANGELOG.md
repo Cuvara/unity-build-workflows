@@ -8,6 +8,29 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **iOS release builds through `unity-pipeline.yml` could not sign.** The
+  pipeline's signing step passed `certificate-base64`, `certificate-password`
+  and `provisioning-profile-base64` to `ios-setup-signing`, which declares
+  `ios-distribution-certificate-base64`, `ios-distribution-certificate-password`
+  and `ios-provisioning-profile-base64`, and passed no bundle identifier or team
+  at all — so no certificate was imported and `ExportOptions.plist` could not be
+  generated. The tests only checked that the step existed.
+  - New `scripts/ios/configure_xcode_signing.py` reads team, profile and bundle
+    ID from the provisioning profile and the generated Xcode project, and writes
+    manual signing into the `Unity-iPhone` target before the archive. A project
+    no longer needs `appleDeveloperTeamID` or manual signing in PlayerSettings.
+  - A bundle ID that does not match the profile, or a profile type that does
+    not match `ios-export-method`, fails before `xcodebuild` with the reason.
+  - Cleanup now also removes the installed profile and the keychain by path.
+  - New tests check that every `with:` key of the iOS steps is an input the
+    action declares.
+
+---
+
 ## [6.7.0] — 2026-10-02
 
 ### Added
