@@ -153,6 +153,25 @@ security list-keychain -d user -s "$KEYCHAIN_PATH"
 
 ---
 
+### Pipeline lane (`unity-pipeline.yml`): signing comes from the profile
+
+On the pipeline's iOS release build the player is built with the project's own
+PlayerSettings, which may carry no Apple team and automatic signing. Before the
+archive, `scripts/ios/configure_xcode_signing.py` reads everything signing
+needs from the provisioning profile and writes manual signing into the
+generated Xcode project:
+
+| Value | Source |
+|---|---|
+| Team ID | the profile's `TeamIdentifier` |
+| Provisioning profile | the profile's `Name` (set as `PROVISIONING_PROFILE_SPECIFIER` on the `Unity-iPhone` target only; framework targets get the team, no profile) |
+| Bundle ID | the `Unity-iPhone` target's `PRODUCT_BUNDLE_IDENTIFIER`, checked against the profile's `application-identifier` (wildcards accepted) |
+| Export method | must match the profile type: an **App Store** profile for the default `ios-export-method: app-store` |
+
+So the project needs no `appleDeveloperTeamID` or manual-signing setup in
+PlayerSettings: the three signing secrets are enough. A bundle ID or profile
+type mismatch fails before `xcodebuild` runs, with the reason in the log.
+
 ## Manual Signing vs. Automatic Signing
 
 ### Manual Signing (Recommended for CI)
