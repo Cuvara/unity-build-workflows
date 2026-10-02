@@ -1,11 +1,14 @@
 name: Setup Fastlane
 description: >
-  Install Ruby and Fastlane with Bundler caching.
-  Used by release pipelines that replace custom Python/shell scripts.
+  Install Ruby and Fastlane with Bundler caching. On GitHub-hosted runners via
+  ruby/setup-ruby; on self-hosted runners with the runner's own Ruby, because
+  ruby/setup-ruby installs into /Users/runner/hostedtoolcache (macOS) or
+  /opt/hostedtoolcache, which a self-hosted runner account cannot create
+  ("EACCES: permission denied, mkdir '/Users/runner'").
 
 inputs:
   ruby-version:
-    description: Ruby version to install.
+    description: Ruby version to install (GitHub-hosted runners only).
     required: false
     default: '3.2'
   working-directory:
@@ -16,9 +19,26 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup Ruby
+    - name: Setup Ruby (GitHub-hosted)
+      if: ${{ runner.environment != 'self-hosted' }}
       uses: ruby/setup-ruby@v1
       with:
         ruby-version: ${{ inputs.ruby-version }}
         bundler-cache: true
         working-directory: ${{ inputs.working-directory }}
+
+    - name: Install gems with the runner's Ruby (self-hosted)
+      if: ${{ runner.environment == 'self-hosted' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -Eeuo pipefail
+        if ! command -v bundle >/dev/null 2>&1; then
+          echo "::error title=Ruby with Bundler not found::fastlane needs Ruby >= 2.7 with Bundler for the runner account (macOS: brew install ruby, put Homebrew's Ruby first on the runner's PATH, gem install bundler; Windows: RubyInstaller). See docs/BUILD_DELIVERY.md."
+          exit 1
+        fi
+        echo "Ruby: $(ruby --version) — $(command -v ruby)"
+        # A per-runner cache instead of the system gem dir: no sudo, reused
+        # across runs.
+        bundle config set --local path "${RUNNER_TOOL_CACHE:-${HOME}/.cache}/toolkit-gems"
+        bundle install --quiet

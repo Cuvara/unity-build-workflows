@@ -1723,6 +1723,9 @@ jobs:
 
       # ── Step 11a-pre: Setup Fastlane for Firebase delivery ──────────────────
       - name: Setup Fastlane (delivery)
+        # Delivery never fails a build: a missing Ruby is a warning on the
+        # run, and the upload step below reports it again.
+        continue-on-error: true
         if: ${{ inputs.build-delivery == 'firebase' && (inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios)) && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
         uses: ./.toolkit/.github/actions/setup-fastlane
         with:
