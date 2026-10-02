@@ -22,6 +22,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **Discord: an iOS message showed Android build info and every platform.**
+  Build Info read every field from the Android settings — an iOS build said
+  "Arch: ARMv7+ARM64 • Output: APK • Store: Google Play" — and the artifact
+  list showed all seven platforms, five of them `skipped`. Build Info now has
+  a line per platform in the message (**Android:** bundle, backend, arch,
+  APK/AAB, defines, Play link; **iOS:** bundle, IL2CPP, IPA / Xcode project,
+  defines), and a message lists only the platforms it is about. New
+  `extract_project_metadata.sh` outputs `bundle-id-ios` and
+  `define-symbols-count-ios`, passed to `discord-upload-build`.
 - **iOS Xcode project size reported as ~1 MB.** The manifest measured the
   `Unity-iPhone.xcodeproj` bundle — only the project description — instead of
   the Unity iOS export around it (`Classes/`, `Data/`, `Libraries/`), so a
