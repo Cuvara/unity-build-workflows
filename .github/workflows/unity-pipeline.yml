@@ -358,6 +358,7 @@ jobs:
       sign-ios:               ${{ steps.matrix.outputs.sign-ios }}
       ipa-artifact-name:      ${{ steps.matrix.outputs.ipa-artifact-name }}
       build-type:             ${{ steps.matrix.outputs.build-type }}
+      planned-platforms:      ${{ steps.matrix.outputs.planned-platforms }}
       build-type-label:       ${{ steps.matrix.outputs.build-type-label }}
       android-artifact-type:  ${{ steps.matrix.outputs.android-artifact-type }}
       label-addressables:     ${{ steps.matrix.outputs.label-addressables }}
@@ -907,6 +908,15 @@ jobs:
           fi
           SIGN_MATRIX="[${SIGN_ROWS%,}]"
 
+          # The platforms this run set out to build, whether or not they got
+          # to run: a quality-gate failure still has to reach each platform's
+          # Discord thread, not the channel root.
+          PLANNED=""
+          for _sel in ANDROID:Android WEBGL:WebGL LINUX64:Linux64 LINUXSERVER:LinuxServer WINDOWS64:Windows64 IOS:iOS; do
+            _var="SEL_${_sel%%:*}"
+            [ "${!_var:-false}" = "true" ] && PLANNED="${PLANNED:+${PLANNED} }${_sel##*:}"
+          done
+
           # A matrix with no vectors is a workflow error, so the jobs are also
           # gated on these being non-empty.
           {
@@ -915,6 +925,7 @@ jobs:
             echo "sign-ios=$([ "${SIGN_MATRIX}" = "[]" ] && echo false || echo true)"
             echo "ipa-artifact-name=$([ "${SIGN_MATRIX}" != "[]" ] && echo "${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_ios_ipa" || echo "")"
             echo "build-type=${BUILD_TYPE}"
+            echo "planned-platforms=${PLANNED}"
             echo "build-type-label=${BUILD_TYPE_LABEL}"
             echo "android-artifact-type=${ANDROID_ARTIFACT}"
             echo "label-addressables=${CONFIG}"
@@ -1208,6 +1219,7 @@ jobs:
       build-engine:        ${{ needs.resolve-config.outputs.build-engine }}
       activation-strategy: ${{ needs.resolve-config.outputs.activation-strategy }}
       toolkit-ref:         ${{ needs.resolve-config.outputs.toolkit-ref }}
+      toolkit-repo:        ${{ inputs.toolkit-repo }}
       submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
@@ -2400,6 +2412,8 @@ jobs:
           # if that step failed.
           thread-id:           ${{ needs.resolve-config.outputs.discord-thread-id || vars.DISCORD_THREAD_ID }}
           platform-thread-ids: ${{ needs.resolve-config.outputs.discord-platform-thread-ids }}
+          # Routed even when the quality gate stopped them before they built.
+          planned-platforms:   ${{ needs.resolve-config.outputs.planned-platforms }}
           artifact-dir:        ./artifacts
           attach-size-threshold-mb: '8'
           actor:               ${{ github.actor }}

@@ -8,6 +8,26 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [6.8.1] — 2026-10-02
+
+### Fixed
+
+- **Discord: a run stopped before building posted to the channel root.** When
+  the quality gate stopped a run (e.g. Unity Tests failed), no platform had a
+  result, so the per-platform router fell back to the default thread — the
+  channel root for a project that routes only per platform. The pipeline now
+  passes `planned-platforms` (new `discord-upload-build` input and
+  resolve-config output) and every platform the run set out to build posts to
+  its own thread with the run's status and failed stage.
+- **Unity Tests on native lanes could not find the editor.** The macOS and
+  Windows test steps assumed Unity Hub's default install path and failed with
+  `Unity executable not found` on runners whose editors live elsewhere (e.g.
+  `~/Unity/Editors`), while the build job found the same editor. The test job
+  now runs Unity preflight like the build job and uses the editor it reports;
+  new `reusable-unity-tests.yml` input `toolkit-repo`.
+
+---
+
 ## [6.8.0] — 2026-10-02
 
 ### Added
