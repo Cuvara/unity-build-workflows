@@ -163,21 +163,28 @@ See [docs/ADD_NEW_PROJECT.md](docs/ADD_NEW_PROJECT.md) for the complete onboardi
 
 ### 5. Add iOS Secrets (iOS builds only)
 
-For iOS, add at **Settings → Secrets and variables → Actions**:
+Repository secrets (**Settings → Secrets and variables → Actions**):
 
 ```
 UNITY_LICENSE                              # .ulf license content
 UNITY_EMAIL                                # Unity account email
 UNITY_PASSWORD                             # Unity account password
-IOS_DISTRIBUTION_CERTIFICATE_BASE64        # Base64-encoded .p12 certificate
-IOS_DISTRIBUTION_CERTIFICATE_PASSWORD      # .p12 export password
-IOS_PROVISIONING_PROFILE_BASE64            # Base64-encoded .mobileprovision
 APP_STORE_CONNECT_KEY_ID                   # ASC API key ID (for TestFlight)
 APP_STORE_CONNECT_ISSUER_ID                # ASC issuer UUID (for TestFlight)
 APP_STORE_CONNECT_PRIVATE_KEY              # .p8 key contents (for TestFlight)
 ```
 
-Scope `APP_STORE_CONNECT_*` to the `production` GitHub Environment. See [docs/IOS_SIGNING.md](docs/IOS_SIGNING.md).
+Environment secrets, in each of `development`, `staging` and `production`
+(**Settings → Environments → <env>**):
+
+```
+IOS_DISTRIBUTION_CERTIFICATE_BASE64        # Base64-encoded .p12 certificate
+IOS_DISTRIBUTION_CERTIFICATE_PASSWORD      # .p12 export password
+IOS_PROVISIONING_PROFILE_BASE64            # Base64-encoded .mobileprovision
+```
+
+See [docs/IOS_SIGNING.md](docs/IOS_SIGNING.md) and
+[docs/MIGRATING_TO_ENVIRONMENT_SECRETS.md](docs/MIGRATING_TO_ENVIRONMENT_SECRETS.md).
 
 ### 6. Enable Discord Notifications (optional)
 

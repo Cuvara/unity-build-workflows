@@ -88,6 +88,7 @@ UNITY_RELEASE_DEFINE_SYMBOLS=PRODUCTION;LIVE_BACKEND
 | `BUILD_RELEASE_PLATFORMS` | `Android,WebGL,Linux64,LinuxServer,Windows64` | `push → release-*` | Legacy: `RELEASE_BUILD_PLATFORMS`. |
 | `BUILD_TIMEOUT_MINUTES` | `120` | all build jobs | Positive integer; per-job timeout in minutes. |
 | `BUILD_CLEAN` | `false` | all build jobs | See [BUILD_CLEAN](#build_clean-clean-vs-incremental-builds) below. |
+| `BUILD_ENVIRONMENT_SECRETS` | `true` | platform build jobs | The build job declares the GitHub Environment matching the build environment (`development` \| `staging` \| `production`), so **environment-scoped secrets override repository secrets of the same name** — signing keys per environment. Applies to push and manual dispatch, never to PRs; each build creates a deployment and passes that environment's protection rules. `false` = no environment, repository secrets only. See [GITHUB_ENVIRONMENTS.md § Environment-scoped build secrets](GITHUB_ENVIRONMENTS.md#environment-scoped-build-secrets). |
 
 Platform lists are comma-separated and case-sensitive. **Allowed platform
 names:** `Android`, `WebGL`, `Linux64`, `LinuxServer`, `Windows64`, `iOS`.
@@ -476,8 +477,16 @@ ARTIFACT_COMPRESSION=zip
 | `UNITY_LICENSE` | Unity license file content (`.ulf`) |
 | `UNITY_EMAIL` | Unity account email |
 | `UNITY_PASSWORD` | Unity account password |
-| Keystore secrets | Android signing keystore and passwords |
-| Apple signing | iOS distribution certificates and provisioning profiles |
+
+**Settings → Environments → `development` / `staging` / `production` → Environment secrets**
+(one set per environment, under these exact names):
+
+| Secret | Purpose |
+|---|---|
+| `ANDROID_KEYSTORE_PASS`, `ANDROID_KEY_PASS` | Android signing keystore passwords |
+| `IOS_DISTRIBUTION_CERTIFICATE_BASE64`, `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64` | iOS distribution certificate and provisioning profile |
+
+See [MIGRATING_TO_ENVIRONMENT_SECRETS.md](MIGRATING_TO_ENVIRONMENT_SECRETS.md).
 
 ## Best practices
 
