@@ -277,6 +277,17 @@ inputs:
     required: false
     default: ''
 
+  platform-thread-ids:
+    description: |
+      Per-platform thread routing, one `Platform=<snowflake>` per line
+      (Android, WebGL, Linux64, LinuxServer, Windows64, iOS). Each platform
+      that ran posts to its own thread; platforms without an entry use
+      thread-id. Platforms sharing a thread share one message, which lists only
+      them (Addressables appears in every message). Empty = one message for
+      the whole run in thread-id, as before. NOT a secret.
+    required: false
+    default: ''
+
   # ── File attachment ────────────────────────────────────────────────────────────
   artifact-dir:
     description: |
@@ -351,6 +362,7 @@ runs:
         INPUT_CONFIGURATION:         ${{ inputs.configuration }}
         INPUT_THREAD_ID:             ${{ inputs.thread-id }}
         INPUT_THREAD_NAME:           ${{ inputs.thread-name }}
+        INPUT_PLATFORM_THREAD_IDS:   ${{ inputs.platform-thread-ids }}
         INPUT_ARTIFACT_DIR:          ${{ inputs.artifact-dir }}
         INPUT_THRESHOLD_MB:          ${{ inputs.attach-size-threshold-mb }}
       run: |
@@ -360,6 +372,11 @@ runs:
         # Disable exit-on-error: this action must never fail the pipeline.
         # Risky operations use || true; unexpected errors emit ::warning:: only.
         set +e
+
+        # One message = one call of _post_group, a subshell: its `exit`s end
+        # that message only, and per-group INPUT_* overrides cannot leak into
+        # the next group. The router at the bottom decides how many calls.
+        _post_group() (
 
         # ── Step 1: Guard — webhook present? ─────────────────────────────────
         if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
@@ -467,6 +484,15 @@ runs:
 
           PLAT="${PLAT_ENTRY%%:*}"
           RESULT="${PLAT_ENTRY##*:}"
+
+          # A per-thread message lists only the platforms routed to it.
+          # Addressables is shared by every platform, so it stays in all.
+          if [ -n "${INPUT_ONLY_PLATFORMS:-}" ] && [ "${PLAT}" != "Addressables" ]; then
+            case " ${INPUT_ONLY_PLATFORMS} " in
+              *" ${PLAT} "*) ;;
+              *) continue ;;
+            esac
+          fi
 
           case "${RESULT}" in
             success)   RE="✅" ;;
@@ -972,3 +998,89 @@ runs:
 
         # ── Step 9: Cleanup temp files ────────────────────────────────────────
         rm -f /tmp/unity-build-*-$$.zip "${_RESP_FILE}" "${_CODE_FILE}" "${_ERR_FILE}" 2>/dev/null || true
+        )
+
+        # ── Router: one message per destination thread ────────────────────────
+        # platform-thread-ids maps a platform to its own thread. Without it —
+        # or when every platform that ran lands in the same thread — the run
+        # posts exactly one message, the same as before per-platform routing.
+        declare -A _ROUTE
+        while IFS='=' read -r _rp _rt || [ -n "${_rp}" ]; do
+          _rp="$(printf '%s' "${_rp}" | tr -d '[:space:]')"
+          _rt="$(printf '%s' "${_rt}" | tr -d '[:space:]')"
+          [ -z "${_rp}" ] || [ -z "${_rt}" ] && continue
+          if ! printf '%s' "${_rt}" | grep -qE '^[0-9]{17,20}$'; then
+            echo "::warning::Discord upload-build: thread for ${_rp} '${_rt}' is not a valid snowflake (17-20 digits) — using the default thread."
+            continue
+          fi
+          _ROUTE["${_rp}"]="${_rt}"
+        done <<< "${INPUT_PLATFORM_THREAD_IDS:-}"
+
+        _GROUP_THREADS=()            # destination threads, first-seen order
+        declare -A _GROUP_PLATS      # thread → "Android iOS"
+        for _gp in Android WebGL Linux64 LinuxServer Windows64 iOS; do
+          case "${_gp}" in
+            Android)     _gr="${INPUT_RESULT_ANDROID:-skipped}" ;;
+            WebGL)       _gr="${INPUT_RESULT_WEBGL:-skipped}" ;;
+            Linux64)     _gr="${INPUT_RESULT_LINUX64:-skipped}" ;;
+            LinuxServer) _gr="${INPUT_RESULT_LINUXSERVER:-skipped}" ;;
+            Windows64)   _gr="${INPUT_RESULT_WINDOWS64:-skipped}" ;;
+            iOS)         _gr="${INPUT_RESULT_IOS:-skipped}" ;;
+          esac
+          [ "${_gr}" = "skipped" ] && continue
+          _gt="${_ROUTE[${_gp}]:-${INPUT_THREAD_ID:-}}"
+          _gk="t${_gt}"              # "t" prefix: the channel root is a key too
+          if [ -z "${_GROUP_PLATS[${_gk}]+set}" ]; then
+            _GROUP_THREADS+=("${_gk}")
+            _GROUP_PLATS["${_gk}"]="${_gp}"
+          else
+            _GROUP_PLATS["${_gk}"]="${_GROUP_PLATS[${_gk}]} ${_gp}"
+          fi
+        done
+
+        if [ "${#_GROUP_THREADS[@]}" -le 1 ]; then
+          # Nothing ran (e.g. the quality gate stopped the run) or everything
+          # shares one destination: one message with the run's overall status.
+          if [ "${#_GROUP_THREADS[@]}" -eq 1 ]; then
+            INPUT_THREAD_ID="${_GROUP_THREADS[0]#t}"
+          fi
+          _post_group
+          exit 0
+        fi
+
+        for _gk in "${_GROUP_THREADS[@]}"; do
+          _gplats="${_GROUP_PLATS[${_gk}]}"
+          # The message's status is its own platforms', not the run's: an iOS
+          # failure must not paint the Android thread red.
+          _n=0; _ok=0; _fail=0; _cancel=0
+          for _gp in ${_gplats}; do
+            case "${_gp}" in
+              Android)     _gr="${INPUT_RESULT_ANDROID}";     _gv="${INPUT_VALIDATION_ANDROID:-}" ;;
+              WebGL)       _gr="${INPUT_RESULT_WEBGL}";       _gv="${INPUT_VALIDATION_WEBGL:-}" ;;
+              Linux64)     _gr="${INPUT_RESULT_LINUX64}";     _gv="" ;;
+              LinuxServer) _gr="${INPUT_RESULT_LINUXSERVER}"; _gv="" ;;
+              Windows64)   _gr="${INPUT_RESULT_WINDOWS64}";   _gv="" ;;
+              iOS)         _gr="${INPUT_RESULT_IOS}";         _gv="${INPUT_VALIDATION_IOS:-}" ;;
+            esac
+            _n=$((_n + 1))
+            [ "${_gv}" = "failure" ] && _gr="failure"
+            case "${_gr}" in
+              success)   _ok=$((_ok + 1)) ;;
+              failure)   _fail=$((_fail + 1)) ;;
+              cancelled) _cancel=$((_cancel + 1)) ;;
+            esac
+          done
+          if   [ "${_fail}" -gt 0 ];        then _gstatus="failure"
+          elif [ "${_ok}" -eq "${_n}" ];    then _gstatus="success"
+          elif [ "${_cancel}" -eq "${_n}" ]; then _gstatus="cancelled"
+          else                                   _gstatus="partial"
+          fi
+          _gthread="${_gk#t}"
+          echo "Discord upload-build: ${_gplats} → ${_gthread:-channel root} (${_gstatus})"
+          (
+            export INPUT_THREAD_ID="${_gthread}"
+            export INPUT_ONLY_PLATFORMS="${_gplats}"
+            export INPUT_STATUS="${_gstatus}"
+            _post_group
+          )
+        done
