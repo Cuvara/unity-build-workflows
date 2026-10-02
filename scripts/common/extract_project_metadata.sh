@@ -13,11 +13,13 @@
 #   product-name        Application.productName
 #   app-version         bundleVersion (e.g. 0.4.0)
 #   bundle-id-android   applicationIdentifier.Android (e.g. com.ondi.pack.adventure)
+#   bundle-id-ios       applicationIdentifier.iPhone
 #   bundle-id           bundle-id-android or Standalone fallback
 #   scripting-backend   IL2CPP | Mono  (Android target; default Mono)
 #   android-arch        ARMv7 | ARM64 | ARMv7+ARM64 | x86 | x86_64 | (raw)
 #   orientation         Portrait | PortraitUpsideDown | LandscapeRight | LandscapeLeft | AutoRotation
 #   store-link-android  Play Store URL derived from bundle-id-android (empty if no id)
+#   define-symbols-count-ios  scriptingDefineSymbols.iPhone token count
 # =============================================================================
 set -Euo pipefail
 
@@ -35,7 +37,7 @@ emit() {
 
 if [ ! -f "$PS" ]; then
   log "ProjectSettings.asset not found at $PS — emitting empty metadata"
-  for k in product-name app-version bundle-id-android bundle-id scripting-backend android-arch orientation define-symbols-count store-link-android; do
+  for k in product-name app-version bundle-id-android bundle-id-ios bundle-id scripting-backend android-arch orientation define-symbols-count define-symbols-count-ios store-link-android; do
     emit "$k" ""
   done
   exit 0
@@ -47,6 +49,7 @@ app_version=$(grep -m1 -E '^\s*bundleVersion:' "$PS" | sed -E 's/^\s*bundleVersi
 
 # ── applicationIdentifier map (Android / Standalone) ────────────────────────
 bundle_android=$(awk '/^\s*applicationIdentifier:/{f=1;next} f&&/^\s*Android:/{sub(/^\s*Android:\s*/,"");print;exit} f&&/^\s*[A-Za-z]/&&!/^\s+/{exit}' "$PS" | tr -d '\r' || true)
+bundle_ios=$(awk '/^\s*applicationIdentifier:/{f=1;next} f&&/^\s*iPhone:/{sub(/^\s*iPhone:\s*/,"");print;exit} f&&/^\s*[A-Za-z]/&&!/^\s+/{exit}' "$PS" | tr -d '\r' || true)
 bundle_standalone=$(awk '/^\s*applicationIdentifier:/{f=1;next} f&&/^\s*Standalone:/{sub(/^\s*Standalone:\s*/,"");print;exit} f&&/^\s*buildNumber:/{exit}' "$PS" | tr -d '\r' || true)
 bundle_id="${bundle_android:-$bundle_standalone}"
 
@@ -87,6 +90,12 @@ define_symbols_count=0
 if [ -n "$defines_android" ]; then
   define_symbols_count=$(printf '%s' "$defines_android" | tr ';' '\n' | sed '/^[[:space:]]*$/d' | grep -c . || echo 0)
 fi
+# Same for iPhone: a project's iOS defines differ from its Android ones.
+defines_ios=$(awk '/^\s*scriptingDefineSymbols:/{f=1;next} f&&/^\s*iPhone:/{sub(/^\s*iPhone:\s*/,"");print;exit} f&&/^\s*[A-Za-z].*:/&&!/^\s+/{exit}' "$PS" | tr -d '\r' || true)
+define_symbols_count_ios=0
+if [ -n "$defines_ios" ]; then
+  define_symbols_count_ios=$(printf '%s' "$defines_ios" | tr ';' '\n' | sed '/^[[:space:]]*$/d' | grep -c . || echo 0)
+fi
 
 store_link_android=""
 [ -n "$bundle_android" ] && store_link_android="https://play.google.com/store/apps/details?id=${bundle_android}"
@@ -94,9 +103,11 @@ store_link_android=""
 emit "product-name"       "$product_name"
 emit "app-version"        "$app_version"
 emit "bundle-id-android"  "$bundle_android"
+emit "bundle-id-ios"      "$bundle_ios"
 emit "bundle-id"          "$bundle_id"
 emit "scripting-backend"  "$scripting_backend"
 emit "android-arch"       "$android_arch"
 emit "orientation"        "$orientation"
 emit "define-symbols-count" "$define_symbols_count"
+emit "define-symbols-count-ios" "$define_symbols_count_ios"
 emit "store-link-android" "$store_link_android"
