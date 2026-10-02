@@ -8,6 +8,22 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Firebase App Distribution uploads failed silently on self-hosted
+  runners.** The upload runs `bundle exec fastlane` from the toolkit Gemfile,
+  but nothing ran `bundle install`, so on a runner without the gems fastlane
+  died with "Could not find gem" and `|| true` hid it: a green build and
+  nothing in Firebase. The step now installs the gems into the runner's tool
+  cache (no sudo) and turns every failure — no Bundler, `bundle install`
+  failing, the upload failing — into a named warning on the run. Delivery still
+  never fails a build. `docs/BUILD_DELIVERY.md` said the Firebase CLI was used;
+  it is fastlane, and a self-hosted runner needs Ruby with Bundler.
+
+---
+
 ## [6.8.1] — 2026-10-02
 
 ### Fixed

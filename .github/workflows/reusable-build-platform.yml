@@ -1771,20 +1771,33 @@ jobs:
             trap 'rm -f "${SA_FILE}"' EXIT
 
             cd .toolkit
+            # Fastlane and its Firebase plugin come from the toolkit Gemfile.
+            # Nothing installed them, so on a self-hosted runner `bundle exec`
+            # died with "Could not find gem" and `|| true` hid it: a green
+            # build, nothing in Firebase. Install into a per-runner cache
+            # (no sudo), and say what went wrong instead of swallowing it.
+            # A delivery failure still never fails the build.
+            if ! command -v bundle >/dev/null 2>&1; then
+              echo "::warning title=Firebase delivery skipped::Ruby with Bundler is not installed on this runner (gem install bundler). The build was not uploaded to Firebase."
+              exit 0
+            fi
+            bundle config set --local path "${RUNNER_TOOL_CACHE:-${HOME}/.cache}/toolkit-gems" >/dev/null || true
+            if ! bundle install --quiet; then
+              echo "::warning title=Firebase delivery skipped::bundle install failed for the toolkit Gemfile (fastlane + firebase_app_distribution) — see the log above. The build was not uploaded to Firebase."
+              exit 0
+            fi
             if [ "${{ inputs.platform }}" = "iOS" ]; then
-              bundle exec fastlane ios firebase_distribute \
-                app_id:"${FIREBASE_APP_ID}" \
-                ipa_path:"${GITHUB_WORKSPACE}/${ARTIFACT}" \
-                service_account_path:"${SA_FILE}" \
-                groups:"${FIREBASE_TESTER_GROUPS}" \
-                release_notes:"${FIREBASE_RELEASE_NOTES}" || true
+              LANE=(ios firebase_distribute ipa_path:"${GITHUB_WORKSPACE}/${ARTIFACT}")
             else
-              bundle exec fastlane android firebase_distribute \
+              LANE=(android firebase_distribute apk_path:"${GITHUB_WORKSPACE}/${ARTIFACT}")
+            fi
+            if ! bundle exec fastlane "${LANE[@]}" \
                 app_id:"${FIREBASE_APP_ID}" \
-                apk_path:"${GITHUB_WORKSPACE}/${ARTIFACT}" \
                 service_account_path:"${SA_FILE}" \
                 groups:"${FIREBASE_TESTER_GROUPS}" \
-                release_notes:"${FIREBASE_RELEASE_NOTES}" || true
+                release_notes:"${FIREBASE_RELEASE_NOTES}"; then
+              echo "::warning title=Firebase upload failed::fastlane firebase_distribute failed — see its output above. Check FIREBASE_APP_ID_ANDROID / FIREBASE_APP_ID_IOS, FIREBASE_SERVICE_ACCOUNT_JSON (role: Firebase App Distribution Admin) and FIREBASE_TESTER_GROUPS (groups must exist)."
+              exit 0
             fi
             cd "${GITHUB_WORKSPACE}"
 
