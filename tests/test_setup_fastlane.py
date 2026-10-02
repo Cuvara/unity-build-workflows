@@ -26,10 +26,12 @@ def test_setup_ruby_only_on_github_hosted_runners():
 
 
 def test_self_hosted_runners_use_their_own_ruby():
-    own = next(s for s in _steps() if s.get("if") == "${{ runner.environment == 'self-hosted' }}")
+    own = next(s for s in _steps() if s.get("name") == "Install gems (self-hosted)")
     assert "bundle install" in own["run"]
     assert "RUNNER_TOOL_CACHE" in own["run"], "gems go to a per-runner cache, no sudo"
-    assert "Ruby with Bundler not found" in own["run"]
+    find = next(s for s in _steps() if s.get("id") == "ruby")
+    assert "ensure_ruby.sh" in find["run"]
+    assert find["if"] == "${{ runner.environment == 'self-hosted' }}"
 
 
 def test_delivery_setup_never_fails_the_build():

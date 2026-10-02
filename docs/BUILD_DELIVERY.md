@@ -127,12 +127,17 @@ APKs server-side for tester devices.
    `Firebase App Distribution Admin` role.
 5. Download the JSON key.
 6. The upload runs **fastlane** with the `firebase_app_distribution` plugin from
-   the toolkit's `Gemfile`. The build job runs `bundle install` into the
-   runner's tool cache (no sudo) before uploading. GitHub-hosted runners have
-   Ruby and Bundler; a **self-hosted runner needs Ruby with Bundler** installed
-   for the runner account (macOS: `brew install ruby`, then put Homebrew's Ruby
-   first on the runner's `PATH`; Windows: RubyInstaller). Without it the step
-   warns `Firebase delivery skipped` and the build stays green.
+   the toolkit's `Gemfile`, so it needs Ruby. GitHub-hosted runners get it from
+   `ruby/setup-ruby`. On a **self-hosted runner** the build job runs
+   `scripts/common/ensure_ruby.sh`, which *runs* each candidate and checks its
+   version: `ruby` on PATH, then what `brew --prefix ruby`, `rbenv which ruby`,
+   `asdf which ruby` or `where ruby` report. macOS's system Ruby 2.6 is
+   rejected (too old; its Bundler needs sudo). With no usable Ruby it installs
+   one — `brew install ruby` on macOS, `winget install
+   RubyInstallerTeam.RubyWithDevKit.3.3` on Windows — puts it on PATH for the
+   job, installs Bundler, and the gems go to the runner's tool cache (no sudo).
+   A machine without Homebrew/winget gets the exact command to run instead, and
+   the step warns `Firebase delivery skipped`; the build stays green.
 7. A failed upload (wrong app ID, service account without the
    `Firebase App Distribution Admin` role, a tester group that does not exist)
    is a `Firebase upload failed` warning on the run — never a failed build, and
