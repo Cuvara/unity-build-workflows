@@ -98,6 +98,12 @@ on:
         default: token
         type: string
 
+      toolkit-repo:
+        description: Toolkit repository (owner/repo) checked out for Unity preflight on native lanes.
+        required: false
+        default: 'Cuvara/unity-build-workflows'
+        type: string
+
       toolkit-ref:
         description: Git ref of the toolkit repo (used when calling toolkit scripts).
         required: false
@@ -367,6 +373,43 @@ jobs:
           # attempt a check run, and the attempt fails on a read-only token.
           githubToken:   ${{ inputs.post-test-check-run && github.token || '' }}
 
+      # ── 4b. Unity preflight — native lanes ────────────────────────────────────
+      # The test steps used to assume a Unity Hub default path
+      # (/Applications/Unity/Hub/Editor/<v>, C:\Program Files\Unity\Hub\Editor\<v>)
+      # and failed with "Unity executable not found" on a runner whose editors
+      # live elsewhere — while the build job, which runs preflight, found the
+      # same editor. Same discovery as the build job; tests need no platform
+      # module, only the editor ProjectVersion.txt names.
+      - name: Checkout toolkit (Unity preflight)
+        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+          clean: false
+
+      - name: Unity preflight (provision editor)
+        id: unity-preflight
+        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') }}
+        shell: bash
+        env:
+          PROJECT_PATH:     ${{ inputs.project-path }}
+          EXPECTED_VERSION: ${{ inputs.unity-version }}
+          UNITY_NO_ELEVATE: '1'
+        run: |
+          set -Eeuo pipefail
+          args=(--project "${PROJECT_PATH}" --cli unity --format github-actions
+                --install-cli-to "${UNITY_PREFLIGHT_CLI_HOME:-${RUNNER_TOOL_CACHE}/unity-cli}"
+                --fallback-install-root "${USERPROFILE:-${HOME}}/Unity/Editors")
+          RESULT="$(bash .toolkit/scripts/unity-preflight.sh "${args[@]}")"
+          eval "${RESULT}"
+          if [[ -n "${EXPECTED_VERSION}" && "${EXPECTED_VERSION}" != "${UNITY_VERSION}" ]]; then
+            echo "::error title=Unity version mismatch::unity-version input is ${EXPECTED_VERSION}, but ${UNITY_PROJECT_PATH}/ProjectSettings/ProjectVersion.txt requires ${UNITY_VERSION}."
+            exit 1
+          fi
+          echo "Unity ${UNITY_VERSION} for tests: ${UNITY_EDITOR} (${UNITY_EDITOR_SOURCE})"
+
       # ── 4c. Run tests — self-hosted-windows lane ──────────────────────────────
       # Local Unity installation (no Docker, no license secrets).
       # Runs EditMode and/or PlayMode sequentially; continues past EditMode failure for All.
@@ -379,8 +422,11 @@ jobs:
           TEST_MODE:     ${{ inputs.test-mode }}
           PROJECT_PATH:  ${{ inputs.project-path }}
           UNITY_VERSION: ${{ inputs.unity-version }}
+          UNITY_EDITOR:  ${{ steps.unity-preflight.outputs.unity_editor }}
         run: |
-          $unityExe = "C:\Program Files\Unity\Hub\Editor\$env:UNITY_VERSION\Editor\Unity.exe"
+          # Editor found or installed by the preflight step above.
+          $unityExe = $env:UNITY_EDITOR
+          if (-not $unityExe) { $unityExe = "C:\Program Files\Unity\Hub\Editor\$env:UNITY_VERSION\Editor\Unity.exe" }
           if (-not (Test-Path $unityExe)) {
             Write-Error "Unity executable not found: $unityExe"
             exit 1
@@ -440,10 +486,12 @@ jobs:
           TEST_MODE:     ${{ inputs.test-mode }}
           PROJECT_PATH:  ${{ inputs.project-path }}
           UNITY_VERSION: ${{ inputs.unity-version }}
+          UNITY_EDITOR:  ${{ steps.unity-preflight.outputs.unity_editor }}
         run: |
           set -euo pipefail
 
-          UNITY_APP="/Applications/Unity/Hub/Editor/${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity"
+          # Editor found or installed by the preflight step above.
+          UNITY_APP="${UNITY_EDITOR:-/Applications/Unity/Hub/Editor/${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity}"
           if [ ! -x "${UNITY_APP}" ]; then
             echo "::error::Unity executable not found: ${UNITY_APP}"
             exit 1

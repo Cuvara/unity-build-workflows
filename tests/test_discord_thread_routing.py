@@ -133,6 +133,24 @@ class TestRouting:
                      INPUT_PLATFORM_THREAD_IDS="Android=not-a-thread")
         assert [t for t, _ in calls] == [DEFAULT_THREAD]
 
+    def test_planned_platforms_reach_their_threads_when_nothing_built(self, run_body, tmp_path):
+        # The quality gate stopped the run: no platform ran, but each thread
+        # still has to hear why there is no build.
+        calls = post(run_body, tmp_path, INPUT_STATUS="failure",
+                     INPUT_FAILED_STAGE="Unity Tests",
+                     INPUT_PLANNED_PLATFORMS="Android iOS",
+                     INPUT_PLATFORM_THREAD_IDS=f"Android={ANDROID_THREAD}\niOS={IOS_THREAD}")
+        by_thread = {t: p for t, p in calls}
+        assert set(by_thread) == {ANDROID_THREAD, IOS_THREAD}
+        assert all("Failure" in p["embeds"][0]["title"] for p in by_thread.values())
+        assert "**iOS**" not in text_of(by_thread[ANDROID_THREAD])
+
+    def test_unplanned_skipped_platform_is_not_routed(self, run_body, tmp_path):
+        calls = post(run_body, tmp_path, INPUT_RESULT_ANDROID="success",
+                     INPUT_PLANNED_PLATFORMS="Android", INPUT_THREAD_ID=DEFAULT_THREAD,
+                     INPUT_PLATFORM_THREAD_IDS=f"Android={ANDROID_THREAD}\niOS={IOS_THREAD}")
+        assert [t for t, _ in calls] == [ANDROID_THREAD]
+
     def test_addressables_listed_in_every_message(self, run_body, tmp_path):
         calls = post(run_body, tmp_path, INPUT_RESULT_ANDROID="success",
                      INPUT_RESULT_IOS="success", INPUT_RESULT_ADDRESSABLES="success",
@@ -300,3 +318,12 @@ def test_pipeline_resolves_threads_in_resolve_config():
         "${{ needs.resolve-config.outputs.discord-thread-id || vars.DISCORD_THREAD_ID }}")
     assert post["with"]["platform-thread-ids"] == (
         "${{ needs.resolve-config.outputs.discord-platform-thread-ids }}")
+
+
+def test_pipeline_passes_planned_platforms():
+    wf = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))
+    assert wf["jobs"]["resolve-config"]["outputs"]["planned-platforms"] == (
+        "${{ steps.matrix.outputs.planned-platforms }}")
+    post = next(s for s in wf["jobs"]["notify-discord"]["steps"]
+                if s.get("name") == "Post build to Discord thread")
+    assert post["with"]["planned-platforms"] == "${{ needs.resolve-config.outputs.planned-platforms }}"

@@ -283,8 +283,18 @@ inputs:
       (Android, WebGL, Linux64, LinuxServer, Windows64, iOS). Each platform
       that ran posts to its own thread; platforms without an entry use
       thread-id. Platforms sharing a thread share one message, which lists only
-      them (Addressables appears in every message). Empty = one message for
+      them (Addressables appears in every message). Platforms listed in
+      planned-platforms are routed even when they did not run. Empty = one message for
       the whole run in thread-id, as before. NOT a secret.
+    required: false
+    default: ''
+
+  planned-platforms:
+    description: |
+      Space-separated platforms the run set out to build (e.g. "Android iOS").
+      A planned platform that never ran — the quality gate stopped the run —
+      still posts to its own thread, with the run's status, instead of
+      falling back to the default thread. NOT a secret.
     required: false
     default: ''
 
@@ -363,6 +373,7 @@ runs:
         INPUT_THREAD_ID:             ${{ inputs.thread-id }}
         INPUT_THREAD_NAME:           ${{ inputs.thread-name }}
         INPUT_PLATFORM_THREAD_IDS:   ${{ inputs.platform-thread-ids }}
+        INPUT_PLANNED_PLATFORMS:     ${{ inputs.planned-platforms }}
         INPUT_ARTIFACT_DIR:          ${{ inputs.artifact-dir }}
         INPUT_THRESHOLD_MB:          ${{ inputs.attach-size-threshold-mb }}
       run: |
@@ -1027,7 +1038,12 @@ runs:
             Windows64)   _gr="${INPUT_RESULT_WINDOWS64:-skipped}" ;;
             iOS)         _gr="${INPUT_RESULT_IOS:-skipped}" ;;
           esac
-          [ "${_gr}" = "skipped" ] && continue
+          # Planned but not run (the quality gate stopped the run, a dependency
+          # failed) still goes to its own thread: that thread is where its
+          # people look for "why is there no build".
+          if [ "${_gr}" = "skipped" ]; then
+            case " ${INPUT_PLANNED_PLATFORMS:-} " in *" ${_gp} "*) ;; *) continue ;; esac
+          fi
           _gt="${_ROUTE[${_gp}]:-${INPUT_THREAD_ID:-}}"
           _gk="t${_gt}"              # "t" prefix: the channel root is a key too
           if [ -z "${_GROUP_PLATS[${_gk}]+set}" ]; then
@@ -1052,7 +1068,7 @@ runs:
           _gplats="${_GROUP_PLATS[${_gk}]}"
           # The message's status is its own platforms', not the run's: an iOS
           # failure must not paint the Android thread red.
-          _n=0; _ok=0; _fail=0; _cancel=0
+          _n=0; _ok=0; _fail=0; _cancel=0; _skip=0
           for _gp in ${_gplats}; do
             case "${_gp}" in
               Android)     _gr="${INPUT_RESULT_ANDROID}";     _gv="${INPUT_VALIDATION_ANDROID:-}" ;;
@@ -1062,6 +1078,7 @@ runs:
               Windows64)   _gr="${INPUT_RESULT_WINDOWS64}";   _gv="" ;;
               iOS)         _gr="${INPUT_RESULT_IOS}";         _gv="${INPUT_VALIDATION_IOS:-}" ;;
             esac
+            if [ "${_gr:-skipped}" = "skipped" ]; then _skip=$((_skip + 1)); continue; fi
             _n=$((_n + 1))
             [ "${_gv}" = "failure" ] && _gr="failure"
             case "${_gr}" in
@@ -1070,9 +1087,10 @@ runs:
               cancelled) _cancel=$((_cancel + 1)) ;;
             esac
           done
-          if   [ "${_fail}" -gt 0 ];        then _gstatus="failure"
-          elif [ "${_ok}" -eq "${_n}" ];    then _gstatus="success"
-          elif [ "${_cancel}" -eq "${_n}" ]; then _gstatus="cancelled"
+          if   [ "${_fail}" -gt 0 ];   then _gstatus="failure"
+          elif [ "${_n}" -eq 0 ];      then _gstatus="${INPUT_STATUS:-failure}"   # nothing of theirs ran: the run's verdict
+          elif [ "${_skip}" -eq 0 ] && [ "${_ok}" -eq "${_n}" ];     then _gstatus="success"
+          elif [ "${_skip}" -eq 0 ] && [ "${_cancel}" -eq "${_n}" ]; then _gstatus="cancelled"
           else                                   _gstatus="partial"
           fi
           _gthread="${_gk#t}"
