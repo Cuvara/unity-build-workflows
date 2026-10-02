@@ -548,10 +548,12 @@ class TestSparseCheckoutHonoursProjectPath:
     in a subdirectory checks out nothing and the step fails.
     """
 
-    # Root-anchored on purpose, and not project files: the runner policy is a
-    # repository-level file (`.github/unity-runner-policy.json` or
-    # RUNNER_POLICY_FILE), resolved from the repository root by contract.
-    REPO_ROOT_FILES = ("RUNNER_POLICY_FILE",)
+    # Root-anchored on purpose, and not project files: the runner policy and the
+    # Discord thread config are repository-level files
+    # (`.github/unity-runner-policy.json` / `.github/discord.json`, or
+    # RUNNER_POLICY_FILE / DISCORD_CONFIG_FILE), resolved from the repository
+    # root by contract.
+    REPO_ROOT_FILES = ("RUNNER_POLICY_FILE", "DISCORD_CONFIG_FILE")
 
     def _sparse_patterns(self, workflow: dict):
         for step in iter_steps(workflow):
