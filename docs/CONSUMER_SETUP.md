@@ -197,14 +197,35 @@ gh secret set ANDROID_KEY_PASS        --repo "${REPO}" --env production
 **Project with its own keystore, built on a self-hosted native lane.** If
 Player Settings > Publishing Settings has **Custom Keystore** enabled and the
 keystore file is in the project, a native (`build-engine: local`) build needs
-only the passwords. Unity never stores them in the project. Set them as
-repository secrets, since every environment's build signs, and pass them to
-`unity-pipeline.yml` from your caller:
+only the passwords. Unity never stores them in the project. Set them in every
+environment that builds Android — the build job reads its environment's
+secrets directly, so the caller does not pass them:
 
 ```bash
-gh secret set ANDROID_KEYSTORE_PASS --repo "${REPO}"
-gh secret set ANDROID_KEY_PASS      --repo "${REPO}"   # only if the alias password differs
+for env in development staging production; do
+  gh secret set ANDROID_KEYSTORE_PASS --repo "${REPO}" --env "$env"
+  gh secret set ANDROID_KEY_PASS      --repo "${REPO}" --env "$env"   # only if the alias password differs
+done
 ```
+
+### iOS signing (iOS builds only)
+
+Also per environment, under these exact names — typically a Development or
+Ad Hoc profile for `development`/`staging` and an App Store profile for
+`production`:
+
+```bash
+for env in development staging production; do
+  gh secret set IOS_DISTRIBUTION_CERTIFICATE_BASE64   --repo "${REPO}" --env "$env" < cert.p12.b64
+  gh secret set IOS_DISTRIBUTION_CERTIFICATE_PASSWORD --repo "${REPO}" --env "$env"
+  gh secret set IOS_PROVISIONING_PROFILE_BASE64       --repo "${REPO}" --env "$env" < "profile-${env}.mobileprovision.b64"
+done
+```
+
+Why per environment and how the lookup falls back to repository secrets:
+[GITHUB_ENVIRONMENTS.md § Environment-scoped build secrets](GITHUB_ENVIRONMENTS.md#environment-scoped-build-secrets).
+Moving a project that keeps them at repository level:
+[MIGRATING_TO_ENVIRONMENT_SECRETS.md](MIGRATING_TO_ENVIRONMENT_SECRETS.md).
 
 `PlayerBuilder.Build` applies them in memory for that build. Without them, the
 build fails with a message naming the keystore, instead of Unity's "Can not

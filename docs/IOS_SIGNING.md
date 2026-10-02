@@ -35,6 +35,13 @@ Navigate to **Settings → Secrets and variables → Actions** in your game repo
 Secrets for TestFlight (`APP_STORE_CONNECT_*`) are only required when `uploadToTestFlight: true`.
 Scope these to a `production` GitHub Environment for branch protection. See [IOS_RELEASE.md](IOS_RELEASE.md).
 
+**Pipeline (`unity-pipeline.yml`) builds:** set the three signing secrets
+(`IOS_DISTRIBUTION_CERTIFICATE_BASE64`, `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`,
+`IOS_PROVISIONING_PROFILE_BASE64`) as **environment secrets** in each of
+`development`, `staging` and `production`, under exactly these names. The
+build job declares its environment and reads them from there. See
+[MIGRATING_TO_ENVIRONMENT_SECRETS.md](MIGRATING_TO_ENVIRONMENT_SECRETS.md).
+
 ---
 
 ## Step 1: Export Your Distribution Certificate

@@ -8,6 +8,36 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Signing secrets are per GitHub Environment.** The platform build job now
+  declares the environment matching the build environment (`development` |
+  `staging` | `production`) for push and manual-dispatch builds, so signing
+  secrets stored as environment secrets, under the toolkit's own names, override
+  the repository ones. Until now a project could not keep a different keystore
+  or certificate per environment: a reusable workflow only sees environment
+  secrets through a job-level `environment:`, and the build job had none. That
+  pushed projects to keep every key at repository level, often under renamed
+  aliases mapped in the caller.
+  - Not breaking for secrets: a secret an environment lacks falls back to the
+    repository secret the caller passes, so a project that has not migrated
+    builds as before.
+  - Side effects: each build job records a deployment and must pass the
+    environment's protection rules. A required reviewer on `production` gates
+    release builds; a deployment branch policy that excludes the dispatched ref
+    blocks the build. PR builds declare no environment.
+  - Opt out with the repository variable `BUILD_ENVIRONMENT_SECRETS=false`.
+  - New resolver output `secrets-environment` and `reusable-build-platform.yml`
+    input of the same name (default empty: no environment).
+  - Migration guide: `docs/MIGRATING_TO_ENVIRONMENT_SECRETS.md`. Updated
+    `docs/GITHUB_ENVIRONMENTS.md`, `docs/CONSUMER_SETUP.md`,
+    `docs/IOS_SIGNING.md`, `docs/REPOSITORY_VARIABLES.md`,
+    `docs/BRANCH_FLOW_CONTRACT.md` and the README.
+
+---
+
 ## [6.6.0] — 2026-10-01
 
 ### Added

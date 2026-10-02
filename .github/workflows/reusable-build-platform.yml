@@ -334,6 +334,17 @@ on:
         default: ''
         type: string
 
+      secrets-environment:
+        description: |
+          GitHub Environment the build job declares (development | staging |
+          production), so that environment-scoped secrets with the same name
+          override the ones the caller passes. Empty = no environment; the job
+          uses the caller's (repository) secrets only. Resolved by
+          resolve_build_flow.sh from BUILD_ENVIRONMENT_SECRETS.
+        required: false
+        default: ''
+        type: string
+
     secrets:
       UNITY_LICENSE:
         description: |
@@ -469,6 +480,10 @@ jobs:
     # independent — see the build-lane gating below. runner-mode/runner-*-label
     # inputs are kept for backward compat but no longer choose the lane.
     runs-on: ${{ fromJSON(inputs.runner-labels != '' && inputs.runner-labels || '["ubuntu-latest"]') }}
+    # A job-level environment is the only way a reusable workflow reaches
+    # environment-scoped secrets: they take precedence over the caller's
+    # secrets of the same name. Empty = no environment (repository secrets).
+    environment: ${{ inputs.secrets-environment }}
 
     outputs:
       result:                 ${{ steps.set-outputs.outputs.result }}

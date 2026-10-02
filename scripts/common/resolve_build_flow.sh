@@ -487,6 +487,12 @@ else
     clean_build_source="${_resolved_source}"
 fi
 
+resolve_setting "true" "" \
+    variable-new "${NEW_BUILD_ENVIRONMENT_SECRETS:-}" \
+    variable-new "${BUILD_ENVIRONMENT_SECRETS:-}"
+build_environment_secrets="${_resolved_value}"
+validate_bool "BUILD_ENVIRONMENT_SECRETS" "${build_environment_secrets}"
+
 # ---------------------------------------------------------------------------
 # Group: RUNNER / BUILD ENGINE
 #
@@ -1138,6 +1144,26 @@ case "${flow_type}" in
 esac
 
 log_info "gh-environment=${gh_environment} (deployment target; empty = none)"
+
+# ---------------------------------------------------------------------------
+# Secrets environment — the GitHub Environment the build job declares so that
+# environment-scoped secrets (signing keys) override the repository ones.
+# Signing secrets live per environment under the toolkit's own names; a secret
+# an environment lacks falls back to the repository secret the caller passed.
+# BUILD_ENVIRONMENT_SECRETS=false opts out (no environment on the build job,
+# so no deployment and no protection rules).
+# Unlike gh-environment it includes manual dispatches — a dispatched release
+# build still has to sign with the production keys. PR flows never get one,
+# so environment secrets stay off pull requests.
+# ---------------------------------------------------------------------------
+secrets_environment=""
+if [[ "${build_environment_secrets}" == "true" ]]; then
+    case "${flow_type}" in
+        pr-develop|pr-staging|pr-release|none) secrets_environment="" ;;
+        *)                                     secrets_environment="${environment}" ;;
+    esac
+fi
+log_info "secrets-environment=${secrets_environment} (build job environment; empty = repository secrets only)"
 # ---------------------------------------------------------------------------
 # LIFECYCLE → ARTIFACT CONTRACT
 # ---------------------------------------------------------------------------
@@ -1292,7 +1318,7 @@ platform_labels_json="{${PLATFORM_LABELS_MAP%,}}"
     echo "Event:                ${EVENT_NAME:-<none>}"
     echo "Branch:               ${REF_NAME:-<none>}"
     echo "Target branch:        ${BASE_REF:-<none>}"
-    echo "Environment:          ${environment} (gh-environment: ${gh_environment:-<none>})"
+    echo "Environment:          ${environment} (gh-environment: ${gh_environment:-<none>}, secrets-environment: ${secrets_environment:-<none>})"
     echo "Unity Version:        ${unity_version} (source: $(_source_label "${unity_version_source}"))"
     echo "Unity Project Path:   ${unity_project_path} (source: $(_source_label "${unity_project_path_source}"))"
     echo "Unity Build Method:   ${unity_build_method:-<game-ci default>} (source: $(_source_label "${unity_build_method_source}"))"
@@ -1342,6 +1368,7 @@ emit "flow-type"               "${flow_type}"
 emit "define-symbols"          "${define_symbols}"
 emit "environment"             "${environment}"
 emit "gh-environment"          "${gh_environment}"
+emit "secrets-environment"     "${secrets_environment}"
 emit "run-tests"                "${run_tests}"
 emit "test-mode"               "${test_mode}"
 emit "build-addressables"      "${build_addressables}"

@@ -938,3 +938,30 @@ def test_signed_ipa_is_validated_before_it_can_be_promoted(pipeline_jobs):
         "an unsigned IPA would reach App Store Connect and be rejected after it "
         "had already consumed a build number"
     )
+
+
+# ---------------------------------------------------------------------------
+# Environment-scoped secrets (BUILD_ENVIRONMENT_SECRETS)
+# ---------------------------------------------------------------------------
+
+def test_build_job_declares_the_secrets_environment():
+    """A reusable workflow reaches environment secrets only through a job-level
+    `environment:`; the caller cannot pass them."""
+    job = load(BUILD_PLATFORM)["jobs"][BUILD_JOB]
+    assert job.get("environment") == "${{ inputs.secrets-environment }}"
+    inputs = call_inputs(load(BUILD_PLATFORM))
+    assert inputs["secrets-environment"]["default"] == "", (
+        "secrets-environment must default to no environment so other callers are unchanged"
+    )
+
+
+def test_pipeline_wires_secrets_environment_to_the_build():
+    wf = load(PIPELINE)
+    resolve = wf["jobs"]["resolve-config"]
+    assert "secrets-environment" in resolve["outputs"]
+    env_blocks = [s.get("env", {}) for s in resolve["steps"]]
+    assert any(e.get("NEW_BUILD_ENVIRONMENT_SECRETS") == "${{ vars.BUILD_ENVIRONMENT_SECRETS }}"
+               for e in env_blocks)
+    assert wf["jobs"][BUILD_JOB]["with"]["secrets-environment"] == (
+        "${{ needs.resolve-config.outputs.secrets-environment }}"
+    )

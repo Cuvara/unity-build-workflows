@@ -95,6 +95,7 @@ the full legacy → new migration table.
 | `platform-source` | default \| variable \| dispatch |
 | `define-symbols` | Extra Scripting Define Symbols (`';'`-joined) from the branch's `UNITY_*_DEFINE_SYMBOLS` (or legacy `*_DEFINE_SYMBOLS`) variable, or `IN_DEFINE_SYMBOLS` for manual dispatch; **empty** when unset. Applied additively to `ProjectSettings.asset` before the build by `apply_define_symbols.sh`. |
 | `gh-environment` | GitHub deployment environment: `development` \| `staging` \| `production` (push/manual); **empty** for all PR flows and `none`. PRs never target a GitHub environment, keeping production secrets/approvals off PRs. |
+| `secrets-environment` | GitHub Environment the platform build job declares so its environment-scoped secrets override repository ones: the build `environment` for push and manual flows; **empty** for all PR flows, for `none`, and when `BUILD_ENVIRONMENT_SECRETS=false`. |
 | `unity-version` | Resolved Unity version: `UNITY_VERSION` variable → `ProjectVersion.txt` → toolkit default. |
 | `project-path` | Resolved from `UNITY_PROJECT_PATH` (default `.`). |
 | `build-method` | Resolved from `UNITY_BUILD_METHOD` (empty = game-ci default). |

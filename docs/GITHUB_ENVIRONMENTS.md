@@ -108,11 +108,52 @@ When `gh-environment` is `production`, the `final-report` job must pass the
 production environment's protection rules (required reviewers, branch policy)
 before it can run.
 
-### One deployment per push run
+### Deployments per run
 
-Each push to `develop`, `staging`, or `release-*` creates **exactly one**
-GitHub Deployment (on `final-report`). The build jobs themselves do not create
-deployments — they run without an `environment:` key.
+Each push to `develop`, `staging`, or `release-*` creates a GitHub Deployment
+on `final-report`. Each platform build job also declares an environment (for
+its secrets, below) and so records a deployment of its own; PR builds declare
+none.
+
+### Environment-scoped build secrets
+
+Signing secrets are **per environment**. The resolver emits
+`secrets-environment` — the build `environment`: `development` | `staging` |
+`production` — and the platform build job declares it:
+
+```yaml
+# reusable-build-platform.yml — build job
+environment: ${{ inputs.secrets-environment }}
+```
+
+A reusable workflow cannot receive environment secrets from its caller; a
+job-level `environment:` is the only way in. Inside that job an environment
+secret **overrides** the caller-passed secret of the same name, so:
+
+- Name environment secrets with the toolkit's names (`ANDROID_KEYSTORE_PASS`,
+  `ANDROID_KEY_PASS`, `IOS_DISTRIBUTION_CERTIFICATE_BASE64`,
+  `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`).
+  Do not rename them in the caller.
+- A secret missing from the environment falls back to the repository secret the
+  caller passed. Delete the repository copy once every environment has its own.
+- Unity license, submodule key and other non-signing secrets stay at
+  repository level: jobs that declare no environment read them too.
+
+Unlike `gh-environment`, `secrets-environment` is also set for
+`workflow_dispatch`: a dispatched release build must sign with the production
+keys. PR flows never get one. Each build job must pass the environment's
+protection rules (required reviewers, branch policy) before it starts — a
+branch policy that excludes the dispatched ref blocks the build.
+
+Set `BUILD_ENVIRONMENT_SECRETS=false` to opt out: no environment on the build
+job, repository secrets only.
+
+Store credentials (`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`, `APP_STORE_CONNECT_*`)
+are read by the Release / Android and Release / iOS pipelines, whose jobs use
+their own environments (`internal-testing`, `external-testing`, `production`)
+plus an artifact-verification job with none; keep them at repository level.
+
+Moving an existing project: [MIGRATING_TO_ENVIRONMENT_SECRETS.md](MIGRATING_TO_ENVIRONMENT_SECRETS.md).
 
 ---
 
