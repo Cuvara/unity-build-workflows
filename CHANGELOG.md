@@ -8,10 +8,35 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
-## [6.8.1] — 2026-10-02
+## [Unreleased]
+
+### Added
+
+- **Signed iOS development builds.** `BUILD_IOS_SIGN_DEVELOPMENT=true` signs a
+  development iOS build too and exports an IPA next to the Xcode project,
+  using the `development` environment's signing secrets and the export method
+  its provisioning profile allows (Ad Hoc / Development). With
+  `BUILD_DELIVERY=firebase` the IPA goes to Firebase App Distribution, so iOS
+  testers get an install link for development builds like Android testers do.
+  Release builds are unchanged (`ios-export-method`, default `app-store`).
 
 ### Fixed
 
+- **Discord: an iOS message showed Android build info and every platform.**
+  Build Info read every field from the Android settings — an iOS build said
+  "Arch: ARMv7+ARM64 • Output: APK • Store: Google Play" — and the artifact
+  list showed all seven platforms, five of them `skipped`. Build Info now has
+  a line per platform in the message (**Android:** bundle, backend, arch,
+  APK/AAB, defines, Play link; **iOS:** bundle, IL2CPP, IPA / Xcode project,
+  defines), and a message lists only the platforms it is about. New
+  `extract_project_metadata.sh` outputs `bundle-id-ios` and
+  `define-symbols-count-ios`, passed to `discord-upload-build`.
+- **iOS Xcode project size reported as ~1 MB.** The manifest measured the
+  `Unity-iPhone.xcodeproj` bundle — only the project description — instead of
+  the Unity iOS export around it (`Classes/`, `Data/`, `Libraries/`), so a
+  650 MB export showed as "1 MB" in Discord and the run summary. `XCODEPROJ`
+  is now a tree artifact like `ADDRESSABLES`: the export directory is the
+  artifact and its size is the sum of the tree.
 - **Firebase App Distribution uploads failed silently on self-hosted
   runners.** The upload runs `bundle exec fastlane` from the toolkit Gemfile,
   but nothing ran `bundle install`, so on a runner without the gems fastlane

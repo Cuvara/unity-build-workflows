@@ -151,6 +151,42 @@ class TestRouting:
                      INPUT_PLATFORM_THREAD_IDS=f"Android={ANDROID_THREAD}\niOS={IOS_THREAD}")
         assert [t for t, _ in calls] == [ANDROID_THREAD]
 
+    BUILD_META = {
+        "INPUT_PRODUCT_NAME": "Game", "INPUT_APP_VERSION": "1.1.0",
+        "INPUT_BUNDLE_ID": "com.example.game", "INPUT_BUNDLE_ID_IOS": "com.example.game.ios",
+        "INPUT_SCRIPTING_BACKEND": "IL2CPP", "INPUT_ANDROID_ARCH": "ARMv7+ARM64",
+        "INPUT_ORIENTATION": "Portrait", "INPUT_ANDROID_EXPORT_TYPE": "apk",
+        "INPUT_STORE_LINK": "https://play.google.com/store/apps/details?id=com.example.game",
+        "INPUT_DEFINE_SYMBOLS_COUNT": "31", "INPUT_DEFINE_SYMBOLS_COUNT_IOS": "29",
+    }
+
+    def _build_info(self, payload):
+        fields = payload["embeds"][0].get("fields", [])
+        return next((f["value"] for f in fields if "Build Info" in f["name"]), "")
+
+    def test_ios_message_has_no_android_build_info(self, run_body, tmp_path):
+        calls = post(run_body, tmp_path, INPUT_RESULT_IOS="success",
+                     INPUT_PLANNED_PLATFORMS="iOS", **self.BUILD_META)
+        info = self._build_info(calls[0][1])
+        assert "**iOS:** com.example.game.ios" in info and "29 defines" in info
+        for android_only in ("ARMv7", "APK", "Google Play", "**Android:**"):
+            assert android_only not in info, android_only
+
+    def test_android_message_keeps_its_facts(self, run_body, tmp_path):
+        calls = post(run_body, tmp_path, INPUT_RESULT_ANDROID="success",
+                     INPUT_PLANNED_PLATFORMS="Android", **self.BUILD_META)
+        info = self._build_info(calls[0][1])
+        assert "**Android:** com.example.game" in info
+        assert "APK" in info and "Google Play" in info and "**iOS:**" not in info
+
+    def test_single_message_lists_only_its_platforms(self, run_body, tmp_path):
+        calls = post(run_body, tmp_path, INPUT_RESULT_IOS="success",
+                     INPUT_PLANNED_PLATFORMS="iOS")
+        body = text_of(calls[0][1])
+        assert "**iOS**" in body
+        for absent in ("**Android**", "**WebGL**", "**Linux64**", "**Addressables**"):
+            assert absent not in body, absent
+
     def test_addressables_listed_in_every_message(self, run_body, tmp_path):
         calls = post(run_body, tmp_path, INPUT_RESULT_ANDROID="success",
                      INPUT_RESULT_IOS="success", INPUT_RESULT_ADDRESSABLES="success",

@@ -290,8 +290,23 @@ class TestArtifactManifest:
         assert "ServerData" in str(found)
         assert artifact_manifest.size_of(found) == remote_total
 
+    def test_xcodeproj_reports_the_whole_unity_export(self, tmp_path):
+        # Unity-iPhone.xcodeproj is only the project description; the export
+        # around it is the build. Measuring the bundle reported a 650 MB
+        # export as 1 MB in Discord.
+        export = tmp_path / "build" / "iOS"
+        (export / "Unity-iPhone.xcodeproj").mkdir(parents=True)
+        (export / "Unity-iPhone.xcodeproj" / "project.pbxproj").write_bytes(b"p" * 100)
+        (export / "Data").mkdir()
+        (export / "Data" / "data.unity3d").write_bytes(b"d" * 9000)
+        (export / "Classes").mkdir()
+        (export / "Classes" / "main.mm").write_bytes(b"c" * 900)
+        found = artifact_manifest.discover_artifact(tmp_path / "build", "XCODEPROJ")
+        assert found == export
+        assert artifact_manifest.size_of(found) == 100 + 9000 + 900
+
     def test_single_file_types_are_unaffected_by_tree_handling(self, tmp_path):
-        # The tree rule must apply to ADDRESSABLES only.
+        # The tree rule must apply to tree types (ADDRESSABLES, XCODEPROJ) only.
         build = tmp_path / "build"
         build.mkdir()
         (build / "Game.exe").write_bytes(b"x" * 4096)

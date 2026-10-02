@@ -136,6 +136,16 @@ inputs:
     required: false
     default: ''
 
+  bundle-id-ios:
+    description: iOS bundle identifier (applicationIdentifier.iPhone). Shown on the iOS line of Build Info.
+    required: false
+    default: ''
+
+  define-symbols-count-ios:
+    description: Number of iOS scripting define symbols. Shown on the iOS line of Build Info.
+    required: false
+    default: ''
+
   define-symbols:
     description: |
       Extra branch/dispatch Scripting Define Symbols applied at build time
@@ -352,6 +362,8 @@ runs:
         INPUT_STORE_LINK:            ${{ inputs.store-link }}
         INPUT_ANDROID_EXPORT_TYPE:   ${{ inputs.android-export-type }}
         INPUT_DEFINE_SYMBOLS_COUNT:  ${{ inputs.define-symbols-count }}
+        INPUT_BUNDLE_ID_IOS:         ${{ inputs.bundle-id-ios }}
+        INPUT_DEFINE_SYMBOLS_COUNT_IOS: ${{ inputs.define-symbols-count-ios }}
         INPUT_DEFINE_SYMBOLS:        ${{ inputs.define-symbols }}
         INPUT_PLATFORM_DIAGNOSTICS:  ${{ inputs.platform-diagnostics }}
         INPUT_PLATFORM_SUMMARY:      ${{ inputs.platform-summary }}
@@ -496,13 +508,19 @@ runs:
           PLAT="${PLAT_ENTRY%%:*}"
           RESULT="${PLAT_ENTRY##*:}"
 
-          # A per-thread message lists only the platforms routed to it.
-          # Addressables is shared by every platform, so it stays in all.
-          if [ -n "${INPUT_ONLY_PLATFORMS:-}" ] && [ "${PLAT}" != "Addressables" ]; then
-            case " ${INPUT_ONLY_PLATFORMS} " in
-              *" ${PLAT} "*) ;;
-              *) continue ;;
-            esac
+          # A message lists only its own platforms: the ones routed to it, or —
+          # in a single message — the ones the run built or planned. Listing
+          # every platform the toolkit knows put five "skipped" rows above the
+          # one that ran. Addressables is shared, so it shows wherever it ran.
+          if [ -n "${INPUT_ONLY_PLATFORMS:-}" ]; then
+            if [ "${PLAT}" = "Addressables" ]; then
+              [ "${RESULT}" = "skipped" ] && continue
+            else
+              case " ${INPUT_ONLY_PLATFORMS} " in
+                *" ${PLAT} "*) ;;
+                *) continue ;;
+              esac
+            fi
           fi
 
           case "${RESULT}" in
@@ -662,7 +680,11 @@ runs:
         # Capture UTC timestamp for embed.timestamp (ISO 8601, best-effort)
         EMBED_TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
 
-        export PLATFORM_ROWS N_ATTACHMENTS ATTACH_NAMES_PIPE EMBED_TIMESTAMP
+        # Which platforms this message is about, for the platform-specific
+        # Build Info lines (Android: arch / APK / Play; iOS: bundle / output).
+        MSG_PLATFORMS="${INPUT_ONLY_PLATFORMS:-}"
+        IOS_ARTIFACT_TYPE="${_PLAT_TYPE[iOS]:-}"
+        export PLATFORM_ROWS N_ATTACHMENTS ATTACH_NAMES_PIPE EMBED_TIMESTAMP MSG_PLATFORMS IOS_ARTIFACT_TYPE
 
         PAYLOAD_PY="/tmp/discord_payload_$$.py"
         cat > "${PAYLOAD_PY}" << 'DISCORD_PY'
@@ -815,42 +837,74 @@ runs:
                            'inline': False})
 
         # ── 🏗️ Build Info block field ──────────────────────────────────────────
-        # Omit the entire field when none of the 7 build-metadata inputs are set.
-        # Omit individual lines when all values in that line are empty.
+        # Platform-specific facts go on that platform's own line, and only for
+        # the platforms this message is about: an iOS message used to say
+        # "Arch: ARMv7+ARM64 • Output: APK • Store: Google Play" — every
+        # field was read from the Android settings whatever had been built.
+        msg_platforms = set((os.environ.get('MSG_PLATFORMS', '') or '').split())
+        if not msg_platforms:
+            # One message for the whole run: the platforms that ran.
+            for _p, _v in (('Android', 'INPUT_RESULT_ANDROID'), ('iOS', 'INPUT_RESULT_IOS')):
+                if os.environ.get(_v, 'skipped') not in ('', 'skipped'):
+                    msg_platforms.add(_p)
+        bundle_id_ios = os.environ.get('INPUT_BUNDLE_ID_IOS', '').strip()
+        defines_ios = os.environ.get('INPUT_DEFINE_SYMBOLS_COUNT_IOS', '').strip()
+        ios_artifact_type = os.environ.get('IOS_ARTIFACT_TYPE', '').strip().upper()
+
+        def _count(value):
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return 0
+
         build_info_lines = []
-        # Line 1: Product • Version
+        # Line 1: Product • Version • Orientation (shared by every platform)
         line1 = []
         if product_name: line1.append('**Product:** {}'.format(product_name))
         if app_version:  line1.append('**Version:** {}'.format(app_version))
+        if orientation:  line1.append('**Orientation:** {}'.format(orientation))
         if line1:        build_info_lines.append('  •  '.join(line1))
-        # Line 2: Bundle ID
-        if bundle_id:    build_info_lines.append('**Bundle ID:** {}'.format(bundle_id))
-        # Line 3: Backend • Arch • Orientation • Output
-        line3 = []
-        if scripting_backend: line3.append('**Backend:** {}'.format(scripting_backend))
-        if android_arch:      line3.append('**Arch:** {}'.format(android_arch))
-        if orientation:       line3.append('**Orientation:** {}'.format(orientation))
-        if android_export_type == 'apk':
-            line3.append('**Output:** APK')
-        elif android_export_type == 'aab':
-            line3.append('**Output:** AAB (App Bundle)')
-        if line3:             build_info_lines.append('  •  '.join(line3))
-        # Line 4: Define symbols count (omit when empty or 0)
-        try:
-            _dsym = int(define_symbols_count)
-        except (ValueError, TypeError):
-            _dsym = 0
-        if _dsym > 0:
-            build_info_lines.append('**Defines:** {} symbols'.format(_dsym))
-        # Line 4b: Extra (branch/dispatch) define symbols, actual values
+
+        if 'Android' in msg_platforms:
+            parts = []
+            if bundle_id:         parts.append(bundle_id)
+            if scripting_backend: parts.append(scripting_backend)
+            if android_arch:      parts.append(android_arch)
+            if android_export_type == 'apk':
+                parts.append('APK')
+            elif android_export_type == 'aab':
+                parts.append('AAB (App Bundle)')
+            if _count(define_symbols_count) > 0:
+                parts.append('{} defines'.format(_count(define_symbols_count)))
+            if store_link:
+                parts.append('[Google Play]({})'.format(store_link))
+            if parts:
+                build_info_lines.append('**Android:** ' + '  •  '.join(parts))
+
+        if 'iOS' in msg_platforms:
+            parts = []
+            if bundle_id_ios or bundle_id:
+                parts.append(bundle_id_ios or bundle_id)
+            parts.append('IL2CPP')  # the only backend Unity ships for iOS
+            if ios_artifact_type == 'IPA':
+                parts.append('IPA')
+            elif ios_artifact_type:
+                parts.append('Xcode project (unsigned)')
+            if _count(defines_ios) > 0:
+                parts.append('{} defines'.format(_count(defines_ios)))
+            build_info_lines.append('**iOS:** ' + '  •  '.join(parts))
+
+        if not msg_platforms & {'Android', 'iOS'} and bundle_id:
+            # Desktop / WebGL: no store-specific facts to report.
+            build_info_lines.append('**Bundle ID:** {}'.format(bundle_id))
+
+        # Extra (branch/dispatch) define symbols, actual values
         if define_symbols:
             _extra = ', '.join(
                 s.strip() for s in define_symbols.replace(',', ';').split(';') if s.strip()
             )
             if _extra:
                 build_info_lines.append('**Extra defines:** {}'.format(_extra))
-        # Line 5: Store link
-        if store_link:   build_info_lines.append('**Store:** [Google Play]({})'.format(store_link))
 
         if build_info_lines:
             build_info_value = '\n'.join(build_info_lines)
@@ -1059,6 +1113,7 @@ runs:
           # shares one destination: one message with the run's overall status.
           if [ "${#_GROUP_THREADS[@]}" -eq 1 ]; then
             INPUT_THREAD_ID="${_GROUP_THREADS[0]#t}"
+            export INPUT_ONLY_PLATFORMS="${_GROUP_PLATS[${_GROUP_THREADS[0]}]}"
           fi
           _post_group
           exit 0

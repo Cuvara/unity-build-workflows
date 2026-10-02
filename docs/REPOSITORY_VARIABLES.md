@@ -88,6 +88,7 @@ UNITY_RELEASE_DEFINE_SYMBOLS=PRODUCTION;LIVE_BACKEND
 | `BUILD_RELEASE_PLATFORMS` | `Android,WebGL,Linux64,LinuxServer,Windows64` | `push → release-*` | Legacy: `RELEASE_BUILD_PLATFORMS`. |
 | `BUILD_TIMEOUT_MINUTES` | `120` | all build jobs | Positive integer; per-job timeout in minutes. |
 | `BUILD_CLEAN` | `false` | all build jobs | See [BUILD_CLEAN](#build_clean-clean-vs-incremental-builds) below. |
+| `BUILD_IOS_SIGN_DEVELOPMENT` | `false` | iOS development builds | `true` = a development iOS build is also signed and exported as an IPA (next to the Xcode project), with the export method the `development` environment's provisioning profile allows (Ad Hoc or Development). With `BUILD_DELIVERY=firebase` testers get an install link. Needs the iOS signing secrets in that environment. See [IOS_SIGNING.md](IOS_SIGNING.md#signed-development-builds). |
 | `BUILD_ENVIRONMENT_SECRETS` | `true` | platform build jobs | The build job declares the GitHub Environment matching the build environment (`development` \| `staging` \| `production`), so **environment-scoped secrets override repository secrets of the same name** — signing keys per environment. Applies to push and manual dispatch, never to PRs; each build creates a deployment and passes that environment's protection rules. `false` = no environment, repository secrets only. See [GITHUB_ENVIRONMENTS.md § Environment-scoped build secrets](GITHUB_ENVIRONMENTS.md#environment-scoped-build-secrets). |
 
 Platform lists are comma-separated and case-sensitive. **Allowed platform

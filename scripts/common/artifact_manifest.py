@@ -64,8 +64,14 @@ INTERMEDIATE_ARTIFACT_TYPES = {"XCODEPROJ"}
 
 # Artifact types whose artifact is a directory tree rather than a single
 # file. Their size is the sum of the tree, and a single member file is
-# never the artifact.
-TREE_ARTIFACT_TYPES = {"ADDRESSABLES"}
+# never the artifact. The artifact is the directory that holds the matched
+# marker:
+#   ADDRESSABLES  the content tree around the catalog
+#   XCODEPROJ     the Unity iOS export around Unity-iPhone.xcodeproj. The
+#                 .xcodeproj bundle is only the project description (~1 MB);
+#                 Classes/, Data/ and Libraries/ beside it are the build. It
+#                 was reported as "1 MB" for a 650 MB export.
+TREE_ARTIFACT_TYPES = {"ADDRESSABLES", "XCODEPROJ"}
 
 
 # Platform → the artifact type a build produces when the caller does not say.
@@ -117,8 +123,10 @@ def discover_artifact(search_root, artifact_type):
     nested one — Unity leaves intermediate copies in subdirectories and the
     shallowest hit is the shipped artifact.
 
-    ADDRESSABLES is the exception: a content build is a tree of bundles plus a
-    catalog, and no single file in it is "the artifact". Returning one bundle
+    ADDRESSABLES and XCODEPROJ are the exceptions (TREE_ARTIFACT_TYPES): a
+    content build is a tree of bundles plus a catalog, and an Xcode project is
+    the Unity export around its .xcodeproj. For Addressables:
+    no single file in it is "the artifact". Returning one bundle
     would report that bundle's size as the build's size. The containing
     DIRECTORY is returned instead, so `size_of` sums the whole tree.
     """

@@ -171,3 +171,22 @@ def test_xcode_signing_runs_before_setup_and_archive():
     order = ["iOS — Find Xcode project", "iOS — Configure Xcode signing",
              "iOS — Setup signing", "iOS — Archive and export IPA"]
     assert [names.index(n) for n in order] == sorted(names.index(n) for n in order)
+
+
+def test_development_build_exports_with_the_profile_method():
+    # A signed development build passes no export method; the profile decides
+    # (ad-hoc / development), so an Ad Hoc profile is not rejected as "not
+    # app-store".
+    with_ = _step("iOS — Setup signing")["with"]
+    assert with_["export-method"] == (
+        "${{ inputs.ios-export-method || steps.ios-xcode-signing.outputs.export-method }}")
+    pipeline = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml")
+                              .read_text(encoding="utf-8"))
+    assert pipeline["jobs"]["build"]["with"]["ios-export-method"] == (
+        "${{ needs.resolve-config.outputs.build-type == 'release' && inputs.ios-export-method || '' }}")
+
+
+def test_sign_matrix_includes_opted_in_development_builds():
+    text = (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text(encoding="utf-8")
+    assert '[ "${IOS_SIGN_DEV:-false}" = "true" ]' in text
+    assert "NEW_BUILD_IOS_SIGN_DEVELOPMENT: ${{ vars.BUILD_IOS_SIGN_DEVELOPMENT }}" in text

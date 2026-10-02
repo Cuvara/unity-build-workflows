@@ -493,6 +493,16 @@ resolve_setting "true" "" \
 build_environment_secrets="${_resolved_value}"
 validate_bool "BUILD_ENVIRONMENT_SECRETS" "${build_environment_secrets}"
 
+# Sign iOS development builds too (Ad Hoc / Development profile from the
+# development environment), so testers get an installable IPA — e.g. through
+# Firebase App Distribution. Off by default: it needs signing secrets in that
+# environment, which a project that only ships release IPAs never set.
+resolve_setting "false" "" \
+    variable-new "${NEW_BUILD_IOS_SIGN_DEVELOPMENT:-}" \
+    variable-new "${BUILD_IOS_SIGN_DEVELOPMENT:-}"
+ios_sign_development="${_resolved_value}"
+validate_bool "BUILD_IOS_SIGN_DEVELOPMENT" "${ios_sign_development}"
+
 # ---------------------------------------------------------------------------
 # Group: RUNNER / BUILD ENGINE
 #
@@ -1369,6 +1379,7 @@ emit "define-symbols"          "${define_symbols}"
 emit "environment"             "${environment}"
 emit "gh-environment"          "${gh_environment}"
 emit "secrets-environment"     "${secrets_environment}"
+emit "ios-sign-development"     "${ios_sign_development}"
 emit "run-tests"                "${run_tests}"
 emit "test-mode"               "${test_mode}"
 emit "build-addressables"      "${build_addressables}"
