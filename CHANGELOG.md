@@ -10,6 +10,23 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ## [Unreleased]
 
+### Added
+
+- **Per-platform Discord threads.** `unity-pipeline.yml` can post each
+  platform's build into its own Discord thread, optionally per environment:
+  `DISCORD_THREAD_ID_<PLATFORM>` and `DISCORD_THREAD_ID_<ENV>_<PLATFORM>`
+  (e.g. `DISCORD_THREAD_ID_DEVELOPMENT_ANDROID`), plus `DISCORD_THREAD_ID_<ENV>`
+  as a per-environment default. Previously one `DISCORD_THREAD_ID` received
+  every platform's result in a single message.
+  - Platforms sharing a thread share one message listing only them; each
+    message carries its own platforms' status. Addressables is listed in every
+    message.
+  - Unchanged for projects that set only `DISCORD_THREAD_ID`: one message, as
+    before.
+  - New `discord-upload-build` input `platform-thread-ids`; new script
+    `scripts/common/resolve_discord_threads.py`. See
+    `docs/DISCORD_NOTIFICATIONS.md`.
+
 ### Changed
 
 - **Signing secrets are per GitHub Environment.** The platform build job now
