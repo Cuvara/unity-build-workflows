@@ -74,6 +74,49 @@ The `discord-notify` action reads `DISCORD_THREAD_ID` from the job environment (
 
 The action validates the thread ID as a 17–20 digit numeric string (Discord snowflake format). A malformed value produces a `::warning::` annotation and the message falls back to the channel root — the pipeline is never affected.
 
+### Per-platform threads (`unity-pipeline.yml`)
+
+Each platform can post into its own thread — Android builds into an Android
+thread, iOS builds into an iOS thread — and the thread can differ per
+environment. Set repository variables:
+
+| Variable | Scope |
+|---|---|
+| `DISCORD_THREAD_ID_<ENV>_<PLATFORM>` | One platform in one environment, e.g. `DISCORD_THREAD_ID_DEVELOPMENT_ANDROID` |
+| `DISCORD_THREAD_ID_<PLATFORM>` | One platform in every environment, e.g. `DISCORD_THREAD_ID_IOS` |
+| `DISCORD_THREAD_ID_<ENV>` | Default thread for one environment, e.g. `DISCORD_THREAD_ID_PRODUCTION` |
+| `DISCORD_THREAD_ID` | Default thread for everything (the original variable) |
+
+`<PLATFORM>` is `ANDROID`, `IOS`, `WEBGL`, `LINUX64`, `LINUXSERVER` or
+`WINDOWS64`; `<ENV>` is `DEVELOPMENT`, `STAGING` or `PRODUCTION`. For each
+platform the first one set wins, in the order of the table; a platform with no
+thread of its own uses the default thread, and with no default the channel
+root.
+
+```bash
+REPO=YOUR_ORG/YOUR_REPO
+gh variable set DISCORD_THREAD_ID_DEVELOPMENT_ANDROID --repo "$REPO" --body "1555415823538065530"
+gh variable set DISCORD_THREAD_ID_DEVELOPMENT_IOS     --repo "$REPO" --body "1555415958141804554"
+```
+
+How the messages split:
+
+- Platforms that land in the same thread share **one** message listing only
+  them. A run where every platform shares a thread — including a project with
+  only `DISCORD_THREAD_ID` set — posts exactly one message, as before.
+- A message's status is its own platforms' status: an iOS failure turns the
+  iOS message red and leaves the Android message green.
+- Addressables is shared by every platform, so it is listed in every message.
+- A run in which no platform built (for example, the quality gate stopped it)
+  posts one message to the default thread.
+- All threads must belong to the channel of `DISCORD_WEBHOOK_URL`: a webhook
+  can only post into threads of its own channel.
+
+Routing is resolved by `scripts/common/resolve_discord_threads.py` and applied
+by the `platform-thread-ids` input of `discord-upload-build`. The standalone
+workflows (`unity-build.yml`, `unity-build-ios.yml`, `unity-release*.yml`) still
+read `DISCORD_THREAD_ID` only.
+
 ---
 
 ## Which Workflows Notify

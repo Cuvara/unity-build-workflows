@@ -2344,6 +2344,22 @@ jobs:
             echo "total-warnings=" >> "$GITHUB_OUTPUT"
           fi
 
+      # Per-platform threads: DISCORD_THREAD_ID_<PLATFORM>, optionally
+      # DISCORD_THREAD_ID_<ENV>_<PLATFORM>; see docs/DISCORD_NOTIFICATIONS.md.
+      # Thread IDs are variables, not secrets, so passing all vars is safe.
+      - name: Resolve Discord threads
+        id: threads
+        continue-on-error: true
+        shell: bash
+        env:
+          VARS_JSON:         ${{ toJSON(vars) }}
+          BUILD_ENVIRONMENT: ${{ needs.resolve-config.outputs.environment }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "${VARS_JSON}" \
+            | python3 .toolkit/scripts/common/resolve_discord_threads.py \
+                --environment "${BUILD_ENVIRONMENT}" >> "$GITHUB_OUTPUT"
+
       - name: Post build to Discord thread
         uses: ./.toolkit/.github/actions/discord-upload-build
         continue-on-error: true
@@ -2372,7 +2388,9 @@ jobs:
           result-validation-ios:     ${{ steps.status.outputs.validation-ios }}
           failed-stage:        ${{ needs.final-report.outputs.failed-stage }}
           configuration:       ${{ needs.resolve-config.outputs.configuration }}
-          thread-id:           ${{ vars.DISCORD_THREAD_ID }}
+          # Falls back to the single-thread variable if the resolver step failed.
+          thread-id:           ${{ steps.threads.outputs.thread-id || vars.DISCORD_THREAD_ID }}
+          platform-thread-ids: ${{ steps.threads.outputs.platform-thread-ids }}
           artifact-dir:        ./artifacts
           attach-size-threshold-mb: '8'
           actor:               ${{ github.actor }}
