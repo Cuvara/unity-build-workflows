@@ -145,11 +145,19 @@ class TestRouting:
 # Repository variables → action inputs
 # ---------------------------------------------------------------------------
 
-def resolve(environment, variables):
-    out = subprocess.run(
-        [sys.executable, str(RESOLVER), "--environment", environment],
+def _write_config(tmp_path, config):
+    path = tmp_path / "discord.json"
+    path.write_text(config if isinstance(config, str) else json.dumps(config), encoding="utf-8")
+    return path
+
+
+def resolve(environment, variables, config=None, tmp_path=None, with_stderr=False):
+    proc = subprocess.run(
+        [sys.executable, str(RESOLVER), "--environment", environment]
+        + (["--config", str(_write_config(tmp_path, config))] if config is not None else []),
         input=json.dumps(variables), capture_output=True, text=True, check=True,
-    ).stdout
+    )
+    out = proc.stdout
     result = {}
     lines = out.splitlines()
     i = 0
@@ -167,7 +175,7 @@ def resolve(environment, variables):
             key, _, value = line.partition("=")
             result[key] = value
         i += 1
-    return result
+    return (result, proc.stderr) if with_stderr else result
 
 
 class TestResolver:
@@ -212,12 +220,83 @@ class TestResolver:
         assert set(routed) == set(names.values())
 
 
-def test_pipeline_passes_routes_to_the_action():
+class TestConfigFile:
+    CONFIG = {"threads": {
+        "development": {"Android": ANDROID_THREAD, "iOS": IOS_THREAD},
+        "production": {"default": DEFAULT_THREAD},
+        "*": {"default": "444444444444444444"},
+    }}
+
+    def test_file_routes_platforms(self, tmp_path):
+        out = resolve("development", {}, self.CONFIG, tmp_path)
+        assert out["platform-thread-ids"].splitlines() == [
+            f"Android={ANDROID_THREAD}", f"iOS={IOS_THREAD}"]
+        assert out["thread-id"] == "444444444444444444", "'*' default applies"
+
+    def test_environment_default(self, tmp_path):
+        out = resolve("production", {}, self.CONFIG, tmp_path)
+        assert out["thread-id"] == DEFAULT_THREAD
+        assert out["platform-thread-ids"] == ""
+
+    def test_keys_are_case_insensitive(self, tmp_path):
+        config = {"threads": {"Development": {"android": ANDROID_THREAD, "IOS": IOS_THREAD}}}
+        out = resolve("development", {}, config, tmp_path)
+        assert out["platform-thread-ids"].splitlines() == [
+            f"Android={ANDROID_THREAD}", f"iOS={IOS_THREAD}"]
+
+    def test_star_platform_beats_environment_default(self, tmp_path):
+        config = {"threads": {"*": {"iOS": IOS_THREAD}, "staging": {"default": DEFAULT_THREAD}}}
+        out = resolve("staging", {}, config, tmp_path)
+        assert out["platform-thread-ids"] == f"iOS={IOS_THREAD}"
+        assert out["thread-id"] == DEFAULT_THREAD
+
+    def test_variables_override_the_file(self, tmp_path):
+        out = resolve("development",
+                      {"DISCORD_THREAD_ID_IOS": "555555555555555555",
+                       "DISCORD_THREAD_ID": DEFAULT_THREAD},
+                      self.CONFIG, tmp_path)
+        assert "iOS=555555555555555555" in out["platform-thread-ids"].splitlines()
+        assert out["thread-id"] == DEFAULT_THREAD
+
+    def test_missing_file_is_no_config(self, tmp_path):
+        out = subprocess.run(
+            [sys.executable, str(RESOLVER), "--environment", "development",
+             "--config", str(tmp_path / "absent.json")],
+            input="{}", capture_output=True, text=True, check=True).stdout
+        assert "thread-id=\n" in out + "\n"
+
+    @pytest.mark.parametrize("config,needle", [
+        ("{not json", "not valid JSON"),
+        ({"threads": {"dev": {"Android": ANDROID_THREAD}}}, "unknown environment 'dev'"),
+        ({"threads": {"development": {"Switch": ANDROID_THREAD}}}, "unknown platform 'Switch'"),
+        ({"threads": {"development": {"Android": "123"}}}, "is not a Discord thread ID"),
+    ])
+    def test_problems_are_annotated_not_fatal(self, tmp_path, config, needle):
+        out, err = resolve("development", {}, config, tmp_path, with_stderr=True)
+        assert "::error::Discord config:" in err and needle in err
+        assert out["platform-thread-ids"] == ""
+
+    def test_bad_entry_does_not_drop_good_ones(self, tmp_path):
+        config = {"threads": {"development": {"Android": ANDROID_THREAD, "iOS": "oops"}}}
+        out = resolve("development", {}, config, tmp_path)
+        assert out["platform-thread-ids"] == f"Android={ANDROID_THREAD}"
+
+
+def test_pipeline_resolves_threads_in_resolve_config():
     wf = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))
-    steps = wf["jobs"]["notify-discord"]["steps"]
-    post_step = next(s for s in steps if s.get("name") == "Post build to Discord thread")
-    assert post_step["with"]["thread-id"] == (
-        "${{ steps.threads.outputs.thread-id || vars.DISCORD_THREAD_ID }}")
-    assert post_step["with"]["platform-thread-ids"] == "${{ steps.threads.outputs.platform-thread-ids }}"
-    resolve_step = next(s for s in steps if s.get("id") == "threads")
-    assert resolve_step["env"]["VARS_JSON"] == "${{ toJSON(vars) }}"
+    resolve_job = wf["jobs"]["resolve-config"]
+    step = next(s for s in resolve_job["steps"] if s.get("id") == "discord")
+    assert step["env"]["VARS_JSON"] == "${{ toJSON(vars) }}"
+    assert "--config" in step["run"]
+    assert step.get("continue-on-error") is True, "a notification setting never fails a build"
+    checkout = resolve_job["steps"][0]["with"]["sparse-checkout"]
+    assert "${{ vars.DISCORD_CONFIG_FILE || '.github/discord.json' }}" in checkout
+    assert resolve_job["outputs"]["discord-platform-thread-ids"] == (
+        "${{ steps.discord.outputs.platform-thread-ids }}")
+
+    post = next(s for s in wf["jobs"]["notify-discord"]["steps"]
+                if s.get("name") == "Post build to Discord thread")
+    assert post["with"]["thread-id"] == (
+        "${{ needs.resolve-config.outputs.discord-thread-id || vars.DISCORD_THREAD_ID }}")
+    assert post["with"]["platform-thread-ids"] == (
+        "${{ needs.resolve-config.outputs.discord-platform-thread-ids }}")

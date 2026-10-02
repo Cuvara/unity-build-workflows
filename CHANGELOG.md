@@ -8,6 +8,25 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Discord thread config file.** Per-platform Discord threads are configured
+  in `.github/discord.json` in the project repository (path:
+  `DISCORD_CONFIG_FILE`) instead of one repository variable per environment ×
+  platform:
+  `{"threads": {"development": {"Android": "<id>", "iOS": "<id>"}, "*": {"default": "<id>"}}}`.
+  Thread IDs are not secrets, so the routing is versioned and reviewed with the
+  project; `templates/discord.example.json` is the starting point.
+  - The `DISCORD_THREAD_ID_*` variables keep working and override the file.
+  - Resolved in `resolve-config` at the start of the run (moved from
+    `notify-discord`), so an invalid file, unknown key or malformed ID shows up
+    as an `::error::` annotation before any build. The entry is ignored; a
+    notification setting never fails a build.
+
+---
+
 ## [6.7.1] — 2026-10-02
 
 ### Fixed
