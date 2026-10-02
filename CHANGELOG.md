@@ -8,6 +8,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Self-hosted runners find or install Ruby for fastlane.** New
+  `scripts/common/ensure_ruby.sh`, run by `setup-fastlane` on self-hosted
+  runners, *runs* every candidate and checks its version instead of trusting a
+  path: `ruby` on PATH, then the answers of `brew --prefix ruby`,
+  `rbenv which ruby`, `asdf which ruby` and Windows `where ruby`. Without a Ruby
+  >= 2.7 it installs one (`brew install ruby` / `winget install
+  RubyInstallerTeam.RubyWithDevKit.3.3`), puts it and its gem bin dir on PATH
+  for the job (the runner service's PATH is frozen at configuration time), and
+  installs Bundler. Found on a consumer's Mac, where only macOS's Ruby 2.6 was
+  available and `bundle install` stopped on `sudo` — so Firebase delivery was
+  skipped on every build.
+
+---
+
 ## [6.9.1] — 2026-10-02
 
 ### Fixed

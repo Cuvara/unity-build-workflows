@@ -27,17 +27,23 @@ runs:
         bundler-cache: true
         working-directory: ${{ inputs.working-directory }}
 
-    - name: Install gems with the runner's Ruby (self-hosted)
+    - name: Find or install Ruby (self-hosted)
+      id: ruby
+      if: ${{ runner.environment == 'self-hosted' }}
+      shell: bash
+      # Runs every candidate and checks its version (PATH, then brew / rbenv /
+      # asdf / where), installs Ruby when none qualifies, and puts it on PATH
+      # for the following steps — the runner service's own PATH is frozen at
+      # configuration time and misses a Ruby installed later.
+      run: bash "${{ github.action_path }}/../../../scripts/common/ensure_ruby.sh"
+
+    - name: Install gems (self-hosted)
       if: ${{ runner.environment == 'self-hosted' }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
         set -Eeuo pipefail
-        if ! command -v bundle >/dev/null 2>&1; then
-          echo "::error title=Ruby with Bundler not found::fastlane needs Ruby >= 2.7 with Bundler for the runner account (macOS: brew install ruby, put Homebrew's Ruby first on the runner's PATH, gem install bundler; Windows: RubyInstaller). See docs/BUILD_DELIVERY.md."
-          exit 1
-        fi
-        echo "Ruby: $(ruby --version) — $(command -v ruby)"
+        echo "Ruby ${{ steps.ruby.outputs.ruby-version }} (${{ steps.ruby.outputs.ruby-source }}): ${{ steps.ruby.outputs.ruby-bin }}"
         # A per-runner cache instead of the system gem dir: no sudo, reused
         # across runs.
         bundle config set --local path "${RUNNER_TOOL_CACHE:-${HOME}/.cache}/toolkit-gems"
