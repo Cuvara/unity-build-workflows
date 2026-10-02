@@ -199,7 +199,10 @@ Player Settings > Publishing Settings has **Custom Keystore** enabled and the
 keystore file is in the project, a native (`build-engine: local`) build needs
 only the passwords. Unity never stores them in the project. Set them in every
 environment that builds Android — the build job reads its environment's
-secrets directly, so the caller does not pass them:
+secrets — but the caller must still list both names under `secrets:`
+(`ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}`), because GitHub
+resolves an environment secret in a reusable workflow only for names the
+caller passes:
 
 ```bash
 for env in development staging production; do

@@ -22,6 +22,16 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **Migration guide told callers to stop passing signing secrets.** Step 4 of
+  `docs/MIGRATING_TO_ENVIRONMENT_SECRETS.md` (v6.7.0) said environment secrets
+  reach the build job directly once the caller drops its secret lines. They
+  do not: GitHub resolves an environment secret inside a reusable workflow
+  only for a name the caller passes, and a consumer that followed the guide
+  got an empty `ANDROID_KEYSTORE_PASS`. The guide, `GITHUB_ENVIRONMENTS.md`,
+  `CONSUMER_SETUP.md` and `IOS_SIGNING.md` now say to list every signing
+  secret under the toolkit's name (`NAME: ${{ secrets.NAME }}`) — empty at
+  repository level, resolved from the environment in the build job.
+  Verified on a consumer run (`***` from the `development` environment).
 - **Discord: an iOS message showed Android build info and every platform.**
   Build Info read every field from the Android settings — an iOS build said
   "Arch: ARMv7+ARM64 • Output: APK • Store: Google Play" — and the artifact

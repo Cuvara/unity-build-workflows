@@ -26,6 +26,9 @@ How a secret is resolved inside the build job:
 1. The **environment secret** with that exact name, if the environment has one.
 2. Otherwise the secret the **caller passed** (a repository secret).
 
+Both only for a name the caller passes: a name the caller does not list
+resolves to empty inside the build job, environment or not (Step 4).
+
 So nothing breaks on upgrade: a project that has not created environment
 secrets keeps building with its repository secrets. The migration is complete
 when every environment has its own copy and the repository copies are deleted.
@@ -100,29 +103,43 @@ done
 history. Secrets cannot be read back — copy them from their source (keychain,
 password manager), not from the old repository secrets.
 
-### Step 4 — Remove the renames from the caller workflow
+### Step 4 — Pass every signing secret under the toolkit's name
 
-A caller that renamed secrets passes the **repository** value under the
-toolkit's name. Keep the line only while the repository copy still exists as a
-fallback; once every environment has the secret, drop it:
+**The caller must still list each signing secret.** GitHub resolves an
+environment secret inside a reusable workflow only for a name the caller
+passes: drop the line and the build job receives an empty value, even though
+it declares the environment. Verified on a consumer run — with the line
+removed, `ANDROID_KEYSTORE_PASS` reached the build step as an empty string;
+with `ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}` restored, it
+arrived as `***` from the `development` environment.
+
+So replace each rename with a pass-through of the toolkit's own name. At
+repository level the value is empty (the repository no longer has the
+secret); inside the build job it resolves to the environment value:
 
 ```yaml
-# Before
+# Before — repository secrets under other names
 secrets:
   IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.P12_BASE64 }}
   IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.P12_PASSWORD }}
   IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.MOBILEPROVISION_BASE64 }}
-  ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
 
-# After — environment secrets reach the build job directly
+# After — same names as the environment secrets; values come from the environment
 secrets:
   SUBMODULE_SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}   # still repository-level
   UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
   UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
   UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+  ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+  ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+  IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+  IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+  IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
 ```
 
-A caller using `secrets: inherit` needs no change.
+A caller using `secrets: inherit` already passes every name and needs no
+change (same organization or enterprise only — `inherit` does not cross an
+organization boundary, so a caller in another organization lists them).
 
 ### Step 5 — Check environment protection rules
 
@@ -179,3 +196,4 @@ protection rules and reads repository secrets only — the ≤ v6.6 behaviour.
 | Signing uses an old key | A repository copy is still the fallback, or the environment secret name differs from the toolkit's | Create the secret in the environment under the exact toolkit name; delete the repository copy |
 | `Keystore was tampered with, or password was incorrect` | `ANDROID_KEY_PASS` set to a wrong value | Delete it when the alias password equals the keystore password |
 | PR build cannot sign | Expected: PR flows never declare an environment | Sign on push or dispatch builds |
+| A signing secret shows as empty (not `***`) in the build step | The caller workflow does not list that name under `secrets:` | Add `NAME: ${{ secrets.NAME }}` for every signing secret (Step 4) |
