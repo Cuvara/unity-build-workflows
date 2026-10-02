@@ -158,6 +158,17 @@ docker run --env UNITY_LICENSE="<actual-content>" ...
 
 ---
 
+### Secrets in log artifacts
+
+GitHub masks secret values in the job console, **not** in files. Unity writes
+the whole process environment into `Editor.log` when a Gradle build fails, so
+any secret exported to a build step (e.g. `ANDROID_KEYSTORE_PASS` on native
+lanes) would reach the uploaded `-logs` artifact. The build job therefore runs
+`scripts/common/redact_log_secrets.py` (`if: always()`) before the log summary
+and the log upload: every secret value the job can see is replaced with `***`
+in all log files. A new secret exported to a build step must be added to that
+step's `--env` list.
+
 ## Temporary Credential Cleanup
 
 All temporary credential files are removed after container execution:

@@ -12,6 +12,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **Secrets leaked into the `-logs` artifact.** When Gradle fails, Unity
+  writes the whole process environment into Editor.log — on the native lanes
+  that includes `ANDROID_KEYSTORE_PASS` and `ANDROID_KEY_PASS` (since v6.6.0).
+  GitHub masks secrets on the console, not in files, so the uploaded log held
+  the password in plain text. A new `if: always()` step,
+  `scripts/common/redact_log_secrets.py`, replaces every secret value the build
+  job can see with `***` in all log files before they are summarised or
+  uploaded. See `docs/SECURITY.md` § Secrets in log artifacts. **Rotate any keystore password that was set as a secret while a
+  failed native Android build ran on v6.6.0–v6.7.0.**
 - **iOS release builds through `unity-pipeline.yml` could not sign.** The
   pipeline's signing step passed `certificate-base64`, `certificate-password`
   and `provisioning-profile-base64` to `ios-setup-signing`, which declares

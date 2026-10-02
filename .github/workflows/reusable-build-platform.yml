@@ -1875,6 +1875,38 @@ jobs:
       # said nothing. This puts the errors on the run page as annotations and
       # into the job summary, and it runs on success too, because a build that
       # succeeded with two hundred new warnings is worth knowing about.
+      # ── Step 11a: Redact secrets from the logs ─────────────────────────────
+      # GitHub masks secrets on the console, not in files, and Unity writes
+      # the whole environment into Editor.log when Gradle fails — keystore
+      # passwords included. Runs before anything reads or uploads a log.
+      - name: Redact secrets from logs
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_PASS:      ${{ secrets.ANDROID_KEY_PASS }}
+          UNITY_PASSWORD:        ${{ secrets.UNITY_PASSWORD }}
+          UNITY_LICENSE:         ${{ secrets.UNITY_LICENSE }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          SUBMODULE_SSH_KEY:     ${{ secrets.SUBMODULE_SSH_KEY }}
+          R2_SECRET_ACCESS_KEY:  ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          if [ ! -f ".toolkit/scripts/common/redact_log_secrets.py" ]; then
+            echo "::warning::toolkit checkout unavailable — logs not redacted"
+            exit 0
+          fi
+          PY=python3; command -v python3 >/dev/null 2>&1 || PY=python
+          "${PY}" .toolkit/scripts/common/redact_log_secrets.py \
+            --env ANDROID_KEYSTORE_PASS --env ANDROID_KEY_PASS \
+            --env UNITY_PASSWORD --env UNITY_LICENSE \
+            --env IOS_DISTRIBUTION_CERTIFICATE_PASSWORD \
+            --env SUBMODULE_SSH_KEY --env R2_SECRET_ACCESS_KEY \
+            "${{ inputs.project-path }}/Logs" \
+            "${{ inputs.project-path }}/Library/Editor.log" \
+            "${{ inputs.project-path }}/Editor.log" \
+            Editor.log Editor-addressables-pre.log Editor-activate.log
+
       - name: Summarise the Unity log
         if: ${{ always() && steps.ios-guard.outputs.blocked != 'true' }}
         continue-on-error: true
