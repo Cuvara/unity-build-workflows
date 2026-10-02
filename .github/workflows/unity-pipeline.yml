@@ -367,6 +367,9 @@ jobs:
       has-builds:             ${{ steps.matrix.outputs.has-builds }}
       has-validations:        ${{ steps.matrix.outputs.has-validations }}
       has-sign-ops:           ${{ steps.matrix.outputs.has-sign-ops }}
+      # ── Discord routing (read by notify-discord) ─────────────────────────────
+      discord-thread-id:           ${{ steps.discord.outputs.thread-id }}
+      discord-platform-thread-ids: ${{ steps.discord.outputs.platform-thread-ids }}
     steps:
       - name: Checkout (shallow — only needs ProjectVersion.txt)
         uses: actions/checkout@v4
@@ -389,6 +392,7 @@ jobs:
             **/ProjectSettings/ProjectVersion.txt
             **/ProjectSettings/ProjectSettings.asset
             ${{ vars.RUNNER_POLICY_FILE || '.github/unity-runner-policy.json' }}
+            ${{ vars.DISCORD_CONFIG_FILE || '.github/discord.json' }}
           sparse-checkout-cone-mode: false
 
       - name: Resolve Unity version
@@ -553,6 +557,26 @@ jobs:
       # falling back only as the policy allows. The result is one JSON document,
       # `runner-selection`, which the matrix step, the job inputs, the summary
       # and the final report all read. See docs/MULTI_RUNNER_SCHEDULING.md.
+      # Per-platform Discord threads, from the project's .github/discord.json
+      # and DISCORD_THREAD_ID_* variables (see docs/DISCORD_NOTIFICATIONS.md).
+      # Resolved here, at the start of the run, so a broken config file shows
+      # up as an annotation before any build — never as a failed build.
+      # Thread IDs are variables, not secrets, so passing all vars is safe.
+      - name: Resolve Discord threads
+        id: discord
+        continue-on-error: true
+        shell: bash
+        env:
+          VARS_JSON:         ${{ toJSON(vars) }}
+          BUILD_ENVIRONMENT: ${{ steps.flow.outputs.environment }}
+          CONFIG_FILE:       ${{ vars.DISCORD_CONFIG_FILE || '.github/discord.json' }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "${VARS_JSON}" \
+            | python3 .toolkit/scripts/common/resolve_discord_threads.py \
+                --environment "${BUILD_ENVIRONMENT}" --config "${CONFIG_FILE}" \
+                >> "$GITHUB_OUTPUT"
+
       - name: Select runners
         id: runners
         shell: bash
@@ -2344,22 +2368,6 @@ jobs:
             echo "total-warnings=" >> "$GITHUB_OUTPUT"
           fi
 
-      # Per-platform threads: DISCORD_THREAD_ID_<PLATFORM>, optionally
-      # DISCORD_THREAD_ID_<ENV>_<PLATFORM>; see docs/DISCORD_NOTIFICATIONS.md.
-      # Thread IDs are variables, not secrets, so passing all vars is safe.
-      - name: Resolve Discord threads
-        id: threads
-        continue-on-error: true
-        shell: bash
-        env:
-          VARS_JSON:         ${{ toJSON(vars) }}
-          BUILD_ENVIRONMENT: ${{ needs.resolve-config.outputs.environment }}
-        run: |
-          set -Eeuo pipefail
-          printf '%s' "${VARS_JSON}" \
-            | python3 .toolkit/scripts/common/resolve_discord_threads.py \
-                --environment "${BUILD_ENVIRONMENT}" >> "$GITHUB_OUTPUT"
-
       - name: Post build to Discord thread
         uses: ./.toolkit/.github/actions/discord-upload-build
         continue-on-error: true
@@ -2388,9 +2396,10 @@ jobs:
           result-validation-ios:     ${{ steps.status.outputs.validation-ios }}
           failed-stage:        ${{ needs.final-report.outputs.failed-stage }}
           configuration:       ${{ needs.resolve-config.outputs.configuration }}
-          # Falls back to the single-thread variable if the resolver step failed.
-          thread-id:           ${{ steps.threads.outputs.thread-id || vars.DISCORD_THREAD_ID }}
-          platform-thread-ids: ${{ steps.threads.outputs.platform-thread-ids }}
+          # Resolved in resolve-config; falls back to the single-thread variable
+          # if that step failed.
+          thread-id:           ${{ needs.resolve-config.outputs.discord-thread-id || vars.DISCORD_THREAD_ID }}
+          platform-thread-ids: ${{ needs.resolve-config.outputs.discord-platform-thread-ids }}
           artifact-dir:        ./artifacts
           attach-size-threshold-mb: '8'
           actor:               ${{ github.actor }}
