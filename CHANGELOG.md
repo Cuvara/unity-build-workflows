@@ -8,6 +8,22 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Firebase delivery failed successful builds on self-hosted runners.**
+  `setup-fastlane` always ran `ruby/setup-ruby`, which installs into the hosted
+  tool cache (`/Users/runner/hostedtoolcache` on macOS). A self-hosted runner
+  account cannot create that path, so the step failed with
+  `EACCES: permission denied, mkdir '/Users/runner'` — after Unity had built
+  the APK — and failed the job. On self-hosted runners the action now uses the
+  runner's own Ruby and installs the gems into the runner's tool cache, with an
+  actionable error when Ruby/Bundler is missing; the delivery setup step is
+  `continue-on-error`, as delivery never fails a build.
+
+---
+
 ## [6.9.0] — 2026-10-02
 
 ### Added
