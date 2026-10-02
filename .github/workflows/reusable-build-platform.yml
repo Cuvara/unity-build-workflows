@@ -317,7 +317,7 @@ on:
         default: false
         type: boolean
       ios-export-method:
-        description: Xcode export method (app-store | ad-hoc | development | enterprise).
+        description: Xcode export method (app-store | ad-hoc | development | enterprise). Empty = the method the provisioning profile allows.
         required: false
         default: 'app-store'
         type: string
@@ -1628,7 +1628,8 @@ jobs:
           ios-distribution-certificate-base64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
           ios-distribution-certificate-password: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
           ios-provisioning-profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-          export-method: ${{ inputs.ios-export-method }}
+          # Empty (a signed development build): the method the profile allows.
+          export-method: ${{ inputs.ios-export-method || steps.ios-xcode-signing.outputs.export-method }}
           bundle-identifier: ${{ steps.ios-xcode-signing.outputs.bundle-identifier }}
           development-team: ${{ steps.ios-xcode-signing.outputs.development-team }}
 

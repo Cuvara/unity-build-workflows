@@ -508,6 +508,7 @@ jobs:
           NEW_BUILD_TIMEOUT_MINUTES:    ${{ vars.BUILD_TIMEOUT_MINUTES }}
           NEW_BUILD_CLEAN:              ${{ vars.BUILD_CLEAN }}
           NEW_BUILD_ENVIRONMENT_SECRETS: ${{ vars.BUILD_ENVIRONMENT_SECRETS }}
+          NEW_BUILD_IOS_SIGN_DEVELOPMENT: ${{ vars.BUILD_IOS_SIGN_DEVELOPMENT }}
           NEW_TEST_EDITMODE_ENABLED:    ${{ vars.TEST_EDITMODE_ENABLED }}
           NEW_TEST_PLAYMODE_ENABLED:    ${{ vars.TEST_PLAYMODE_ENABLED }}
           NEW_TEST_FAIL_FAST:           ${{ vars.TEST_FAIL_FAST }}
@@ -662,6 +663,7 @@ jobs:
           SEL_LINUXSERVER: ${{ steps.flow.outputs.build-linuxserver }}
           SEL_WINDOWS64:   ${{ steps.flow.outputs.build-windows64 }}
           SEL_IOS:         ${{ steps.flow.outputs.build-ios }}
+          IOS_SIGN_DEV:    ${{ steps.flow.outputs.ios-sign-development }}
         run: |
           set -Eeuo pipefail
 
@@ -898,11 +900,13 @@ jobs:
           VALIDATE_MATRIX="[${VALIDATE_ROWS%,}]"
 
           # ── Sign matrix: platform-specific post-build operations ───────────
-          # Only iOS release builds need signing. The matrix is empty for every
+          # Only iOS builds are ever signed here. The matrix is empty for every
           # other platform, so the sign-ios job is structurally incapable of
           # scheduling iOS operations for a non-iOS build.
           SIGN_ROWS=""
-          if [ "${SEL_IOS}" = "true" ] && [ "${BUILD_TYPE}" = "release" ]; then
+          # Release builds always sign iOS; development builds sign when the
+          # project opts in (BUILD_IOS_SIGN_DEVELOPMENT), so testers get an IPA.
+          if [ "${SEL_IOS}" = "true" ] && { [ "${BUILD_TYPE}" = "release" ] || [ "${IOS_SIGN_DEV:-false}" = "true" ]; }; then
             _IOS_LABELS=$(labels_of "iOS")
             SIGN_ROWS="{\"platform\":\"iOS\",\"label\":\"iOS\",\"runner-labels\":\"${_IOS_LABELS}\",\"xcodeproj-artifact\":\"${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_ios_xcodeproj\",\"ipa-artifact\":\"${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_ios_ipa\"},"
           fi
@@ -1447,7 +1451,9 @@ jobs:
       # iOS signing — folded into the build so non-iOS builds have no
       # signing node in the Actions graph. Only the iOS matrix row activates.
       sign-ios:                ${{ matrix.platform == 'iOS' && needs.resolve-config.outputs.sign-ios == 'true' }}
-      ios-export-method:       ${{ inputs.ios-export-method }}
+      # Release exports with the configured method (app-store by default);
+      # a signed development build takes the method from its profile.
+      ios-export-method:       ${{ needs.resolve-config.outputs.build-type == 'release' && inputs.ios-export-method || '' }}
       ios-app-name:            ${{ inputs.ios-app-name }}
       ipa-artifact-name:       ${{ matrix.platform == 'iOS' && needs.resolve-config.outputs.ipa-artifact-name || '' }}
       # Environment-scoped signing secrets; empty when BUILD_ENVIRONMENT_SECRETS=false or for PRs.

@@ -8,7 +8,17 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
-## [6.8.1] — 2026-10-02
+## [Unreleased]
+
+### Added
+
+- **Signed iOS development builds.** `BUILD_IOS_SIGN_DEVELOPMENT=true` signs a
+  development iOS build too and exports an IPA next to the Xcode project,
+  using the `development` environment's signing secrets and the export method
+  its provisioning profile allows (Ad Hoc / Development). With
+  `BUILD_DELIVERY=firebase` the IPA goes to Firebase App Distribution, so iOS
+  testers get an install link for development builds like Android testers do.
+  Release builds are unchanged (`ios-export-method`, default `app-store`).
 
 ### Fixed
 
