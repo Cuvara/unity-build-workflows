@@ -291,6 +291,7 @@ jobs:
       flow-type:          ${{ steps.flow.outputs.flow-type }}
       environment:        ${{ steps.flow.outputs.environment }}
       gh-environment:     ${{ steps.flow.outputs.gh-environment }}
+      secrets-environment: ${{ steps.flow.outputs.secrets-environment }}
       run-tests:          ${{ steps.flow.outputs.run-tests }}
       test-mode:          ${{ steps.flow.outputs.test-mode }}
       build-addressables: ${{ steps.flow.outputs.build-addressables }}
@@ -501,6 +502,7 @@ jobs:
           NEW_UNITY_BUILD_METHOD:       ${{ vars.UNITY_BUILD_METHOD }}
           NEW_BUILD_TIMEOUT_MINUTES:    ${{ vars.BUILD_TIMEOUT_MINUTES }}
           NEW_BUILD_CLEAN:              ${{ vars.BUILD_CLEAN }}
+          NEW_BUILD_ENVIRONMENT_SECRETS: ${{ vars.BUILD_ENVIRONMENT_SECRETS }}
           NEW_TEST_EDITMODE_ENABLED:    ${{ vars.TEST_EDITMODE_ENABLED }}
           NEW_TEST_PLAYMODE_ENABLED:    ${{ vars.TEST_PLAYMODE_ENABLED }}
           NEW_TEST_FAIL_FAST:           ${{ vars.TEST_FAIL_FAST }}
@@ -1412,6 +1414,8 @@ jobs:
       ios-export-method:       ${{ inputs.ios-export-method }}
       ios-app-name:            ${{ inputs.ios-app-name }}
       ipa-artifact-name:       ${{ matrix.platform == 'iOS' && needs.resolve-config.outputs.ipa-artifact-name || '' }}
+      # Environment-scoped signing secrets; empty when BUILD_ENVIRONMENT_SECRETS=false or for PRs.
+      secrets-environment:     ${{ needs.resolve-config.outputs.secrets-environment }}
     secrets:
       UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
       UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}

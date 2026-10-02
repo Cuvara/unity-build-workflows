@@ -1317,6 +1317,63 @@ class TestGitHubEnvironment:
         assert out["gh-environment"] == ""
 
 
+# ── Environment-scoped secrets (secrets-environment) ────────────────────────
+
+class TestSecretsEnvironment:
+    """secrets-environment: on by default, BUILD_ENVIRONMENT_SECRETS=false opts
+    out; never on PRs."""
+
+    ON = {}
+
+    def test_on_by_default(self):
+        out = parse_outputs(run_flow({"EVENT_NAME": "push", "REF_NAME": "release-1.2"}).stdout)
+        assert out["secrets-environment"] == "production"
+
+    def test_opt_out(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "push", "REF_NAME": "release-1.2",
+            "NEW_BUILD_ENVIRONMENT_SECRETS": "false"}).stdout)
+        assert out["secrets-environment"] == ""
+
+    def test_push_develop(self):
+        out = parse_outputs(run_flow({"EVENT_NAME": "push", "REF_NAME": "develop", **self.ON}).stdout)
+        assert out["secrets-environment"] == "development"
+
+    def test_push_release(self):
+        out = parse_outputs(run_flow({"EVENT_NAME": "push", "REF_NAME": "release-1.2", **self.ON}).stdout)
+        assert out["secrets-environment"] == "production"
+
+    def test_manual_dispatch_uses_the_build_environment(self):
+        # A dispatched release build must still sign with production keys, even
+        # though it targets no deployment environment.
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "workflow_dispatch", "IN_PLATFORM": "All",
+            "IN_ENVIRONMENT": "production", **self.ON}).stdout)
+        assert out["secrets-environment"] == "production"
+        assert out["gh-environment"] == ""
+
+    @pytest.mark.parametrize("base", ["develop", "staging", "release-2.0"])
+    def test_pull_requests_never_get_environment_secrets(self, base):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "pull_request", "BASE_REF": base, "REF_NAME": "x", **self.ON}).stdout)
+        assert out["secrets-environment"] == ""
+
+    def test_no_match_branch(self):
+        out = parse_outputs(run_flow({"EVENT_NAME": "push", "REF_NAME": "main", **self.ON}).stdout)
+        assert out["secrets-environment"] == ""
+
+    def test_bare_name_is_read(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "push", "REF_NAME": "staging", "BUILD_ENVIRONMENT_SECRETS": "false"}).stdout)
+        assert out["secrets-environment"] == ""
+
+    def test_invalid_value_fails(self):
+        result = run_flow({"EVENT_NAME": "push", "REF_NAME": "develop",
+                           "NEW_BUILD_ENVIRONMENT_SECRETS": "yes"})
+        assert result.returncode != 0
+        assert "BUILD_ENVIRONMENT_SECRETS" in result.stderr
+
+
 # ---------------------------------------------------------------------------
 # Per-branch Scripting Define Symbols (VAR_*_DEFINE_SYMBOLS → define-symbols)
 # ---------------------------------------------------------------------------
