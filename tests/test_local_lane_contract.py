@@ -116,7 +116,9 @@ def test_only_the_native_build_steps_see_the_keystore_passwords():
     steps = yaml.safe_load(TEXT)["jobs"]["build"]["steps"]
     holders = sorted(s.get("id", s.get("name")) for s in steps
                      if any(k in (s.get("env") or {}) for k in KEYSTORE_SECRETS))
-    assert holders == ["build-macos", "build-windows"]
+    # redact-log-secrets needs the values to scrub them from Editor.log, into
+    # which Unity dumps the environment when Gradle fails; it never expands them.
+    assert holders == ["build-macos", "build-windows", "redact-log-secrets"]
     for s in steps:
         for secret in KEYSTORE_SECRETS:
             assert "$" + secret not in str(s.get("run", "")) \

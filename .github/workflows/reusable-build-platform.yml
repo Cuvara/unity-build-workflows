@@ -1880,6 +1880,7 @@ jobs:
       # the whole environment into Editor.log when Gradle fails — keystore
       # passwords included. Runs before anything reads or uploads a log.
       - name: Redact secrets from logs
+        id: redact-log-secrets
         if: ${{ always() }}
         continue-on-error: true
         shell: bash
