@@ -1006,6 +1006,18 @@ jobs:
           buildMethod: ${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}
           allowDirtyBuild: true
 
+      # A cancelled run can leave its Unity running with the project open, and
+      # the next job on the runner then aborts with "another Unity instance is
+      # running with this project open". One runner runs one job at a time, so
+      # any Unity holding THIS project now is a leftover: stop it (matched by
+      # -projectPath, never by name alone) and clear Temp/UnityLockfile.
+      - name: Stop leftover Unity for this project
+        id: stop-stale-unity
+        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') && steps.ios-guard.outputs.blocked != 'true' }}
+        shell: bash
+        run: |
+          python3 .toolkit/scripts/common/stop_stale_unity.py --project "${{ inputs.project-path }}"
+
       # ── Step 7b: Build Addressables pre-step (self-hosted lanes) ──────────
       # Best-effort; uses bash (Git Bash on Windows, native on macOS).
       - name: Build Addressables pre-step (self-hosted)
@@ -1551,6 +1563,14 @@ jobs:
             DURATION=0
           fi
           echo "BUILD_DURATION=${DURATION}" >> "$GITHUB_ENV"
+
+      # always() also runs when the job is cancelled: stop the Unity this job
+      # started so it cannot block the next one.
+      - name: Stop Unity left by this job
+        if: ${{ always() && steps.stop-stale-unity.conclusion == 'success' }}
+        shell: bash
+        run: |
+          python3 .toolkit/scripts/common/stop_stale_unity.py --project "${{ inputs.project-path }}" || true
 
       # Leaves a persistent self-hosted workspace as the checkout made it.
       - name: Remove toolkit build package

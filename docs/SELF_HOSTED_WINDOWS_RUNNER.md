@@ -378,6 +378,7 @@ If the path is missing or wrong, see Troubleshooting §8.3.
 | Runner shows **Idle** but job queues indefinitely | The runner is missing one of the requested labels, or `RUNNER_LABELS` names a label the runner does not have | Compare `RUNNER_LABELS` with the runner's registered labels; they must match after comma-split/trim/dedup |
 | Job error: `No runner matching the required labels` | No runner carries every label in `RUNNER_LABELS` | Re-register with `--labels self-hosted,windows`, or correct `RUNNER_LABELS` |
 | Job runs but produces no player | `build-method` / `UNITY_BUILD_METHOD` names a method the project does not have (the default, the toolkit package's `PlayerBuilder`, is always present; see [TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md)) | Unset `UNITY_BUILD_METHOD`, or fix the name |
+| `Aborting batchmode due to fatal error: It looks like another Unity instance is running with this project open` | A Unity from a cancelled job still holds the workspace project | Fixed automatically since v6.18.0 ("Stop leftover Unity for this project" step). On older versions, quit that Unity on the runner |
 
 ### 8.2 Wrong Labels
 
