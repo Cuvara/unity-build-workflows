@@ -8,6 +8,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Python could not be installed on a Windows runner service (v6.11.1).**
+  `ensure_python.sh` installed Python only with winget, which a runner running
+  as a Windows service does not have, so the step still ended with "no Python".
+  Without winget (or when it fails) it now downloads python.org's official
+  NuGet package — a plain zip, no installer, no admin — into the runner tool
+  cache, and later runs find it there instead of downloading again.
+
+---
+
 ## [6.11.1] — 2026-10-05
 
 ### Added
