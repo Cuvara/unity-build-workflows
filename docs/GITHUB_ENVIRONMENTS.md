@@ -43,6 +43,16 @@ When to use: platform lists per branch (`DEVELOP_BUILD_PLATFORMS`), feature
 flags (`DEVELOP_RUN_TESTS`), runner mode (`DEFAULT_RUNNER_MODE`). These are
 non-sensitive and can be changed without a deploy key rotation.
 
+### Environment variables
+
+An environment can hold variables too. A job that declares the environment
+reads `${{ vars.NAME }}` as the environment value, else the repository value.
+The pipeline's `resolve-config` and build jobs declare the run's environment,
+so one name with a value per environment (`BUILD_PLATFORMS`, `TEST_ENABLED`,
+`ADDRESSABLES_ENABLED`, `UNITY_DEFINE_SYMBOLS`, `BUILD_NUMBER_OFFSET`, ...)
+replaces a repository variable per branch. See
+[ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md).
+
 ### Secrets (`secrets.*`)
 
 **Secrets** (`Settings → Secrets and variables → Actions → Secrets`) are encrypted
@@ -111,9 +121,12 @@ before it can run.
 ### Deployments per run
 
 Each push to `develop`, `staging`, or `release-*` creates a GitHub Deployment
-on `final-report`. Each platform build job also declares an environment (for
-its secrets, below) and so records a deployment of its own; PR builds declare
-none.
+on `final-report`. `resolve-config` and each platform build job also declare
+an environment (for its variables and secrets, below) and so record a
+deployment of their own; PR builds declare none. Because `resolve-config` is
+the first job after the short `select-environment` job, the environment's
+protection rules (required reviewers, wait timer, branch policy) gate the run
+from its start.
 
 ### Environment-scoped build secrets
 

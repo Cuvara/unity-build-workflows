@@ -51,12 +51,31 @@ For `push`/`pull_request` events (no dispatch layer), priority is simply
 Toolkit default**. The resolver never *requires* a new variable to be set —
 an unconfigured repo behaves exactly as it did before this refactor.
 
+### Per-environment values
+
+Any variable below can also be set in a GitHub Environment (`development`,
+`staging`, `production`); for a run that targets that environment it overrides
+the repository value of the same name. The per-branch families have a single
+generic name meant for this, which wins over them:
+
+| Generic name (set per environment) | Replaces |
+|---|---|
+| `BUILD_PLATFORMS` | `BUILD_DEVELOP_PLATFORMS`, `BUILD_STAGING_PLATFORMS`, `BUILD_RELEASE_PLATFORMS` |
+| `TEST_ENABLED` | `TEST_DEVELOP_ENABLED`, `TEST_STAGING_ENABLED`, `TEST_RELEASE_ENABLED` |
+| `ADDRESSABLES_ENABLED` | `ADDRESSABLES_DEVELOP_ENABLED`, `ADDRESSABLES_STAGING_ENABLED`, `ADDRESSABLES_RELEASE_ENABLED` |
+| `UNITY_DEFINE_SYMBOLS` | `UNITY_DEVELOP_DEFINE_SYMBOLS`, `UNITY_STAGING_DEFINE_SYMBOLS`, `UNITY_RELEASE_DEFINE_SYMBOLS` |
+
+Pull requests have no environment and see repository values only; a few
+variables are read before the environment is known and stay repository-only.
+Details, setup commands and migration: [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md).
+
 ## UNITY
 
 | Variable | Default | Applies to | Notes |
 |---|---|---|---|
 | `UNITY_VERSION` | *(read from `ProjectVersion.txt`)* | all flows | **Validated pin**, not an override. If set, it must equal the editor version in `ProjectSettings/ProjectVersion.txt` — a mismatch fails the build. `ProjectVersion.txt` stays the source of truth (a different value would select a Unity image that can't open the project). The detected version is printed in the Resolve Config report. |
 | `UNITY_BUILD_METHOD` | *(empty = game-ci default)* | all flows | Override the Unity build method invoked by game-ci (docker lane, non-Addressables). |
+| `UNITY_DEFINE_SYMBOLS` | *(empty)* | push/PR on every branch; dispatch when the `define-symbols` field is empty | Generic name, meant to be set **per environment**; wins over the three per-branch names below. See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md). |
 | `UNITY_DEVELOP_DEFINE_SYMBOLS` | *(empty)* | `push/PR → develop` | Legacy: `DEVELOP_DEFINE_SYMBOLS`. |
 | `UNITY_STAGING_DEFINE_SYMBOLS` | *(empty)* | `push/PR → staging` | Legacy: `STAGING_DEFINE_SYMBOLS`. |
 | `UNITY_RELEASE_DEFINE_SYMBOLS` | *(empty)* | `push/PR → release-*` | Legacy: `RELEASE_DEFINE_SYMBOLS`. |
@@ -83,6 +102,7 @@ UNITY_RELEASE_DEFINE_SYMBOLS=PRODUCTION;LIVE_BACKEND
 
 | Variable | Default | Applies to | Notes |
 |---|---|---|---|
+| `BUILD_PLATFORMS` | *(unset → per-branch name below)* | push on every branch; dispatch `All` | Generic name, meant to be set **per environment**; wins over the three per-branch names below. Selection, not capability: `BUILD_PLATFORMS_ENABLED` still filters it. See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md). |
 | `BUILD_DEVELOP_PLATFORMS` | `Android,WebGL` | `push → develop` | Legacy: `DEVELOP_BUILD_PLATFORMS`. |
 | `BUILD_STAGING_PLATFORMS` | `Android,WebGL,Linux64,LinuxServer,Windows64` | `push → staging` | Legacy: `STAGING_BUILD_PLATFORMS`. |
 | `BUILD_RELEASE_PLATFORMS` | `Android,WebGL,Linux64,LinuxServer,Windows64` | `push → release-*` | Legacy: `RELEASE_BUILD_PLATFORMS`. |
@@ -147,6 +167,7 @@ the cases above rather than as a default.
 
 | Variable | Default | Applies to | Notes |
 |---|---|---|---|
+| `TEST_ENABLED` | *(unset → per-branch name below)* | push/PR on every branch | Generic name, meant to be set **per environment**; wins over the three per-branch names below. Not used by a dispatch (the `run-tests` checkbox decides). See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md). |
 | `TEST_DEVELOP_ENABLED` | `true` | `push/PR → develop` | Legacy: `DEVELOP_RUN_TESTS`. |
 | `TEST_STAGING_ENABLED` | `true` | `push/PR → staging` | Legacy: `STAGING_RUN_TESTS`. |
 | `TEST_RELEASE_ENABLED` | `true` | `push/PR → release-*` | Legacy: `RELEASE_RUN_TESTS`. |
@@ -174,6 +195,7 @@ TEST_FAIL_FAST=false
 
 | Variable | Default | Applies to | Notes |
 |---|---|---|---|
+| `ADDRESSABLES_ENABLED` | *(unset → per-branch name below)* | push/PR on every branch | Generic name, meant to be set **per environment**; wins over the three per-branch names below. Not used by a dispatch (the `build-addressables` checkbox decides). See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md). |
 | `ADDRESSABLES_DEVELOP_ENABLED` | `false` | `push/PR → develop` | Legacy: `DEVELOP_BUILD_ADDRESSABLES`. |
 | `ADDRESSABLES_STAGING_ENABLED` | `false` | `push/PR → staging` | Legacy: `STAGING_BUILD_ADDRESSABLES`. |
 | `ADDRESSABLES_RELEASE_ENABLED` | `true` | `push/PR → release-*` | Legacy: `RELEASE_BUILD_ADDRESSABLES`. |
