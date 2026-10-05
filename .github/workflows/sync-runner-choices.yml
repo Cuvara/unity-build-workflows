@@ -1,0 +1,137 @@
+# sync-runner-choices.yml — keep a project's "Runner" dropdown equal to its
+# real self-hosted runners.
+#
+# A workflow_dispatch `choice` input is static YAML, so the list of machines in
+# the Run workflow form cannot be read from the API when the form opens. This
+# workflow does it on a schedule instead: it reads the organization's and the
+# repository's self-hosted runners, rewrites the lines marked
+# `# sync-runner-choices` in the caller workflows (the `options:` of the Runner
+# input and the `runner-labels:` mapping from runner name to its labels), and
+# commits when the list changed. See docs/MULTI_RUNNER_SCHEDULING.md.
+#
+# Caller (e.g. .github/workflows/30-sync-runners.yml):
+#   on: { schedule: [{ cron: '17 * * * *' }], workflow_dispatch: {} }
+#   jobs:
+#     sync:
+#       uses: Cuvara/unity-build-workflows/.github/workflows/sync-runner-choices.yml@v6
+#       secrets:
+#         RUNNER_SYNC_TOKEN: ${{ secrets.RUNNER_SYNC_TOKEN }}
+
+name: Sync runner choices
+
+on:
+  workflow_call:
+    inputs:
+      workflow-files:
+        description: Caller workflows holding the marked Runner lines, one per line.
+        required: false
+        default: |
+          .github/workflows/10-build-development.yml
+          .github/workflows/11-build-release.yml
+        type: string
+      branch:
+        description: Branch to update. Empty = the triggering ref (the default branch for a schedule).
+        required: false
+        default: ''
+        type: string
+      toolkit-repo:
+        description: Toolkit repository (owner/repo).
+        required: false
+        default: 'Cuvara/unity-build-workflows'
+        type: string
+      toolkit-ref:
+        description: Toolkit ref the sync script comes from.
+        required: false
+        default: 'v6'
+        type: string
+    secrets:
+      RUNNER_SYNC_TOKEN:
+        description: >-
+          Fine-grained token. Organization: Self-hosted runners (read).
+          Repository: Administration (read), Contents (read & write),
+          Workflows (read & write). GITHUB_TOKEN can neither list runners nor
+          change workflow files.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync runner choices
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workflows
+        uses: actions/checkout@v4
+        with:
+          # Empty = the triggering ref: the default branch on a schedule.
+          ref: ${{ inputs.branch }}
+          token: ${{ secrets.RUNNER_SYNC_TOKEN }}
+          sparse-checkout: .github
+          lfs: false
+
+      - name: Checkout toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Read self-hosted runners
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_SYNC_TOKEN }}
+          REPO: ${{ github.repository }}
+          ORG: ${{ github.repository_owner }}
+        run: |
+          set -Eeuo pipefail
+          : > runners.ndjson
+          if gh api --paginate "orgs/${ORG}/actions/runners" --jq '.runners[]' >> runners.ndjson 2> org.err; then
+            echo "organization runners: read"
+          else
+            echo "::warning::Could not list ${ORG}'s organization runners ($(head -1 org.err)). Give RUNNER_SYNC_TOKEN 'Self-hosted runners: read' on the organization."
+          fi
+          if gh api --paginate "repos/${REPO}/actions/runners" --jq '.runners[]' >> runners.ndjson 2> repo.err; then
+            echo "repository runners: read"
+          else
+            echo "::warning::Could not list ${REPO}'s repository runners ($(head -1 repo.err))."
+          fi
+          # One array, each runner once (org and repo listings can overlap).
+          jq -s 'unique_by(.id)' runners.ndjson > runners.json
+          {
+            echo "### Self-hosted runners"
+            echo ""
+            echo "| Runner | OS | Status | Busy | Labels |"
+            echo "|---|---|---|---|---|"
+            jq -r '.[] | "| \(.name) | \(.os) | \(.status) | \(.busy) | \([.labels[].name] | join(", ")) |"' runners.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update the Runner dropdown
+        id: sync
+        shell: bash
+        env:
+          WORKFLOW_FILES: ${{ inputs.workflow-files }}
+        run: |
+          set -Eeuo pipefail
+          args=()
+          while IFS= read -r f; do
+            f="${f%$'\r'}"
+            [ -n "${f// }" ] && args+=(--workflow "$f")
+          done <<< "${WORKFLOW_FILES}"
+          python3 .toolkit/scripts/common/sync_runner_choices.py --runners runners.json "${args[@]}"
+
+      - name: Commit
+        if: ${{ steps.sync.outputs.changed == 'true' }}
+        shell: bash
+        env:
+          WORKFLOW_FILES: ${{ inputs.workflow-files }}
+        run: |
+          set -Eeuo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          while IFS= read -r f; do
+            f="${f%$'\r'}"
+            [ -n "${f// }" ] && git add -- "$f"
+          done <<< "${WORKFLOW_FILES}"
+          git commit -m "ci: sync the Runner dropdown with the registered runners"
+          git push
