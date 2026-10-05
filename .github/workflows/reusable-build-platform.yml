@@ -774,6 +774,15 @@ jobs:
           path: .toolkit
           clean: false
 
+      # The preflight and later steps run Python 3.8+. A self-hosted runner may
+      # have none (Windows: only the Microsoft Store placeholder). Find one by
+      # running each candidate, install it per-user when missing, and put it —
+      # plus a `python3` wrapper on Windows — on PATH for the following steps.
+      - name: Ensure Python (self-hosted)
+        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') && steps.ios-guard.outputs.blocked != 'true' }}
+        shell: bash
+        run: bash .toolkit/scripts/common/ensure_python.sh
+
       - name: Unity preflight (provision editor + modules)
         id: unity-preflight
         if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') && steps.ios-guard.outputs.blocked != 'true' }}
