@@ -330,6 +330,10 @@ jobs:
           IN_BUILD_ADDRESSABLES: ${{ inputs.build-addressables || '' }}
           IN_BUILD_TYPE:         ${{ inputs.build-type || '' }}
           # Repository level only: this job has no environment yet.
+          # The capability gate rejects a dispatch the project cannot build
+          # here already, as it would in resolve-config.
+          PLATFORMS:             ${{ vars.PLATFORMS || '' }}
+          NEW_PLATFORMS:         ${{ vars.BUILD_PLATFORMS_ENABLED || '' }}
           NEW_BUILD_ENVIRONMENT_SECRETS: ${{ vars.BUILD_ENVIRONMENT_SECRETS }}
         run: |
           set -euo pipefail

@@ -185,8 +185,9 @@ A value set for these in an environment is ignored. Keep them in
   to the environment, like each build job and `final-report` already do.
   Cleanup: [GITHUB_ENVIRONMENTS.md §6](GITHUB_ENVIRONMENTS.md#6-cleaning-up-stale-deployments).
 - **One more short job.** `select-environment` runs on `ubuntu-latest` for
-  about ten seconds. It reads only event data, dispatch inputs and
-  `BUILD_ENVIRONMENT_SECRETS`.
+  about ten seconds. It reads only event data, dispatch inputs,
+  `BUILD_ENVIRONMENT_SECRETS` and the platform capability
+  (`BUILD_PLATFORMS_ENABLED` / `PLATFORMS`), all at repository level.
 - **The environment must exist** or GitHub creates it on first use, without
   protection rules. Create `development`, `staging` and `production` before
   setting variables in them.
