@@ -8,6 +8,22 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Self-hosted runners find or install Python.** The Unity preflight and
+  later steps need Python 3.8+, and a fresh Windows runner had none (only the
+  Microsoft Store placeholder), so the build stopped at the preflight. New
+  `scripts/common/ensure_python.sh` (step `Ensure Python (self-hosted)` before
+  the preflight in the build and test jobs) runs each candidate — `python3`,
+  `python`, the `py -3` launcher, `brew --prefix python@3` — rejects
+  placeholders and versions below 3.8, installs Python when none qualifies
+  (`winget … --scope user`, no admin; `brew install python@3.12`), puts it on
+  the job's PATH, and adds a `python3` wrapper on Windows.
+
+---
+
 ## [6.11.0] — 2026-10-05
 
 ### Added
