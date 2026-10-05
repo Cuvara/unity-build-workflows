@@ -111,7 +111,7 @@ class TestPipelineWiring:
         steps = build["jobs"][next(iter(build["jobs"]))]["steps"]
         # The Windows-only Git Bash step has to precede every bash step, the
         # identity print included; it is the only thing allowed before it.
-        assert steps[0]["name"] == "Use Git Bash (Windows)"
+        assert steps[0]["name"] == "Use Git Bash and long paths (Windows)"
         assert steps[1]["name"] == "Runner identity"
         assert "runner-selected" in on_block(build)["workflow_call"]["inputs"]
 
