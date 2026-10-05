@@ -8,6 +8,43 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Build scripts ship in the toolkit.** `Company.BuildPipeline.Editor.PlayerBuilder`
+  and `AddressableBuilder` are now part of the Unity package
+  (`com.company.build-pipeline` 2.3.0). Every build job copies the package into
+  the project's `Packages/` folder before Unity starts and removes it at the end
+  (`scripts/common/install_build_package.sh`), so a project needs no
+  `PlayerBuilder.cs` / `AddressableBuilder.cs` of its own and a fix to them is
+  made once, in the toolkit. A project that still has its own global
+  `PlayerBuilder` keeps using it until it deletes it; a project that references
+  or embeds the package keeps its own copy. See `docs/TOOLKIT_BUILD_PACKAGE.md`.
+- The Addressables builder compiles only when the project has
+  `com.unity.addressables` (asmdef `versionDefines`).
+
+### Fixed
+
+- **Self-hosted release builds came out as APKs.** The workflows set
+  `ANDROID_APP_BUNDLE=1`; the old project builder accepted only `true`. The
+  toolkit's `PlayerBuilder` accepts `1`, `true` and `yes`.
+- **Docker on a Windows runner** now passes `BUILD_NUMBER`, `APP_VERSION` and
+  the keystore passwords into the container (by name, never on the command
+  line), so those builds get the run's build number and can sign.
+- **`build-addressables` failed on projects without an `AddressableBuilder`.**
+  The package provides one.
+
+### Changed
+
+- The package's iOS post-processor no longer adds Info.plist usage strings or
+  a push entitlement to builds made without `BuildConfig/`. Those builds only
+  get `ENABLE_BITCODE=NO`; the `BuildCommand` path is unchanged.
+- `templates/PlayerBuilder.cs` and `templates/AddressableBuilder.cs` are
+  removed; the package is the single copy.
+
+---
+
 ## [6.15.0] — 2026-10-05
 
 ### Added

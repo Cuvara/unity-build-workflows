@@ -44,6 +44,15 @@ OLD_PATH_MARKERS = ("Hub/Editor", "Hub\\Editor", "Program Files", "/Applications
 BASH = shutil.which("bash")
 
 
+# The "Install toolkit build package" step's outputs (test_toolkit_build_package.py).
+BUILD_PACKAGE_METHODS = {
+    "steps.build-package.outputs.player-method || 'PlayerBuilder.Build'":
+        "Company.BuildPipeline.Editor.PlayerBuilder.Build",
+    "steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build'":
+        "Company.BuildPipeline.Editor.AddressableBuilder.Build",
+}
+
+
 def step(step_id):
     matches = [s for s in STEPS if s.get("id") == step_id]
     assert len(matches) == 1, f"expected exactly one step with id {step_id}"
@@ -83,7 +92,7 @@ class TestWiring:
         for step_id in NATIVE_UNITY_STEP_IDS:
             assert index_of("unity-preflight") < index_of(step_id), step_id
 
-    @pytest.mark.parametrize("step_id", ["preflight-toolkit", "unity-preflight"])
+    @pytest.mark.parametrize("step_id", ["unity-preflight"])
     def test_preflight_only_on_native_windows_and_macos_lanes(self, step_id):
         condition = step(step_id)["if"]
         assert "inputs.build-engine == 'local'" in condition
@@ -222,6 +231,7 @@ class TestStepBehaviour:
         script = render(build["run"], {
             "inputs.project-path": "project", "inputs.platform": "Android",
             "inputs.build-method": "", "inputs.android-export-type": "apk",
+            **BUILD_PACKAGE_METHODS,
         })
         env = dict(ci["env"], UNITY_EDITOR=editor)
         proc = subprocess.run([BASH, "-c", script], cwd=str(ci["workspace"]), env=env,
@@ -254,6 +264,7 @@ class TestStepBehaviour:
         script = render(step("build-macos")["run"], {
             "inputs.project-path": "project", "inputs.platform": "Android",
             "inputs.build-method": "", "inputs.android-export-type": "apk",
+            **BUILD_PACKAGE_METHODS,
         })
         env = dict(ci["env"], UNITY_EDITOR="")
         proc = subprocess.run([BASH, "-c", script], cwd=str(ci["workspace"]), env=env,

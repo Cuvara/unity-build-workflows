@@ -157,6 +157,7 @@ namespace Company.BuildPipeline.Editor
 
             // ── 12. Populate IOSBuildParameters for [PostProcessBuild] hook ───
             // The hook is static and cannot access BuildContext; this static holder bridges them.
+            IOSBuildParameters.Configured          = true;
             IOSBuildParameters.IsDevelopmentBuild  = cfg.IsDevelopmentBuild;
             IOSBuildParameters.GenerateSymbols      = iosCfg?.GenerateSymbols ?? false;
             IOSBuildParameters.EnableBitcode        = iosCfg?.EnableBitcode ?? false;

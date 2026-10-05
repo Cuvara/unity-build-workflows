@@ -782,15 +782,32 @@ jobs:
       # Every native Unity step below runs THAT executable
       # (steps.unity-preflight.outputs.unity_editor) — never a path rebuilt here.
       # Docker lanes are untouched: their editor is inside the image.
-      - name: Checkout toolkit (Unity preflight)
+      # Every lane: the preflight below and the build package after it both
+      # come from this checkout.
+      - name: Checkout toolkit
         id: preflight-toolkit
-        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') && steps.ios-guard.outputs.blocked != 'true' }}
+        if: ${{ steps.ios-guard.outputs.blocked != 'true' }}
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.toolkit-repo }}
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
           clean: false
+
+      # The project carries no build script: the toolkit's Unity package is
+      # copied into Packages/ for this build (an embedded package, no manifest
+      # edit) and removed by "Remove toolkit build package" at the end. Its
+      # PlayerBuilder / AddressableBuilder are the default -executeMethod
+      # targets below; a project that still has its own global PlayerBuilder
+      # keeps using it. docs/TOOLKIT_BUILD_PACKAGE.md
+      - name: Install toolkit build package
+        id: build-package
+        if: ${{ steps.ios-guard.outputs.blocked != 'true' }}
+        shell: bash
+        run: |
+          bash .toolkit/scripts/common/install_build_package.sh install \
+            --project "${{ inputs.project-path }}" \
+            --package .toolkit/unity-package/Packages/com.company.build-pipeline
 
       # The preflight and later steps run Python 3.8+. A self-hosted runner may
       # have none (Windows: only the Microsoft Store placeholder). Find one by
@@ -973,7 +990,7 @@ jobs:
           projectPath: ${{ inputs.project-path }}
           unityVersion: ${{ inputs.unity-version }}
           targetPlatform: StandaloneLinux64
-          buildMethod: AddressableBuilder.Build
+          buildMethod: ${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}
           allowDirtyBuild: true
 
       # ── Step 7b: Build Addressables pre-step (self-hosted lanes) ──────────
@@ -999,7 +1016,7 @@ jobs:
           "$UNITY_BIN" \
             -batchmode -nographics -quit \
             -projectPath "${PROJECT}" \
-            -executeMethod AddressableBuilder.Build \
+            -executeMethod "${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}" \
             -logFile "Editor-addressables-pre.log"
 
       # ── Step 8: Record build start time ───────────────────────────────────
@@ -1098,7 +1115,7 @@ jobs:
           projectPath: ${{ inputs.project-path }}
           unityVersion: ${{ inputs.unity-version }}
           targetPlatform: StandaloneLinux64
-          buildMethod: AddressableBuilder.Build
+          buildMethod: ${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}
           allowDirtyBuild: true
 
       # ── Step 9b2: Build with Docker (Windows, native docker run) ───────────
@@ -1129,6 +1146,11 @@ jobs:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:    ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          # Read by PlayerBuilder inside the container, as on the native lanes.
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_PASS:      ${{ secrets.ANDROID_KEY_PASS }}
+          BUILD_NUMBER:          ${{ inputs.build-number }}
+          APP_VERSION:           ${{ inputs.app-version }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -1166,7 +1188,7 @@ jobs:
           $extraParams = if ($platform -eq "LinuxServer") { "-standaloneBuildSubtarget Server" } else { "" }
 
           $buildMethod = "${{ inputs.build-method }}"
-          if ([string]::IsNullOrEmpty($buildMethod)) { $buildMethod = "PlayerBuilder.Build" }
+          if ([string]::IsNullOrEmpty($buildMethod)) { $buildMethod = "${{ steps.build-package.outputs.player-method || 'PlayerBuilder.Build' }}" }
 
           $androidAppBundle = if ("${{ inputs.android-export-type }}" -eq "aab") { "1" } else { "0" }
 
@@ -1276,6 +1298,7 @@ jobs:
             -e UNITY_LICENSE -e UNITY_EMAIL -e UNITY_PASSWORD `
             -e "BUILD_TARGET=$buildTarget" -e "BUILD_METHOD=$buildMethod" -e "EXTRA_PARAMS=$extraParams" `
             -e "ANDROID_APP_BUNDLE=$androidAppBundle" `
+            -e ANDROID_KEYSTORE_PASS -e ANDROID_KEY_PASS -e BUILD_NUMBER -e APP_VERSION `
             -w /project `
             $image `
             bash /tmp/build.sh
@@ -1325,7 +1348,7 @@ jobs:
             "!UNITY_EXE!" ^
               -batchmode -nographics -quit ^
               -projectPath "!PROJECT!" ^
-              -executeMethod AddressableBuilder.Build ^
+              -executeMethod ${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }} ^
               -logFile "Editor.log"
             exit /b !ERRORLEVEL!
           )
@@ -1355,10 +1378,11 @@ jobs:
 
           :: Player build method. -buildTarget only SWITCHES the active target;
           :: an -executeMethod that calls BuildPipeline.BuildPlayer is required to
-          :: actually produce a build. Default to the project's PlayerBuilder.Build;
-          :: allow override via the build-method input.
+          :: actually produce a build. Default to the toolkit package's
+          :: PlayerBuilder (or the project's own, see "Install toolkit build
+          :: package"); allow override via the build-method input.
           set "BUILD_METHOD=${{ inputs.build-method }}"
-          if "!BUILD_METHOD!"=="" set "BUILD_METHOD=PlayerBuilder.Build"
+          if "!BUILD_METHOD!"=="" set "BUILD_METHOD=${{ steps.build-package.outputs.player-method || 'PlayerBuilder.Build' }}"
 
           :: Output dir consumed by PlayerBuilder; matches the upload path (build/).
           set "BUILD_OUTPUT_DIR=build"
@@ -1412,7 +1436,7 @@ jobs:
             "$UNITY_BIN" \
               -batchmode -nographics -quit \
               -projectPath "${PROJECT}" \
-              -executeMethod AddressableBuilder.Build \
+              -executeMethod "${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}" \
               -logFile "Editor.log"
             exit 0
           fi
@@ -1436,10 +1460,11 @@ jobs:
 
           # -buildTarget only SWITCHES the active target; an -executeMethod that
           # calls BuildPipeline.BuildPlayer is required to actually produce a
-          # build. Default to the project's PlayerBuilder.Build; allow override
+          # build. Default to the toolkit package's PlayerBuilder (or the
+          # project's own, see "Install toolkit build package"); allow override
           # via the build-method input.
           BUILD_METHOD="${{ inputs.build-method }}"
-          [ -z "$BUILD_METHOD" ] && BUILD_METHOD="PlayerBuilder.Build"
+          [ -z "$BUILD_METHOD" ] && BUILD_METHOD="${{ steps.build-package.outputs.player-method || 'PlayerBuilder.Build' }}"
 
           # Output dir consumed by PlayerBuilder; matches the upload path (build/).
           export BUILD_OUTPUT_DIR="build"
@@ -1472,6 +1497,14 @@ jobs:
             DURATION=0
           fi
           echo "BUILD_DURATION=${DURATION}" >> "$GITHUB_ENV"
+
+      # Leaves a persistent self-hosted workspace as the checkout made it.
+      - name: Remove toolkit build package
+        if: ${{ always() && steps.build-package.outputs.installed == 'true' }}
+        shell: bash
+        run: |
+          bash .toolkit/scripts/common/install_build_package.sh remove \
+            --project "${{ inputs.project-path }}"
 
       # ── Step 10b: Artifact manifest (stage 03 → 04/05 hand-off) ───────────
       # Stage 04 must not have to guess which file in build/ is "the artifact",
