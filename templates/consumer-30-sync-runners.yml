@@ -1,0 +1,35 @@
+# ────────────────────────────────────────────────────────────────────────────
+# 30-sync-runners.yml — keep the "Runner" dropdown of the build workflows
+# equal to the registered self-hosted runners.
+#
+# A workflow_dispatch choice list is static YAML, so this job reads the runners
+# on a schedule and rewrites the lines marked `# sync-runner-choices` in
+# 10-build-development.yml / 11-build-release.yml, committing when the list
+# changed. In those workflows:
+#
+#   inputs:
+#     runner:
+#       description: "RUNNER · Machine to build on (auto = runner policy / repository variables)"
+#       type: choice
+#       default: 'auto'
+#       options: ['auto'] # sync-runner-choices
+#   ...
+#   with:
+#     runner-labels: ${{ inputs.runner != 'auto' && '' || '' }} # sync-runner-choices
+#
+# Needs secret RUNNER_SYNC_TOKEN — see docs/MULTI_RUNNER_SCHEDULING.md.
+# ────────────────────────────────────────────────────────────────────────────
+
+name: Sync / Runner choices
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    name: Sync
+    uses: Cuvara/unity-build-workflows/.github/workflows/sync-runner-choices.yml@v6
+    secrets:
+      RUNNER_SYNC_TOKEN: ${{ secrets.RUNNER_SYNC_TOKEN }}
