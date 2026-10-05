@@ -8,6 +8,29 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Preflight reinstalled an editor Unity Hub already had, then hung.** On a
+  self-hosted Windows runner the editor had been installed with Unity Hub into
+  a custom folder by a person; the runner service's CLI registry is empty and
+  only two fixed `Program Files` paths were checked, so preflight reported
+  `Editor: MISSING` and started installing — and then sat for two hours with
+  no output until the job timed out.
+  - Discovery now also asks **Unity Hub's own records for every account** on
+    the machine — its custom install location (`secondaryInstallPath.json`) and
+    its editor list (`editors-v2.json` / `editors.json`) — and, as before,
+    registers and version-checks each candidate with the CLI before using it.
+  - CLI commands run with **stdin closed** (a prompt fails instead of waiting),
+    are **logged before they run**, and on timeout the **whole process tree**
+    is killed (Windows helpers kept the pipe open past the old timeout).
+  - Installs **stream their output**, log a heartbeat every minute, and stop
+    after `--install-timeout` / `UNITY_PREFLIGHT_INSTALL_TIMEOUT` (default
+    3600 s) with the last output in the error.
+
+---
+
 ## [6.12.0] — 2026-10-05
 
 ### Added

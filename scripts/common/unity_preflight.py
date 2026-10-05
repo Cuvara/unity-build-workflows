@@ -51,6 +51,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
@@ -374,28 +375,92 @@ def extract_json(text: str) -> Any:
     return None
 
 
-def _run(argv: List[str], timeout: Optional[float], extra_env: Optional[Dict[str, str]] = None) -> CliResult:
+HEARTBEAT_SECONDS = 60
+
+
+def _kill_tree(proc: "subprocess.Popen") -> None:
+    """Kill a CLI and everything it started.
+
+    Killing only the direct child is not enough: on Windows the Unity CLI's
+    helpers inherit its output pipes, keep them open, and the read never ends —
+    a "600 s" query hung a CI job for two hours.
+    """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    else:
+        try:
+            os.killpg(proc.pid, 9)
+        except (OSError, AttributeError):
+            proc.kill()
+
+
+def _run(argv: List[str], timeout: Optional[float], extra_env: Optional[Dict[str, str]] = None,
+         stream: bool = False) -> CliResult:
+    """Run a CLI command; never wait on the console and never outlive `timeout`.
+
+    stdin is closed, so a CLI that would prompt (first-run terms, login) reads
+    EOF instead of waiting forever. On timeout the whole process tree is
+    killed. With `stream`, output is echoed as it arrives and a heartbeat is
+    logged every HEARTBEAT_SECONDS, so a long install shows that it is alive.
+    """
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
+    _log(f"$ {_format_argv(argv)}")
+    popen_kwargs: Dict[str, Any] = {}
+    if os.name != "nt":
+        popen_kwargs["start_new_session"] = True  # its own group, for _kill_tree
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             argv,
-            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout,
             env=env,
+            **popen_kwargs,
         )
     except FileNotFoundError as exc:
         raise PreflightError(f"Cannot execute {argv[0]}: {exc}", EXIT_PREREQ)
-    except subprocess.TimeoutExpired:
-        raise PreflightError(
-            f"Command timed out after {timeout}s: {_format_argv(argv)}", EXIT_FAILED
-        )
-    return CliResult(argv, proc.returncode, proc.stdout or "", proc.stderr or "",
-                     extract_json(proc.stdout or ""))
+
+    out: List[str] = []
+    err: List[str] = []
+
+    def pump(pipe, sink: List[str]) -> None:
+        for line in iter(pipe.readline, ""):
+            sink.append(line)
+            if stream:
+                sys.stderr.write(f"  | {line}" if line.endswith("\n") else f"  | {line}\n")
+                sys.stderr.flush()
+        pipe.close()
+
+    readers = [threading.Thread(target=pump, args=(proc.stdout, out), daemon=True),
+               threading.Thread(target=pump, args=(proc.stderr, err), daemon=True)]
+    for reader in readers:
+        reader.start()
+
+    started = time.monotonic()
+    next_beat = started + HEARTBEAT_SECONDS
+    while proc.poll() is None:
+        now = time.monotonic()
+        if timeout is not None and now - started > timeout:
+            _kill_tree(proc)
+            for reader in readers:
+                reader.join(5)
+            raise PreflightError(
+                f"Command timed out after {int(timeout)}s and was stopped: {_format_argv(argv)}\n"
+                f"Last output:\n{_tail(''.join(out + err), 20)}", EXIT_FAILED)
+        if stream and now >= next_beat:
+            _log(f"... still running ({int((now - started) // 60)} min)")
+            next_beat = now + HEARTBEAT_SECONDS
+        time.sleep(0.2)
+    for reader in readers:
+        reader.join(10)
+    stdout, stderr = "".join(out), "".join(err)
+    return CliResult(argv, proc.returncode, stdout, stderr, extract_json(stdout))
 
 
 def _format_argv(argv: Sequence[str]) -> str:
@@ -825,12 +890,91 @@ def standard_editor_locations(version: str, host_os: str) -> List[Path]:
     return []
 
 
+def hub_config_dirs(host_os: str) -> List[Path]:
+    """Unity Hub's per-account configuration directories on this machine.
+
+    Every account, not only the one running preflight: a runner service has
+    its own (empty) profile, while the editor was installed with Unity Hub by
+    a person. UNITY_PREFLIGHT_HUB_CONFIG_DIRS (os.pathsep-separated) replaces
+    the list.
+    """
+    override = os.environ.get("UNITY_PREFLIGHT_HUB_CONFIG_DIRS")
+    if override is not None:
+        return [Path(p) for p in override.split(os.pathsep) if p]
+    dirs: List[Path] = []
+    if host_os == "windows":
+        if os.environ.get("APPDATA"):
+            dirs.append(Path(os.environ["APPDATA"], "UnityHub"))
+        users = Path(os.environ.get("SystemDrive", "C:") + "\\", "Users")
+        try:
+            dirs.extend(sorted(p / "AppData" / "Roaming" / "UnityHub" for p in users.iterdir()))
+        except OSError:
+            pass
+    elif host_os == "darwin":
+        dirs.append(Path.home() / "Library" / "Application Support" / "UnityHub")
+        try:
+            dirs.extend(sorted(p / "Library" / "Application Support" / "UnityHub"
+                               for p in Path("/Users").iterdir()))
+        except OSError:
+            pass
+    else:
+        dirs.append(Path.home() / ".config" / "UnityHub")
+    seen: List[Path] = []
+    for d in dirs:
+        if not any(_same_path(str(d), str(s)) for s in seen):
+            seen.append(d)
+    return seen
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None  # missing, unreadable by this account, or not JSON
+
+
+def _locations_for(node: Any, version: str) -> List[str]:
+    """Editor locations of `version` anywhere in a Hub editors file (any schema)."""
+    found: List[str] = []
+    if isinstance(node, dict):
+        if str(node.get("version", "")) == version and node.get("location"):
+            loc = node["location"]
+            found.extend(str(x) for x in (loc if isinstance(loc, list) else [loc]))
+        for value in node.values():
+            found.extend(_locations_for(value, version))
+    elif isinstance(node, list):
+        for value in node:
+            found.extend(_locations_for(value, version))
+    return found
+
+
+def hub_reported_editors(version: str, host_os: str) -> List[Path]:
+    """Editor applications Unity Hub itself reports for `version`.
+
+    Asks Hub's own records instead of guessing directories: its custom editor
+    install location (secondaryInstallPath.json) and the editors it installed
+    or was pointed at (editors-v2.json, editors.json). Each result is still
+    registered and version-checked by the CLI before it is used.
+    """
+    apps: List[Path] = []
+    for config in hub_config_dirs(host_os):
+        root = _read_json(config / "secondaryInstallPath.json")
+        if isinstance(root, str) and root.strip():
+            apps.append(editor_application(root.strip(), version, host_os))
+        for name in ("editors-v2.json", "editors.json"):
+            for location in _locations_for(_read_json(config / name), version):
+                apps.append(Path(_application_of(location)) if host_os == "darwin"
+                             else Path(location))
+    return apps
+
+
 def editor_candidates(backend, version: str, host_os: str,
                       roots: Sequence[Optional[str]]) -> List[Path]:
     """Existing editor applications of `version` on disk, in discovery order.
 
     Order: the given roots (explicit install root, then the runner-managed
-    fallback root), the CLI's configured install path, then the standard
+    fallback root), the CLI's configured install path, the editors Unity Hub
+    reports for any account on the machine, then the standard
     locations above. Only exact `<root>/<version>` layouts are considered; the
     version is confirmed by the CLI after registration, never trusted from the
     folder name alone.
@@ -841,6 +985,7 @@ def editor_candidates(backend, version: str, host_os: str,
             ordered.append(editor_application(backend.get_install_root(), version, host_os))
         except PreflightError:
             pass
+    ordered.extend(hub_reported_editors(version, host_os))
     ordered.extend(standard_editor_locations(version, host_os))
     found: List[Path] = []
     for candidate in ordered:
@@ -1209,7 +1354,8 @@ def run_preflight(args: argparse.Namespace) -> Dict[str, Any]:
             else:
                 _log(f"Installing required modules: {', '.join(plan['modules'])} ...")
                 action = f"Installing modules into Unity {version}"
-            outcome = _run(plan["argv"], None, {"UNITY_NO_PAGER": "1"})
+            outcome = _run(plan["argv"], args.install_timeout or None, {"UNITY_NO_PAGER": "1"},
+                           stream=True)
             if not _envelope_ok(outcome):
                 raise PreflightError(describe_cli_failure(action, outcome, context), EXIT_FAILED)
             _log("Installation complete")
@@ -1448,6 +1594,10 @@ Examples:
                         help="Directory for the machine-wide install lock (env UNITY_PREFLIGHT_LOCK_DIR).")
     parser.add_argument("--lock-timeout", type=float, default=7200.0,
                         help="Seconds to wait for another preflight's install. Default: 7200.")
+    parser.add_argument("--install-timeout", type=float,
+                        default=float(os.environ.get("UNITY_PREFLIGHT_INSTALL_TIMEOUT") or 3600),
+                        help="Seconds an editor/module install may run before it is stopped "
+                             "(0 = no limit). Default: 3600, or UNITY_PREFLIGHT_INSTALL_TIMEOUT.")
     # Test seam: evaluate host-specific rules (built-in modules, Xcode) for another OS.
     parser.add_argument("--host-os", choices=HOST_OSES, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
