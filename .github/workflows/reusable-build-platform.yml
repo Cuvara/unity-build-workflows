@@ -1272,6 +1272,10 @@ jobs:
           # Read by PlayerBuilder for a project with a custom Android keystore.
           ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+          # Read by PlayerBuilder: the store-facing build number and version
+          # name this run decided (Android versionCode, iOS CFBundleVersion).
+          BUILD_NUMBER: ${{ inputs.build-number }}
+          APP_VERSION: ${{ inputs.app-version }}
         run: |
           @echo off
           setlocal EnableDelayedExpansion
@@ -1362,6 +1366,10 @@ jobs:
           # Read by PlayerBuilder for a project with a custom Android keystore.
           ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+          # Read by PlayerBuilder: the store-facing build number and version
+          # name this run decided (Android versionCode, iOS CFBundleVersion).
+          BUILD_NUMBER: ${{ inputs.build-number }}
+          APP_VERSION: ${{ inputs.app-version }}
         run: |
           set -euo pipefail
           PROJECT="${{ inputs.project-path }}"

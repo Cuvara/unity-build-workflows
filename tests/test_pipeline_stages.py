@@ -850,6 +850,51 @@ def test_build_number_rejects_a_nonsense_offset(resolve_matrix):
         resolve_matrix(["Android"], build_number_offset="not-a-number")
 
 
+@pytest.mark.parametrize("build_type,expected", [("development", "100042"), ("release", "504")])
+def test_build_number_offset_per_build_type(resolve_matrix, build_type, expected):
+    """Development and release each have their own run_number, so each gets
+    its own offset: a development build must not outnumber the next release."""
+    out = resolve_matrix(["Android"], build_type=build_type, run_number=42,
+                         build_number_offset=7,
+                         build_number_offset_development=100000,
+                         build_number_offset_release=462)
+    assert out["build-number"] == expected
+
+
+@pytest.mark.parametrize("build_type", ["development", "release"])
+def test_shared_offset_is_the_fallback(resolve_matrix, build_type):
+    """Projects that set only BUILD_NUMBER_OFFSET keep their numbers."""
+    out = resolve_matrix(["Android"], build_type=build_type, run_number=42,
+                         build_number_offset=462)
+    assert out["build-number"] == "504"
+
+
+def test_per_type_offset_rejects_nonsense(resolve_matrix):
+    with pytest.raises(AssertionError):
+        resolve_matrix(["Android"], build_type="release", build_number_offset_release="12a")
+
+
+def test_native_lanes_hand_build_number_and_version_to_player_builder():
+    """The local lanes never passed BUILD_NUMBER: every native build shipped
+    the project's own versionCode / CFBundleVersion, so the second store
+    upload of a version was rejected."""
+    build = yaml.safe_load(BUILD_PLATFORM.read_text())["jobs"]["build"]["steps"]
+    for step_id in ("build-macos", "build-windows"):
+        env = next(s for s in build if s.get("id") == step_id)["env"]
+        assert env["BUILD_NUMBER"] == "${{ inputs.build-number }}", step_id
+        assert env["APP_VERSION"] == "${{ inputs.app-version }}", step_id
+
+
+def test_player_builder_template_applies_and_restores_the_version(repo_root):
+    template = (repo_root / "templates" / "PlayerBuilder.cs").read_text(encoding="utf-8")
+    assert 'GetEnvironmentVariable("BUILD_NUMBER")' in template
+    assert 'GetEnvironmentVariable("APP_VERSION")' in template
+    assert "PlayerSettings.Android.bundleVersionCode = buildNumber" in template
+    assert "PlayerSettings.iOS.buildNumber = buildNumber.ToString()" in template
+    # Applied for this build only: the runner's ProjectSettings stay untouched.
+    assert "version.Restore();" in template
+
+
 # ---------------------------------------------------------------------------
 # The immutable-artifact boundary
 # ---------------------------------------------------------------------------

@@ -392,6 +392,23 @@ secret so the scheduler can see which runners are online and busy. Without a
 policy nothing changes. See
 [MULTI\_RUNNER\_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md).
 
+### Build numbers (a project already in a store)
+
+Every store upload needs a higher build number (Android `versionCode`, iOS
+`CFBundleVersion`). The pipeline computes it as `github.run_number + offset`
+and the native lane's `PlayerBuilder` applies it, so a project that has never
+uploaded needs nothing. A project that already has builds in a store sets the
+release offset once to the highest number the store has, and usually a
+separate range for development builds:
+
+```bash
+gh variable set BUILD_NUMBER_OFFSET_RELEASE     --repo "${REPO}" --body 462
+gh variable set BUILD_NUMBER_OFFSET_DEVELOPMENT --repo "${REPO}" --body 100000
+```
+
+Its `PlayerBuilder.cs` must apply `BUILD_NUMBER` / `APP_VERSION`; copy them from
+`templates/PlayerBuilder.cs`. Details: [VERSIONING.md](VERSIONING.md).
+
 ---
 
 ## Step 5: (If Using Addressables) Add the AddressableBuilder Script

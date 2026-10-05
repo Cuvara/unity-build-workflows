@@ -8,6 +8,34 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Separate build-number offsets for development and release builds.**
+  `BUILD_NUMBER_OFFSET_DEVELOPMENT` and `BUILD_NUMBER_OFFSET_RELEASE` (falling
+  back to the shared `BUILD_NUMBER_OFFSET`, then `0`). Build / Development and
+  Build / Release have separate `run_number`s, so one shared offset let
+  development builds outnumber the next release. The run log says which offset
+  was used. New `docs/VERSIONING.md` covers where the version name and build
+  number come from, the offsets, how they reach the app on each lane, and how
+  to check a build.
+
+### Fixed
+
+- **Native builds shipped the same build number every time.** The self-hosted
+  macOS / Windows lanes never passed `BUILD_NUMBER` or `APP_VERSION` to the
+  Unity build, so `PlayerBuilder` built with the project's own `versionCode` /
+  `CFBundleVersion` and the second store upload of a version was rejected. The
+  native build steps now pass both, and `templates/PlayerBuilder.cs` applies them
+  (Android `bundleVersionCode`, iOS / macOS `buildNumber`, `bundleVersion`) for
+  the build only, restoring the project's values afterwards. It also warns when
+  the build number is below the project's `versionCode`. The template now
+  includes the debug-key fallback for development APKs without a keystore
+  password. **Consumers update their `PlayerBuilder.cs` from the template.**
+
+---
+
 ## [6.11.2] — 2026-10-05
 
 ### Fixed
