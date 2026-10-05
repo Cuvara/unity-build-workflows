@@ -2184,3 +2184,132 @@ class TestCacheLibraryInput:
         assert spec["default"] == "auto" and spec["type"] == "string" and spec.get("required") is False
         flow = next(s for s in wf["jobs"]["resolve-config"]["steps"] if s.get("id") == "flow")
         assert flow["env"]["IN_CACHE_LIBRARY"] == "${{ inputs.cache-library || '' }}"
+
+
+# ── Environment-scoped generic variables (docs/ENVIRONMENT_VARIABLES.md) ────
+# resolve-config declares the build's GitHub Environment, so vars.BUILD_PLATFORMS
+# reaching NEW_ENV_BUILD_PLATFORMS is already that environment's value. The
+# generic name wins over the per-branch one; the dispatch input still wins
+# over both.
+
+class TestEnvironmentGenericVariables:
+    def test_generic_platforms_win_over_per_branch(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "push", "REF_NAME": "develop",
+            "NEW_ENV_BUILD_PLATFORMS": "Linux64",
+            "NEW_BUILD_DEVELOP_PLATFORMS": "Android",
+            "VAR_DEVELOP_BUILD_PLATFORMS": "WebGL",
+        }).stdout)
+        assert out["build-linux64"] == "true"
+        assert out["build-android"] == "false"
+        assert out["build-webgl"] == "false"
+        assert out["platform-source"] == "variable-new"
+
+    @pytest.mark.parametrize("ref", ["develop", "staging", "release-1.0"])
+    def test_generic_platforms_apply_on_every_branch(self, ref):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "push", "REF_NAME": ref,
+            "NEW_ENV_BUILD_PLATFORMS": "WebGL",
+        }).stdout)
+        assert out["build-webgl"] == "true"
+        assert out["build-android"] == "false"
+
+    def test_per_branch_still_used_when_generic_unset(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "push", "REF_NAME": "staging",
+            "NEW_BUILD_STAGING_PLATFORMS": "Linux64",
+        }).stdout)
+        assert out["build-linux64"] == "true"
+        assert out["build-android"] == "false"
+
+    def test_dispatch_platform_wins_over_generic(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "workflow_dispatch", "IN_PLATFORM": "Android",
+            "IN_ENVIRONMENT": "development",
+            "NEW_ENV_BUILD_PLATFORMS": "WebGL",
+        }).stdout)
+        assert out["build-android"] == "true"
+        assert out["build-webgl"] == "false"
+        assert out["platform-source"] == "dispatch"
+
+    def test_dispatch_all_uses_generic(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "workflow_dispatch", "IN_PLATFORM": "All",
+            "IN_ENVIRONMENT": "staging",
+            "NEW_ENV_BUILD_PLATFORMS": "Linux64",
+            "NEW_BUILD_STAGING_PLATFORMS": "Android",
+        }).stdout)
+        assert out["build-linux64"] == "true"
+        assert out["build-android"] == "false"
+
+    def test_generic_invalid_platform_fails(self):
+        r = run_flow({"EVENT_NAME": "push", "REF_NAME": "develop",
+                      "NEW_ENV_BUILD_PLATFORMS": "Playstation"})
+        assert r.returncode != 0
+
+    def test_generic_test_toggle_wins(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "push", "REF_NAME": "develop",
+            "NEW_ENV_TEST_ENABLED": "false",
+            "NEW_TEST_DEVELOP_ENABLED": "true",
+        }).stdout)
+        assert out["run-tests"] == "false"
+
+    def test_generic_test_toggle_validated(self):
+        r = run_flow({"EVENT_NAME": "push", "REF_NAME": "develop",
+                      "NEW_ENV_TEST_ENABLED": "maybe"})
+        assert r.returncode != 0 and "TEST_DEVELOP_ENABLED" in r.stderr
+
+    def test_generic_addressables_toggle_wins(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "push", "REF_NAME": "release-1.0",
+            "NEW_ENV_ADDRESSABLES_ENABLED": "false",
+            "NEW_ADDRESSABLES_RELEASE_ENABLED": "true",
+        }).stdout)
+        assert out["build-addressables"] == "false"
+
+    def test_generic_define_symbols_win(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "push", "REF_NAME": "develop",
+            "NEW_ENV_UNITY_DEFINE_SYMBOLS": "ENV_DEV;LOG_VERBOSE",
+            "NEW_DEVELOP_DEFINE_SYMBOLS": "BRANCH_DEV",
+        }).stdout)
+        assert out["define-symbols"] == "ENV_DEV;LOG_VERBOSE"
+
+    def test_generic_define_symbols_apply_to_pull_requests(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "pull_request", "BASE_REF": "develop",
+            "NEW_ENV_UNITY_DEFINE_SYMBOLS": "REPO_WIDE",
+        }).stdout)
+        assert out["define-symbols"] == "REPO_WIDE"
+
+    def test_dispatch_takes_environment_define_symbols_when_form_empty(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "workflow_dispatch", "IN_PLATFORM": "Android",
+            "IN_ENVIRONMENT": "development",
+            "NEW_ENV_UNITY_DEFINE_SYMBOLS": "ENV_DEV",
+            "NEW_DEVELOP_DEFINE_SYMBOLS": "BRANCH_DEV",
+        }).stdout)
+        assert out["define-symbols"] == "ENV_DEV"
+
+    def test_dispatch_form_define_symbols_win(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "workflow_dispatch", "IN_PLATFORM": "Android",
+            "IN_ENVIRONMENT": "development",
+            "IN_DEFINE_SYMBOLS": "FORM",
+            "NEW_ENV_UNITY_DEFINE_SYMBOLS": "ENV_DEV",
+        }).stdout)
+        assert out["define-symbols"] == "FORM"
+
+    def test_dispatch_ignores_per_branch_define_symbols(self):
+        out = parse_outputs(run_flow({
+            "EVENT_NAME": "workflow_dispatch", "IN_PLATFORM": "Android",
+            "IN_ENVIRONMENT": "development",
+            "NEW_DEVELOP_DEFINE_SYMBOLS": "BRANCH_DEV",
+        }).stdout)
+        assert out["define-symbols"] == ""
+
+    def test_unset_generic_keeps_defaults(self):
+        out = parse_outputs(run_flow({"EVENT_NAME": "push", "REF_NAME": "develop"}).stdout)
+        assert out["platform-source"] == "default"
+        assert out["build-android"] == "true"

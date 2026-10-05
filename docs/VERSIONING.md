@@ -81,6 +81,33 @@ difference is that it is predictable, and release numbers stay a clean,
 gap-free sequence for the stores. Stay below `2100000000`, Google Play's
 `versionCode` ceiling.
 
+### Offsets per GitHub Environment
+
+Instead of two repository variables, set one `BUILD_NUMBER_OFFSET` in each
+GitHub Environment. `resolve-config` declares the run's environment, so it
+reads that environment's value
+([ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md)):
+
+```bash
+gh variable set BUILD_NUMBER_OFFSET --env development --body 100000 -R OWNER/REPO
+gh variable set BUILD_NUMBER_OFFSET --env staging     --body 100000 -R OWNER/REPO
+gh variable set BUILD_NUMBER_OFFSET --env production  --body 462    -R OWNER/REPO
+gh variable delete BUILD_NUMBER_OFFSET_DEVELOPMENT -R OWNER/REPO   # would win otherwise
+gh variable delete BUILD_NUMBER_OFFSET_RELEASE     -R OWNER/REPO
+```
+
+This is equivalent only when **each workflow targets environments of a single
+build type**: the offset now follows the environment, the run number still
+follows the workflow. The usual setup qualifies: Build / Development
+dispatches `development` or `staging` (build type `development`), and
+Build / Release always builds `production` (build type `release`). If a
+workflow can build a `release` type into `development` (or the reverse), keep
+the `BUILD_NUMBER_OFFSET_<TYPE>` names. You can also set those in an
+environment; they still win over `BUILD_NUMBER_OFFSET`.
+
+Pull requests and `BUILD_ENVIRONMENT_SECRETS=false` have no environment, so
+they use the repository value (or `0`). Neither uploads to a store.
+
 ### Which projects need an offset
 
 | Project | What to set |

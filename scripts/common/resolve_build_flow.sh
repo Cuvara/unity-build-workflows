@@ -327,8 +327,15 @@ resolve_branch_platforms() {
     leg_b="$(eval echo "\${${branch_upper}_BUILD_PLATFORMS:-}")"
     leg_c="$(eval echo "\${VAR_${branch_upper}_BUILD_PLATFORMS:-}")"
 
+    # Generic BUILD_PLATFORMS wins over the per-branch name. resolve-config
+    # declares the build's GitHub Environment, so vars.BUILD_PLATFORMS already
+    # holds that environment's value (else the repository value).
+    # See docs/ENVIRONMENT_VARIABLES.md.
+    local generic="${NEW_ENV_BUILD_PLATFORMS:-${BUILD_PLATFORMS:-}}"
+
     local resolved
     resolve_setting "${default_list}" "${new_display}" \
+        variable-new "${generic}" \
         variable-new "${new_a}" \
         variable-new "${new_b}" \
         variable-legacy "${leg_a}" \
@@ -337,7 +344,7 @@ resolve_branch_platforms() {
     resolved="${_resolved_value}"
     platform_source="${_resolved_source}"
 
-    local var_name_used="${new_display} (or legacy equivalent)"
+    local var_name_used="BUILD_PLATFORMS or ${new_display} (or legacy equivalent)"
     if [[ "${platform_source}" == "default" ]]; then
         log_info "Platforms from defaults: ${resolved}"
     else
@@ -350,8 +357,9 @@ resolve_branch_platforms() {
 
 # ---------------------------------------------------------------------------
 # resolve_branch_optional BRANCH_TYPE
-#   Resolves per-branch run-tests and build-addressables toggles from new
-#   or legacy repo variables. Only overrides if resolved value is non-empty
+#   Resolves run-tests and build-addressables toggles from the generic
+#   TEST_ENABLED / ADDRESSABLES_ENABLED (environment-scoped), then the
+#   per-branch new or legacy repo variables. Only overrides if resolved value is non-empty
 #   relative to the default (which callers apply beforehand).
 # ---------------------------------------------------------------------------
 resolve_branch_optional() {
@@ -367,6 +375,7 @@ resolve_branch_optional() {
 
     local rt_resolved
     resolve_setting "${run_tests}" "TEST_${branch_upper}_ENABLED" \
+        variable-new "${NEW_ENV_TEST_ENABLED:-${TEST_ENABLED:-}}" \
         variable-new "${rt_new_a}" \
         variable-new "${rt_new_b}" \
         variable-legacy "${rt_leg_a}" \
@@ -389,6 +398,7 @@ resolve_branch_optional() {
 
     local addr_resolved
     resolve_setting "${build_addressables}" "ADDRESSABLES_${branch_upper}_ENABLED" \
+        variable-new "${NEW_ENV_ADDRESSABLES_ENABLED:-${ADDRESSABLES_ENABLED:-}}" \
         variable-new "${addr_new_a}" \
         variable-new "${addr_new_b}" \
         variable-legacy "${addr_leg_a}" \
@@ -405,8 +415,9 @@ resolve_branch_optional() {
 
 # ---------------------------------------------------------------------------
 # resolve_branch_define_symbols BRANCH_TYPE
-#   Resolves extra Scripting Define Symbols from new/legacy per-branch repo
-#   variables. Additive: merged into the project's existing symbols at build
+#   Resolves extra Scripting Define Symbols from the generic
+#   UNITY_DEFINE_SYMBOLS (environment-scoped), then new/legacy per-branch
+#   repo variables. Additive: merged into the project's existing symbols at build
 #   time (see apply_define_symbols.sh).
 # ---------------------------------------------------------------------------
 resolve_branch_define_symbols() {
@@ -420,6 +431,7 @@ resolve_branch_define_symbols() {
 
     local resolved
     resolve_setting "" "UNITY_${branch_upper}_DEFINE_SYMBOLS" \
+        variable-new "${NEW_ENV_UNITY_DEFINE_SYMBOLS:-${UNITY_DEFINE_SYMBOLS:-}}" \
         variable-new "${new_val}" \
         variable-legacy "${leg_a}" \
         variable-legacy "${leg_b}"
@@ -1022,6 +1034,15 @@ case "${EVENT_NAME}" in
     build_addressables="${IN_BUILD_ADDRESSABLES}"
     platform_source="dispatch"
     define_symbols="${IN_DEFINE_SYMBOLS}"
+    # An empty form field takes the chosen environment's UNITY_DEFINE_SYMBOLS:
+    # the dispatch names the environment, so its symbols belong to the build.
+    # Only the generic name -- per-branch variables never applied to dispatch.
+    if [[ -z "${define_symbols}" ]]; then
+        define_symbols="${NEW_ENV_UNITY_DEFINE_SYMBOLS:-${UNITY_DEFINE_SYMBOLS:-}}"
+        if [[ -n "${define_symbols}" ]]; then
+            log_info "define-symbols (UNITY_DEFINE_SYMBOLS) = '${define_symbols}'"
+        fi
+    fi
     log_info "workflow_dispatch: platform=${IN_PLATFORM} environment=${environment} run-tests=${run_tests}"
 
     # Platform selection — iOS is only ever built via explicit manual dispatch.
