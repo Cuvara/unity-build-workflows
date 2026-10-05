@@ -1727,7 +1727,7 @@ jobs:
             --output         "${MANIFEST_DIR}/artifact-manifest.json" \
             --project-path   "${{ inputs.project-path }}" \
             --version        "${{ inputs.app-version }}" \
-            --build-number   "${{ github.run_number }}" \
+            --build-number   "${{ inputs.build-number || github.run_number }}" \
             --unity-version  "${{ inputs.unity-version }}" \
             --commit         "${{ github.sha }}" \
             --branch         "${{ github.ref_name }}" \

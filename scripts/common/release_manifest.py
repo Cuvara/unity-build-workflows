@@ -77,6 +77,15 @@ class AmbiguousReleaseSet(Exception):
     """Two shippable artifacts claim the same platform."""
 
 
+def _same_artifact(a, b):
+    """True when two manifests describe the same artifact: same name, type and
+    (when both record it) the same content hash."""
+    if a.get("artifactName") != b.get("artifactName") or a.get("artifactType") != b.get("artifactType"):
+        return False
+    sha_a, sha_b = a.get("artifactSha256"), b.get("artifactSha256")
+    return not (sha_a and sha_b and sha_a != sha_b)
+
+
 def collect_artifact_manifests(search_root):
     """Read every per-platform artifact-manifest.json under search_root.
 
@@ -102,6 +111,12 @@ def collect_artifact_manifests(search_root):
         if not platform:
             continue
         if data.get("intermediate"):
+            continue
+        if platform in found and _same_artifact(found[platform], data):
+            # The build ships its manifest twice: as the "<name>-manifest"
+            # artifact and, where build/ is writable (the native lanes), inside
+            # the build artifact itself. Two copies of one artifact's manifest
+            # are one artifact, not a choice.
             continue
         if platform in found:
             raise AmbiguousReleaseSet(

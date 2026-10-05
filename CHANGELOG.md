@@ -8,6 +8,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Release Manifest failed on self-hosted lanes** with `Release Set is
+  ambiguous — Android has two shippable artifacts — X (AAB) and X (AAB)`. The
+  build ships `artifact-manifest.json` both as its own `<name>-manifest`
+  artifact and, where `build/` is writable (the native lanes), inside the build
+  artifact; the release-manifest job downloads both. Two copies of one
+  artifact's manifest (same name, type and sha256) now count as one; two
+  different artifacts are still refused.
+- **The artifact manifest recorded `github.run_number` as the build number**
+  (e.g. `5`) instead of the run's build number (`467`), so AAB validation
+  reported the wrong versionCode. It now records the `build-number` input, as
+  its description always said.
+
+---
+
 ## [6.18.0] — 2026-10-05
 
 ### Fixed
