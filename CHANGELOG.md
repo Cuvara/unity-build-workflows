@@ -8,7 +8,7 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
-## [6.14.0] — 2026-10-05
+## [6.15.0] — 2026-10-05
 
 ### Added
 
@@ -25,6 +25,13 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
   Previously, an editor in a custom folder that the Unity Hub records did not
   list was not found, and preflight downloaded and installed a second copy.
+
+---
+
+## [6.14.0] — 2026-10-05
+
+### Added
+
 - **One variable name per setting, with a value per GitHub Environment.**
   `BUILD_PLATFORMS`, `TEST_ENABLED`, `ADDRESSABLES_ENABLED` and
   `UNITY_DEFINE_SYMBOLS` replace the per-branch families
