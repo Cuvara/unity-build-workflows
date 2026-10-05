@@ -124,7 +124,9 @@ reports. It needs:
 - Python 3.8+ — found or installed by the job itself: `Ensure Python (self-hosted)`
   runs each candidate (`python3`, `python`, the `py -3` launcher), rejects the
   Microsoft Store placeholder, and otherwise runs
-  `winget install --id Python.Python.3.12 --scope user` (no admin). It adds a
+  `winget install --id Python.Python.3.12 --scope user` — or, without winget
+  (a runner service has none), python.org's NuGet package unpacked into the
+  tool cache; no admin either way. It adds a
   `python3` wrapper, since python.org installs only `python.exe`;
 - an install root the runner account can write **without UAC**, set in the
   runner's `.env` as `UNITY_PREFLIGHT_INSTALL_ROOT=D:\unity-editors`.

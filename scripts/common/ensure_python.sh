@@ -9,8 +9,10 @@
 #   1. `python3`, then `python` on PATH
 #   2. the Windows launcher: `py -3` reports its interpreter
 #      (sys.executable); macOS: `brew --prefix python@3`
-#   3. install — Windows: `winget install --id Python.Python.3.12 --scope user`
-#      (no admin); macOS: `brew install python@3.12` — then ask again
+#   3. install — Windows: `winget install --id Python.Python.3.12 --scope user`,
+#      or, when winget is missing or fails (runner service accounts have
+#      none), python.org's NuGet package unpacked into the tool cache;
+#      no admin either way; macOS: `brew install python@3.12` — then ask again
 #
 # Windows' Microsoft Store "python3" placeholder exists on PATH but exits
 # instead of running Python; the probe rejects it like any broken candidate.
@@ -27,6 +29,20 @@ set -Eeuo pipefail
 
 readonly EXIT_PREREQ=3
 PYTHON_MIN="${PYTHON_MIN:-3.8}"
+
+# Windows fallback when winget is unavailable (a runner service account has
+# no winget): python.org's official NuGet package, a plain zip — no
+# installer, no admin — unpacked into the runner tool cache.
+NUGET_VERSION="${ENSURE_PYTHON_NUGET_VERSION:-3.12.10}"
+NUGET_URL="${ENSURE_PYTHON_NUGET_URL:-https://api.nuget.org/v3-flatcontainer/python/${NUGET_VERSION}/python.${NUGET_VERSION}.nupkg}"
+CACHE_ROOT="${RUNNER_TOOL_CACHE:-${LOCALAPPDATA:-${HOME}}}/toolkit-python"
+NUGET_PYTHON="${CACHE_ROOT}/${NUGET_VERSION}/tools/python.exe"
+
+is_windows() {
+  [ "${ENSURE_PYTHON_PLATFORM:-}" = "windows" ] && return 0
+  case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) return 0 ;; esac
+  return 1
+}
 
 log() { echo "[ensure_python] $*" >&2; }
 
@@ -77,7 +93,28 @@ discover() {
     p="$(brew --prefix python@3 2>/dev/null || true)"
     [ -n "${p}" ] && try brew "${p}/bin/python3" && return 0
   fi
+  # A Python this script unpacked on an earlier run.
+  if is_windows && [ -e "${NUGET_PYTHON}" ]; then
+    try cache "${NUGET_PYTHON}" && return 0
+  fi
   return 1
+}
+
+install_nuget() {
+  local tmp dest
+  dest="${CACHE_ROOT}/${NUGET_VERSION}"
+  tmp="${CACHE_ROOT}/python.${NUGET_VERSION}.zip"
+  mkdir -p "${CACHE_ROOT}"
+  log "downloading Python ${NUGET_VERSION} (python.org NuGet package) into ${dest}"
+  curl -fsSL --retry 3 -o "${tmp}" "${NUGET_URL}" >&2 || return 1
+  rm -rf "${dest}"; mkdir -p "${dest}"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q -o "${tmp}" -d "${dest}" >&2 || return 1
+  else
+    powershell.exe -NoProfile -Command \
+      "Expand-Archive -LiteralPath '$(cygpath -w "${tmp}")' -DestinationPath '$(cygpath -w "${dest}")' -Force" >&2 || return 1
+  fi
+  rm -f "${tmp}"
 }
 
 refresh_windows_path() {
@@ -93,12 +130,21 @@ refresh_windows_path() {
 INSTALLED_WITH=""
 install_python() {
   [ "${ENSURE_PYTHON_NO_INSTALL:-0}" = "1" ] && return 1
-  if command -v winget >/dev/null 2>&1 || command -v winget.exe >/dev/null 2>&1; then
-    log "no usable Python — installing with winget (Python.Python.3.12, user scope, no admin)"
-    winget install --id Python.Python.3.12 -e --scope user --silent \
-      --accept-package-agreements --accept-source-agreements >&2 || return 1
-    refresh_windows_path
-    INSTALLED_WITH="winget"
+  if is_windows; then
+    if command -v winget >/dev/null 2>&1 || command -v winget.exe >/dev/null 2>&1; then
+      log "no usable Python — installing with winget (Python.Python.3.12, user scope, no admin)"
+      if winget install --id Python.Python.3.12 -e --scope user --silent \
+           --accept-package-agreements --accept-source-agreements >&2; then
+        refresh_windows_path
+        INSTALLED_WITH="winget"
+        return 0
+      fi
+      log "winget install failed — falling back to the NuGet package"
+    else
+      log "winget is not available to this account (a runner service usually has none)"
+    fi
+    install_nuget || return 1
+    INSTALLED_WITH="nuget"
     return 0
   fi
   if command -v brew >/dev/null 2>&1; then
@@ -125,15 +171,13 @@ fi
 PY_DIR="$(dirname "${PY_BIN}")"
 export PATH="${PY_DIR}:${PATH}"
 SHIM_DIR=""
-case "$(uname -s 2>/dev/null)" in
-  MINGW*|MSYS*|CYGWIN*)
-    # python.org's Windows installer ships python.exe only.
-    SHIM_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/toolkit-python3"
-    mkdir -p "${SHIM_DIR}"
-    printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "${PY_BIN}" > "${SHIM_DIR}/python3"
-    chmod +x "${SHIM_DIR}/python3"
-    ;;
-esac
+if is_windows; then
+  # python.org's Windows builds ship python.exe only.
+  SHIM_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/toolkit-python3"
+  mkdir -p "${SHIM_DIR}"
+  printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "${PY_BIN}" > "${SHIM_DIR}/python3"
+  chmod +x "${SHIM_DIR}/python3"
+fi
 
 if [ -n "${GITHUB_PATH:-}" ]; then
   # Later lines take precedence: the shim, if any, wins.
