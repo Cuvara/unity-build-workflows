@@ -78,6 +78,64 @@ in memory, and restores it afterwards:
 | `APP_VERSION` | version name (`bundleVersion`) |
 | `ANDROID_KEYSTORE_PASS`, `ANDROID_KEY_PASS` | passwords for the project's custom keystore. Without them a development APK is signed with the debug key; an App Bundle fails with the fix |
 | `-standaloneBuildSubtarget Server` | dedicated server for `LinuxServer` (applied by Unity) |
+| `BUILD_PROFILE` | Unity 6 Build Profile to build with — see below. Empty or `ProjectSettings` = the project's Player Settings |
+| `BUILD_PROFILE_DIR` | where a bare profile name is looked up (default `Assets/Settings/Build Profiles`) |
+
+### Build Profiles
+
+The pipeline input `build-profiles` maps platforms to Unity 6 Build Profiles,
+as comma-separated `Platform=Profile` pairs:
+
+```yaml
+build-profiles: 'Android=Android-Staging,iOS=iOS-dev'
+```
+
+Each build leg receives its own platform's entry as `BUILD_PROFILE`. A
+platform that is not listed, or is set to `ProjectSettings`, builds exactly as
+before: the project's Player Settings and the enabled scene list. The value is
+an asset name in `Assets/Settings/Build Profiles/` (`Android-Staging` →
+`Android-Staging.asset`) or a project-relative `.asset` path.
+
+`PlayerBuilder` then:
+
+1. loads the profile and checks it builds the job's platform. A missing
+   profile fails and lists the profiles the project has; an `iOS-dev` profile
+   on an Android leg fails;
+2. activates it **before** applying `APP_VERSION`, `BUILD_NUMBER` and the
+   keystore passwords, so a profile that overrides Player Settings still gets
+   this run's version and build number (the log line
+   `effective version …, Android versionCode …` shows the values that go into
+   the player);
+3. builds with `BuildPlayerWithProfileOptions` — the profile's scene list,
+   scripting defines and Player Settings overrides;
+4. restores everything: the previously active profile is re-activated and the
+   profile asset, which Unity saves during the build, is put back byte for
+   byte. A `ProjectSettings` build deactivates a profile left active in
+   `Library/` first, so a cached `Library/` never changes what a build uses.
+
+Profiles are applied only by the toolkit's `PlayerBuilder`. The "Guard — build
+profile needs PlayerBuilder" step fails a leg with a profile when it would not
+run it:
+
+| Situation | Why it is rejected |
+|---|---|
+| Docker on Linux (game-ci lane) | game-ci uses its own builder |
+| The project has its own global `PlayerBuilder` | the project's script wins (above) and knows nothing about profiles — delete it (§6) |
+| `build-method` / `UNITY_BUILD_METHOD` names another method | same |
+
+Profiles need Unity 6; an older editor fails when one is requested.
+
+A dispatch form can offer one dropdown per platform and join them; GitHub
+forms cannot filter one input by another:
+
+```yaml
+android-build-profile:
+  description: 'UNITY · Android build profile'
+  type: choice
+  options: [ProjectSettings, Android-Staging]
+# …
+build-profiles: ${{ format('Android={0},iOS={1}', inputs.android-build-profile, inputs.ios-build-profile) }}
+```
 
 A failed build logs `::error::[PlayerBuilder] ...` and exits 1; Unity's own
 exit code under `-quit` does not reflect a failed `BuildPlayer`.
@@ -155,4 +213,7 @@ it: the pipeline then installs nothing and uses the project's copy.
 | The old project builder still runs | it is still in `Assets/` (global namespace) | delete it (§6) |
 | Compile error in `Company.BuildPipeline.Editor` | the project lacks `com.unity.nuget.newtonsoft-json` and the registry is unreachable | add the package to `manifest.json` |
 | `packages-lock.json` modified on a self-hosted runner | the run was killed before "Remove toolkit build package" | the next run's checkout resets tracked files; locally, `git checkout -- Packages/packages-lock.json` |
+| `Build profile needs the toolkit's PlayerBuilder` | a profile was chosen and the project still has its own `PlayerBuilder`, or `UNITY_BUILD_METHOD` is set | delete the project script (§6) / unset the variable, or choose `ProjectSettings` |
+| `Build profile 'X' not found` | no `X.asset` in `Assets/Settings/Build Profiles/` on the built branch | fix the name (the error lists the project's profiles) |
+| `Build profile … builds iOS, but this job builds Android` | the profile belongs to another platform | pick a profile of the leg's platform |
 | `This project does not use Addressables` | `build-addressables` on, Addressables not installed | turn off `ADDRESSABLES_ENABLED` / the dispatch checkbox |

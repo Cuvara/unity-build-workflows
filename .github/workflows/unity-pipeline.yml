@@ -165,6 +165,19 @@ on:
         default: 'auto'
         type: string
 
+      build-profiles:
+        description: >-
+          Unity Build Profile per platform, as comma-separated Platform=Profile
+          pairs, e.g. 'Android=Android-Staging,iOS=iOS-dev'. Profile is the
+          asset name in Assets/Settings/Build Profiles (or a project-relative
+          .asset path). A platform not listed, or set to ProjectSettings, builds
+          with the project's own Player Settings (the behaviour before this
+          input existed). Applied by the toolkit's PlayerBuilder on the
+          self-hosted native and Windows-docker lanes.
+        required: false
+        default: ''
+        type: string
+
       android-export:
         description: >-
           DEPRECATED and no longer required. The Android output format is a
@@ -741,6 +754,8 @@ jobs:
           # `runners` step made -- the same document the summary prints, so the
           # table and the routing cannot disagree.
           RUNNER_SELECTION: ${{ steps.runners.outputs.runner-selection }}
+          # Platform=Profile pairs; each row takes its own platform's profile.
+          BUILD_PROFILES: ${{ inputs.build-profiles || '' }}
           SEL_ANDROID:     ${{ steps.flow.outputs.build-android }}
           SEL_WEBGL:       ${{ steps.flow.outputs.build-webgl }}
           SEL_LINUX64:     ${{ steps.flow.outputs.build-linux64 }}
@@ -937,6 +952,18 @@ jobs:
           field_of() {
             RL_PLATFORM="$1" RL_FIELD="$2" python3 "${_rl_script}"
           }
+          # The Build Profile each platform builds with (empty = Player Settings).
+          # Validated once, so a typo fails here rather than in one leg's build.
+          _bp_script="$(dirname "${_rl_script}")/build_profile_for_platform.py"
+          if [ -f "${_bp_script}" ]; then
+            python3 "${_bp_script}" --validate
+          elif [ -n "${BUILD_PROFILES:-}" ]; then
+            echo "::error::build-profiles is set but build_profile_for_platform.py is not in this toolkit checkout"
+            exit 1
+          fi
+          profile_of() {
+            if [ -f "${_bp_script}" ]; then BP_PLATFORM="$1" python3 "${_bp_script}"; fi
+          }
 
           # Sanitize a product name for use in artifact filenames:
           # preserve original casing, strip spaces and filesystem-unsafe
@@ -951,13 +978,14 @@ jobs:
           add() {
             [ "$1" = "true" ] || return 0
             local platform="$2" artifact="$3" suffix="$4" validator="$5"
-            local slug lower_artifact name label labels engine activation selected
+            local slug lower_artifact name label labels engine activation selected profile
             slug=$(slug_of "${platform}")
             label=$(label_of "${platform}")
             labels=$(labels_of "${platform}")
             engine=$(field_of "${platform}" buildEngine)
             activation=$(field_of "${platform}" activationStrategy)
             selected=$(field_of "${platform}" selectedTarget)
+            profile=$(profile_of "${platform}")
             lower_artifact=$(printf '%s' "${artifact}" | tr '[:upper:]' '[:lower:]')
             # Artifact naming: {product}_{version}_{build}_{env}_{platform}_{type}
             # The type suffix is appended only where it distinguishes two real
@@ -966,7 +994,7 @@ jobs:
               Android|iOS) name="${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_${slug}_${lower_artifact}" ;;
               *)           name="${PRODUCT_SLUG}_${_APP_VER}_${BUILD_NUMBER}_${BUILD_TYPE}_${slug}" ;;
             esac
-            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\",\"runner-labels\":\"${labels}\",\"build-engine\":\"${engine}\",\"activation-strategy\":\"${activation}\",\"runner-selected\":\"${selected}\"},"
+            BUILD_ROWS="${BUILD_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"node\":\"${suffix}\",\"runner-labels\":\"${labels}\",\"build-engine\":\"${engine}\",\"activation-strategy\":\"${activation}\",\"runner-selected\":\"${selected}\",\"build-profile\":\"${profile}\"},"
             if [ -n "${validator}" ]; then
               VALIDATE_ROWS="${VALIDATE_ROWS}{\"platform\":\"${platform}\",\"label\":\"${label}\",\"artifact-type\":\"${artifact}\",\"artifact-name\":\"${name}\",\"validator\":\"${validator}\",\"node\":\"${suffix}\"},"
             fi
@@ -1529,6 +1557,7 @@ jobs:
       build-engine:        ${{ matrix.build-engine || needs.resolve-config.outputs.build-engine }}
       activation-strategy: ${{ matrix.activation-strategy || needs.resolve-config.outputs.activation-strategy }}
       runner-selected:     ${{ matrix.runner-selected || '' }}
+      build-profile:       ${{ matrix.build-profile || '' }}
       clean-build:         ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       build-addressables:  false
       android-export-type: ${{ needs.resolve-config.outputs.android-export-type }}

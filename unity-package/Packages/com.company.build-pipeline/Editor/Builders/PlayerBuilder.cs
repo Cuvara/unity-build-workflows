@@ -25,8 +25,21 @@
 //                       never saves them, so batchmode cannot sign without.
 //   -standaloneBuildSubtarget Server
 //                       passed by CI for LinuxServer; Unity applies it.
+//   BUILD_PROFILE       Unity 6 Build Profile for this platform: a name in
+//                       BUILD_PROFILE_DIR (default Assets/Settings/Build Profiles)
+//                       or a project-relative .asset path. Empty or
+//                       "ProjectSettings" = the project's Player Settings. The
+//                       profile must build the job's platform, or the build
+//                       fails. It is activated before version, build number and
+//                       keystore are applied, so a profile that overrides
+//                       Player Settings gets the run's values too. A profile
+//                       left active in Library/ is deactivated for a
+//                       ProjectSettings build, and whichever profile was
+//                       active before is re-activated afterwards.
 // Version, build number and keystore changes are made in memory for this build
-// and restored afterwards; nothing is written to ProjectSettings.
+// and restored afterwards; nothing is written to ProjectSettings. Unity saves
+// the active profile during BuildPlayer, so the profile asset is put back byte
+// for byte after the build.
 // IBuildHook implementations run before and after the build, as with
 // BuildCommand.
 
@@ -34,6 +47,9 @@ using System;
 using System.IO;
 using System.Linq;
 using UnityEditor;
+#if UNITY_6000_0_OR_NEWER
+using UnityEditor.Build.Profile;
+#endif
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
@@ -62,11 +78,36 @@ namespace Company.BuildPipeline.Editor
             BuildTarget target = EditorUserBuildSettings.activeBuildTarget;
             string outputRoot = ResolveOutputRoot();
 
+            // BUILD_PROFILE: the Unity Build Profile for this platform. Empty or
+            // "ProjectSettings" builds with the project's own Player Settings,
+            // exactly as before profiles were supported.
+            string requestedProfile = RequestedProfile(Environment.GetEnvironmentVariable("BUILD_PROFILE"));
+#if UNITY_6000_0_OR_NEWER
+            BuildProfile profile = null;
+            if (requestedProfile != null)
+            {
+                profile = LoadBuildProfile(requestedProfile, target);
+                if (profile == null)
+                {
+                    return 1;
+                }
+            }
+#else
+            if (requestedProfile != null)
+            {
+                Fail($"BUILD_PROFILE '{requestedProfile}' needs Unity 6 Build Profiles; "
+                     + $"this editor is {Application.unityVersion}.");
+                return 1;
+            }
+#endif
+
             string[] scenes = EditorBuildSettings.scenes
                 .Where(s => s.enabled)
                 .Select(s => s.path)
                 .ToArray();
-            if (scenes.Length == 0)
+            // A profile may carry its own scene list, so the shared list only has
+            // to be non-empty when no profile is used.
+            if (requestedProfile == null && scenes.Length == 0)
             {
                 Fail("No enabled scenes in EditorBuildSettings, nothing to build. "
                      + "Add scenes under File > Build Profiles.");
@@ -75,6 +116,43 @@ namespace Company.BuildPipeline.Editor
 
             bool appBundle = IsTrue(Environment.GetEnvironmentVariable("ANDROID_APP_BUNDLE"));
 
+#if UNITY_6000_0_OR_NEWER
+            // Activate the profile BEFORE applying version, build number and
+            // keystore: a profile with Player Settings overrides owns those
+            // values, so they must be set on it, not on the project's settings.
+            // Unity saves the active profile to disk during BuildPlayer, run
+            // values included; keep its bytes to put back afterwards.
+            string profilePath = profile != null ? AssetDatabase.GetAssetPath(profile) : null;
+            byte[] profileBytes = profilePath != null ? File.ReadAllBytes(profilePath) : null;
+            string previousProfile = ActivateProfile(profile, requestedProfile);
+#else
+            Debug.Log($"{Tag} build profile: ProjectSettings (the project's Player Settings)");
+#endif
+            try
+            {
+                return BuildActiveTarget(target, outputRoot, scenes, appBundle
+#if UNITY_6000_0_OR_NEWER
+                                         , profile
+#endif
+                                         );
+            }
+            finally
+            {
+#if UNITY_6000_0_OR_NEWER
+                RestoreProfile(previousProfile);
+                RestoreProfileFile(profilePath, profileBytes);
+#endif
+            }
+        }
+
+#if UNITY_6000_0_OR_NEWER
+        private static int BuildActiveTarget(BuildTarget target, string outputRoot, string[] scenes,
+                                             bool appBundle, BuildProfile profile)
+#else
+        private static int BuildActiveTarget(BuildTarget target, string outputRoot, string[] scenes,
+                                             bool appBundle)
+#endif
+        {
             VersionState version = ApplyVersion(target);
             if (version == null)
             {
@@ -117,14 +195,36 @@ namespace Company.BuildPipeline.Editor
                 hooks.RunBeforeValidation(context);
                 hooks.RunBeforeBuild(context);
 
-                Debug.Log($"{Tag} target={target} scenes={scenes.Length} out={locationPath}");
-                BuildReport report = UnityEditor.BuildPipeline.BuildPlayer(new BuildPlayerOptions
+                // The values that actually go into the player, read back after
+                // the profile (if any) was activated and the run's values applied.
+                Debug.Log($"{Tag} effective version {PlayerSettings.bundleVersion}, "
+                          + $"Android versionCode {PlayerSettings.Android.bundleVersionCode}, "
+                          + $"iOS build {PlayerSettings.iOS.buildNumber}");
+
+                BuildReport report;
+#if UNITY_6000_0_OR_NEWER
+                if (profile != null)
                 {
-                    scenes = scenes,
-                    locationPathName = locationPath,
-                    target = target,
-                    options = BuildOptions.None,
-                });
+                    Debug.Log($"{Tag} target={target} profile={profile.name} out={locationPath}");
+                    report = UnityEditor.BuildPipeline.BuildPlayer(new BuildPlayerWithProfileOptions
+                    {
+                        buildProfile = profile,
+                        locationPathName = locationPath,
+                        options = BuildOptions.None,
+                    });
+                }
+                else
+#endif
+                {
+                    Debug.Log($"{Tag} target={target} scenes={scenes.Length} out={locationPath}");
+                    report = UnityEditor.BuildPipeline.BuildPlayer(new BuildPlayerOptions
+                    {
+                        scenes = scenes,
+                        locationPathName = locationPath,
+                        target = target,
+                        options = BuildOptions.None,
+                    });
+                }
 
                 BuildSummary summary = report.summary;
                 Debug.Log($"{Tag} result={summary.result} "
@@ -184,6 +284,143 @@ namespace Company.BuildPipeline.Editor
             }
             return outputRoot;
         }
+
+        /// <summary>Where profile names are looked up: Assets/Settings/Build Profiles, Unity's default.</summary>
+        internal const string DefaultProfileDirectory = "Assets/Settings/Build Profiles";
+
+        /// <summary>Values of BUILD_PROFILE that mean "the project's Player Settings".</summary>
+        private static readonly string[] NoProfileValues =
+            { "", "projectsettings", "project-settings", "none", "default", "auto" };
+
+        /// <summary>The requested profile, or null for the project's Player Settings.</summary>
+        internal static string RequestedProfile(string raw)
+        {
+            if (raw == null) return null;
+            string value = raw.Trim();
+            return NoProfileValues.Contains(value.ToLowerInvariant()) ? null : value;
+        }
+
+        /// <summary>
+        /// A bare name is an asset in BUILD_PROFILE_DIR (default
+        /// Assets/Settings/Build Profiles); anything with a slash or an .asset
+        /// extension is a project-relative path.
+        /// </summary>
+        internal static string ProfileAssetPath(string requested, string directory)
+        {
+            if (requested.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)
+                || requested.IndexOf('/') >= 0 || requested.IndexOf('\\') >= 0)
+            {
+                return requested.Replace('\\', '/');
+            }
+            string dir = string.IsNullOrWhiteSpace(directory) ? DefaultProfileDirectory : directory.Trim();
+            return $"{dir.Replace('\\', '/').TrimEnd('/')}/{requested}.asset";
+        }
+
+#if UNITY_6000_0_OR_NEWER
+        /// <summary>
+        /// Loads BUILD_PROFILE and checks it builds the job's platform. A missing
+        /// profile or one for another platform fails the build: building with
+        /// the wrong settings, or for the wrong platform, must never pass.
+        /// </summary>
+        private static BuildProfile LoadBuildProfile(string requested, BuildTarget target)
+        {
+            string path = ProfileAssetPath(requested,
+                                           Environment.GetEnvironmentVariable("BUILD_PROFILE_DIR"));
+            var profile = AssetDatabase.LoadAssetAtPath<BuildProfile>(path);
+            if (profile == null)
+            {
+                string available = string.Join(", ", AssetDatabase.FindAssets("t:BuildProfile")
+                    .Select(AssetDatabase.GUIDToAssetPath)
+                    .OrderBy(p => p, StringComparer.Ordinal));
+                Fail($"Build profile '{requested}' not found at {path}. "
+                     + $"Profiles in this project: {(available.Length > 0 ? available : "none")}.");
+                return null;
+            }
+
+            // BuildProfile has no public target accessor; its serialized
+            // m_BuildTarget is what the Build Profiles window shows.
+            SerializedProperty targetProperty = new SerializedObject(profile).FindProperty("m_BuildTarget");
+            if (targetProperty == null)
+            {
+                Fail($"Cannot read the platform of build profile {path}; refusing to build {target} with it.");
+                return null;
+            }
+            var profileTarget = (BuildTarget)targetProperty.intValue;
+            if (profileTarget != target)
+            {
+                Fail($"Build profile {path} builds {profileTarget}, but this job builds {target}. "
+                     + $"Choose a {target} profile, or ProjectSettings.");
+                return null;
+            }
+            return profile;
+        }
+
+        /// <summary>
+        /// Makes <paramref name="profile"/> the active profile; null selects the
+        /// platform's own settings (ProjectSettings). Returns the asset path of
+        /// the previously active profile (null = platform settings).
+        /// </summary>
+        private static string ActivateProfile(BuildProfile profile, string requested)
+        {
+            // The active profile is remembered in Library/, so one left active by
+            // an earlier build or by the Editor would otherwise override a
+            // ProjectSettings build with its own version, keystore and defines.
+            BuildProfile previous = BuildProfile.GetActiveBuildProfile();
+            // Keep the path, not the object: switching profiles reloads assets,
+            // which can leave the old reference destroyed.
+            string previousPath = previous != null ? AssetDatabase.GetAssetPath(previous) : null;
+            if (previous != profile)
+            {
+                BuildProfile.SetActiveBuildProfile(profile);
+            }
+            if (profile == null)
+            {
+                string note = previous != null
+                    ? $"; deactivated profile {previousPath} for this build"
+                    : string.Empty;
+                Debug.Log($"{Tag} build profile: ProjectSettings (the project's Player Settings{note})");
+            }
+            else
+            {
+                Debug.Log($"{Tag} build profile: {requested} ({AssetDatabase.GetAssetPath(profile)})");
+            }
+            return previousPath;
+        }
+
+        /// <summary>Re-activates whatever was active before this build.</summary>
+        private static void RestoreProfile(string previousPath)
+        {
+            BuildProfile previous = string.IsNullOrEmpty(previousPath)
+                ? null
+                : AssetDatabase.LoadAssetAtPath<BuildProfile>(previousPath);
+            BuildProfile active = BuildProfile.GetActiveBuildProfile();
+            string activePath = active != null ? AssetDatabase.GetAssetPath(active) : null;
+            string wantedPath = previous != null ? previousPath : null;
+            if (activePath != wantedPath)
+            {
+                BuildProfile.SetActiveBuildProfile(previous);
+            }
+        }
+
+        /// <summary>
+        /// Puts the profile asset back byte for byte, so the run's version,
+        /// build number and keystore never end up in the project's files.
+        /// </summary>
+        private static void RestoreProfileFile(string path, byte[] original)
+        {
+            if (path == null || original == null)
+            {
+                return;
+            }
+            if (File.Exists(path) && File.ReadAllBytes(path).SequenceEqual(original))
+            {
+                return;
+            }
+            File.WriteAllBytes(path, original);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            Debug.Log($"{Tag} restored {path} (Unity saved this run's values into it during the build)");
+        }
+#endif
 
         /// <summary>"1", "true", "yes" (any case) are true. The workflows send "1".</summary>
         internal static bool IsTrue(string value)
