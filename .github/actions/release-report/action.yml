@@ -224,7 +224,7 @@ runs:
             # themselves as "DiscordBot (<url>, <version>)".
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": "DiscordBot (https://github.com/Cuvara/unity-build-workflows, 6)",
+                "User-Agent": "DiscordBot (release-report, 1.0)",
             },
         )
         try:
