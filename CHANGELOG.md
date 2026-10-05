@@ -28,6 +28,10 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   Pull requests and `BUILD_ENVIRONMENT_SECRETS=false` still declare no
   environment and read repository values only.
   See `docs/ENVIRONMENT_VARIABLES.md`.
+- Build-number offsets can be set as one `BUILD_NUMBER_OFFSET` per
+  environment instead of `BUILD_NUMBER_OFFSET_DEVELOPMENT` /
+  `BUILD_NUMBER_OFFSET_RELEASE`. See `docs/VERSIONING.md` § Offsets per GitHub
+  Environment for when that is equivalent.
 
 ### Changed
 
