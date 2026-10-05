@@ -68,7 +68,9 @@ def unity_processes() -> List[Tuple[int, str]]:
         data = json.loads(raw)
         rows = data if isinstance(data, list) else [data]
         return [(int(r["ProcessId"]), r.get("CommandLine") or "") for r in rows]
-    result = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=60)
+    # -A -o pid= -o args= reads the same on macOS (BSD ps) and Linux (procps).
+    result = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "args="],
+                            capture_output=True, text=True, timeout=60)
     found = []
     for line in result.stdout.splitlines():
         parts = line.strip().split(None, 1)
@@ -112,7 +114,11 @@ def alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    # A stopped process its parent has not reaped yet is a zombie: gone for
+    # our purposes, though kill(pid, 0) still finds it.
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=30).stdout.strip()
+    return bool(state) and not state.startswith("Z")
 
 
 def stop(pid: int) -> bool:
