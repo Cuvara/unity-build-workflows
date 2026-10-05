@@ -8,6 +8,31 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Unity Build Profiles per platform.** New `unity-pipeline.yml` input
+  `build-profiles`: comma-separated `Platform=Profile` pairs, e.g.
+  `Android=Android-Staging,iOS=iOS-dev`. Each build leg gets its platform's
+  profile (matrix field `build-profile`, `reusable-build-platform.yml` input
+  `build-profile`, `BUILD_PROFILE` for Unity); an unlisted platform or
+  `ProjectSettings` builds with the project's Player Settings as before. A
+  malformed mapping or unknown platform fails stage 01
+  (`scripts/common/build_profile_for_platform.py`).
+- The toolkit's `PlayerBuilder` (package 2.4.0) builds with the profile via
+  `BuildPlayerWithProfileOptions`. It activates the profile before applying
+  `APP_VERSION`, `BUILD_NUMBER` and the keystore passwords, so a profile that
+  overrides Player Settings still gets the run's version and build number;
+  fails when the profile is missing (listing the project's profiles) or
+  belongs to another platform; deactivates a profile left active in `Library/`
+  for a `ProjectSettings` build; and afterwards re-activates the previous
+  profile and restores the profile asset Unity saves during the build.
+- Guard step "Guard — build profile needs PlayerBuilder" fails a leg with a
+  profile that would not be applied: the game-ci (Linux docker) lane, a project
+  that still has its own global `PlayerBuilder`, or a custom `build-method`.
+  See `docs/TOOLKIT_BUILD_PACKAGE.md` §Build Profiles.
+
 ## [6.16.0] — 2026-10-05
 
 ### Added
