@@ -531,7 +531,7 @@ jobs:
 
           # Long paths. actions/checkout runs plain `git`, which stops at
           # Windows' 260-character MAX_PATH ("Filename too long") on asset
-          # packs nested deep under the runner workspace — and offers no input
+          # packs nested deep under the runner workspace - and offers no input
           # for it. Set it for the runner account before checkout.
           & $git.Source config --global core.longpaths true
           Write-Output "git core.longpaths = $(& $git.Source config --global core.longpaths)"
@@ -539,7 +539,7 @@ jobs:
           # say how.
           $lp = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled
           if ($lp -ne 1) {
-            Write-Output "::warning title=Windows long paths disabled::LongPathsEnabled is off, so Unity or Gradle may fail on paths over 260 characters. As an administrator: New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force — or give the runner a short work folder (e.g. C:\r)."
+            Write-Output "::warning title=Windows long paths disabled::LongPathsEnabled is off, so Unity or Gradle may fail on paths over 260 characters. As an administrator: New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force - or give the runner a short work folder (e.g. C:\r)."
           }
 
 

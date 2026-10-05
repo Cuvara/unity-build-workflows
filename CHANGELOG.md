@@ -24,6 +24,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   `RUNNER_SYNC_TOKEN`. Docs: `MULTI_RUNNER_SCHEDULING.md` §18 (one job per
   runner — capacity is the number of registered runners) and §19.
 
+### Fixed
+
+- **The Windows "Use Git Bash and long paths" step failed to parse (v6.10.2).**
+  Windows PowerShell 5.1 reads the step's script in the ANSI code page; the em
+  dash in the long-paths warning became `â€”`, whose last byte PowerShell takes
+  for a closing quote — `ParserError: The string is missing the terminator`.
+  PowerShell steps are ASCII now, and `tests/test_powershell_ascii.py` keeps
+  them that way.
+
 ---
 
 ## [6.10.2] — 2026-10-05
