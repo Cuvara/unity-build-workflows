@@ -121,7 +121,11 @@ before building. It installs the editor version from the project's
 `ProjectVersion.txt` and the modules for that job's platform through the Unity
 CLI when they are missing, and the build runs the `Unity.exe` preflight
 reports. It needs:
-- Python 3.8+;
+- Python 3.8+ — found or installed by the job itself: `Ensure Python (self-hosted)`
+  runs each candidate (`python3`, `python`, the `py -3` launcher), rejects the
+  Microsoft Store placeholder, and otherwise runs
+  `winget install --id Python.Python.3.12 --scope user` (no admin). It adds a
+  `python3` wrapper, since python.org installs only `python.exe`;
 - an install root the runner account can write **without UAC**, set in the
   runner's `.env` as `UNITY_PREFLIGHT_INSTALL_ROOT=D:\unity-editors`.
 
