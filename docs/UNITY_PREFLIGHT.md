@@ -460,6 +460,21 @@ scheduler → runner → checkout → toolkit checkout (.toolkit) → Unity pref
     `/Applications/Unity/Hub/Editor` created by an admin), the editor goes to
     the runner account's own `~/Unity/Editors` (`--fallback-install-root`)
     instead. `UNITY_PREFLIGHT_INSTALL_ROOT` overrides both.
+  - **From the repository instead of the runner:** the repository variables
+    `UNITY_EDITOR_ROOT_WINDOWS` and `UNITY_EDITOR_ROOT_MACOS` set the editor
+    location without editing the runner's `.env`. Each applies only on a runner
+    of that OS (`scripts/common/unity_editor_root.sh`):
+    - A folder that **is one editor** (`<folder>\Editor\Unity.exe`, or
+      `<folder>/Unity.app` on macOS) becomes `UNITY_EDITOR`. Preflight still
+      verifies it is the project's version and fails (exit 3) if not.
+    - Any other folder is an **editors root** in the Unity Hub layout
+      (`<root>\<version>\Editor\Unity.exe`). It becomes
+      `UNITY_PREFLIGHT_INSTALL_ROOT`: it is searched first, and a missing
+      version is installed there.
+
+    Example: `UNITY_EDITOR_ROOT_WINDOWS=D:\GameDev\UnityEditor`. A
+    `UNITY_EDITOR` set in the runner's `.env` still wins. The variable replaces
+    a `UNITY_PREFLIGHT_INSTALL_ROOT` from the `.env`, and the log says so.
   - **A module for an existing editor:** the module must land in that
     editor's own folder. If that folder isn't writable, the step fails
     (exit 3) and names the fix.

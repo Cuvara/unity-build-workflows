@@ -12,6 +12,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Added
 
+- **`UNITY_EDITOR_ROOT_WINDOWS` / `UNITY_EDITOR_ROOT_MACOS` repository
+  variables.** They tell Unity preflight where a self-hosted runner keeps its
+  editors without editing the runner's `.env`, e.g.
+  `UNITY_EDITOR_ROOT_WINDOWS=D:\GameDev\UnityEditor`. Each applies only on a
+  runner of its own OS.
+  - A single editor folder becomes `UNITY_EDITOR`; its version is still
+    verified.
+  - A Hub-style root (`<root>\<version>\Editor\Unity.exe`) becomes
+    `UNITY_PREFLIGHT_INSTALL_ROOT`.
+  - A `UNITY_EDITOR` set on the runner still wins.
+
+  Previously, an editor in a custom folder that the Unity Hub records did not
+  list was not found, and preflight downloaded and installed a second copy.
 - **One variable name per setting, with a value per GitHub Environment.**
   `BUILD_PLATFORMS`, `TEST_ENABLED`, `ADDRESSABLES_ENABLED` and
   `UNITY_DEFINE_SYMBOLS` replace the per-branch families

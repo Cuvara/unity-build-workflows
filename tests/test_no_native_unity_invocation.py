@@ -39,6 +39,10 @@ ALLOWED_PATHS = frozenset({
     "docker/unity/entrypoint.sh",
     "docker/unity/activate-license.sh",                # License activation (runs inside Docker)
     "scripts/common/resolve_activation_strategy.sh",   # Strategy resolver (references Unity paths for detection)
+    # Maps UNITY_EDITOR_ROOT_{WINDOWS,MACOS} onto preflight's inputs. It tests
+    # whether <folder>/Unity.app/Contents/MacOS/Unity exists to tell one editor
+    # from an editors root; it never runs the editor.
+    "scripts/common/unity_editor_root.sh",
     ".github/workflows/unity-build-ios.yml",
     ".github/workflows/unity-test-ios.yml",
     ".github/workflows/unity-release-ios.yml",  # iOS release pipeline (tag-triggered)

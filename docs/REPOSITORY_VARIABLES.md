@@ -75,6 +75,8 @@ Details, setup commands and migration: [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VA
 |---|---|---|---|
 | `UNITY_VERSION` | *(read from `ProjectVersion.txt`)* | all flows | **Validated pin**, not an override. If set, it must equal the editor version in `ProjectSettings/ProjectVersion.txt` — a mismatch fails the build. `ProjectVersion.txt` stays the source of truth (a different value would select a Unity image that can't open the project). The detected version is printed in the Resolve Config report. |
 | `UNITY_BUILD_METHOD` | *(empty = game-ci default)* | all flows | Override the Unity build method invoked by game-ci (docker lane, non-Addressables). |
+| `UNITY_EDITOR_ROOT_WINDOWS` | *(empty = runner configuration)* | self-hosted Windows runners (`build-engine=local`) | Where the Unity editors are, e.g. `D:\GameDev\UnityEditor`: either one editor folder (`<folder>\Editor\Unity.exe`) or a Hub-style root (`<root>\<version>\Editor\Unity.exe`). Read by Unity preflight, only on Windows runners. See [UNITY_PREFLIGHT.md](UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes). |
+| `UNITY_EDITOR_ROOT_MACOS` | *(empty = runner configuration)* | self-hosted macOS runners (`build-engine=local`) | Same, for macOS: `<folder>/Unity.app`, or `<root>/<version>/Unity.app`. |
 | `UNITY_DEFINE_SYMBOLS` | *(empty)* | push/PR on every branch; dispatch when the `define-symbols` field is empty | Generic name, meant to be set **per environment**; wins over the three per-branch names below. See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md). |
 | `UNITY_DEVELOP_DEFINE_SYMBOLS` | *(empty)* | `push/PR → develop` | Legacy: `DEVELOP_DEFINE_SYMBOLS`. |
 | `UNITY_STAGING_DEFINE_SYMBOLS` | *(empty)* | `push/PR → staging` | Legacy: `STAGING_DEFINE_SYMBOLS`. |
