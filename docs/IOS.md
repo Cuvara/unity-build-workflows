@@ -72,7 +72,7 @@ macOS Runner (macos-unity-xcode executor)
 > is why the script preflights for it.
 >
 > The other lanes work the other way round: `reusable-build-platform.yml` defaults to
-> `PlayerBuilder.Build`, supplied by the consuming project, and never calls this script — including
+> `Company.BuildPipeline.Editor.PlayerBuilder.Build` (the toolkit package, copied into the project per build) and never calls this script — including
 > for the pipeline's own `Build iOS` job. The two iOS routes do not share an entry point. See
 > [ARCHITECTURE.md](ARCHITECTURE.md#build-entry-points--two-lanes-that-do-not-agree).
 >

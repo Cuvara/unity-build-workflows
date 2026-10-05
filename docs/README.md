@@ -29,6 +29,7 @@ drift apart quietly.
 | [BRANCH_FLOW_CONTRACT.md](BRANCH_FLOW_CONTRACT.md) | Branch and event → what gets built; every resolver input and output |
 | [REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md) | Every repository variable, its default, and the new → legacy migration |
 | [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) | One name per setting (`BUILD_PLATFORMS`, ...) with a value per GitHub Environment; what can and cannot be environment-scoped |
+| [TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md) | The build scripts (`PlayerBuilder`, `AddressableBuilder`) ship in the toolkit package and are copied into the project per build; what stays in the project |
 | [RUNNER_AND_BUILD_ENGINE.md](RUNNER_AND_BUILD_ENGINE.md) | *Where* a job runs versus *how* Unity builds — two axes, three valid combinations |
 | [PLATFORM_MATRIX.md](PLATFORM_MATRIX.md) | Which platform builds on which executor |
 | [BUILD_CONFIG.md](BUILD_CONFIG.md) | `BuildConfig/*.json` schema for the explicit-build path |

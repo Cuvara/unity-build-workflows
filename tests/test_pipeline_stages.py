@@ -886,7 +886,7 @@ def test_native_lanes_hand_build_number_and_version_to_player_builder():
 
 
 def test_player_builder_template_applies_and_restores_the_version(repo_root):
-    template = (repo_root / "templates" / "PlayerBuilder.cs").read_text(encoding="utf-8")
+    template = (repo_root / "unity-package/Packages/com.company.build-pipeline/Editor/Builders/PlayerBuilder.cs").read_text(encoding="utf-8")
     assert 'GetEnvironmentVariable("BUILD_NUMBER")' in template
     assert 'GetEnvironmentVariable("APP_VERSION")' in template
     assert "PlayerSettings.Android.bundleVersionCode = buildNumber" in template

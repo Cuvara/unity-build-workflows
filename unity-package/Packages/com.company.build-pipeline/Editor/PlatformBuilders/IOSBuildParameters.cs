@@ -16,6 +16,14 @@ namespace Company.BuildPipeline.Editor
     /// </summary>
     internal static class IOSBuildParameters
     {
+        /// <summary>
+        /// Set by IOSBuilder.Configure (the BuildConfig path). False for any other
+        /// iOS build in a project that has this package -- PlayerBuilder, a menu
+        /// build -- where the post-processor only disables bitcode and leaves the
+        /// project's plist and entitlements alone.
+        /// </summary>
+        public static bool Configured = false;
+
         /// <summary>Whether this is a development (non-production) build.</summary>
         public static bool IsDevelopmentBuild = false;
 

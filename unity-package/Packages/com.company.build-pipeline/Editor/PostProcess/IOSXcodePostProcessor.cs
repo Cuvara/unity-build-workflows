@@ -40,6 +40,17 @@ namespace Company.BuildPipeline.Editor
 
             Debug.Log($"[BuildPipeline:iOS] IOSXcodePostProcessor — buildPath: {buildPath}");
 
+            // Without BuildConfig (PlayerBuilder, a menu build) there is nothing
+            // to apply but the bitcode switch every Xcode 14+ build needs. Adding
+            // usage strings or a push entitlement the project never asked for
+            // would break signing with a profile that lacks Push.
+            if (!IOSBuildParameters.Configured)
+            {
+                DisableBitcode(buildPath);
+                Debug.Log("[BuildPipeline:iOS] No BuildConfig: bitcode disabled, plist and entitlements untouched.");
+                return;
+            }
+
             ModifyPbxProject(buildPath);
             ModifyInfoPlist(buildPath);
             ModifyEntitlements(buildPath);
@@ -48,6 +59,17 @@ namespace Company.BuildPipeline.Editor
         }
 
         // ── PBXProject ────────────────────────────────────────────────────────
+
+        private static void DisableBitcode(string buildPath)
+        {
+            var pbxPath = PBXProject.GetPBXProjectPath(buildPath);
+            var pbx     = new PBXProject();
+            pbx.ReadFromFile(pbxPath);
+            pbx.SetBuildProperty(pbx.GetUnityMainTargetGuid(),      "ENABLE_BITCODE", "NO");
+            pbx.SetBuildProperty(pbx.GetUnityFrameworkTargetGuid(), "ENABLE_BITCODE", "NO");
+            pbx.SetBuildProperty(pbx.ProjectGuid(),                 "ENABLE_BITCODE", "NO");
+            pbx.WriteToFile(pbxPath);
+        }
 
         private static void ModifyPbxProject(string buildPath)
         {

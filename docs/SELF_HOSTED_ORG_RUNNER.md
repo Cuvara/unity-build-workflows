@@ -59,7 +59,7 @@ The self-hosted lane runs Unity directly; there is no container. Verified agains
 |---|---|---|
 | Unity Editor for the project's exact version | Installed by hand, or provisioned by the job's Unity preflight step (needs Python 3.8+ and a writable `UNITY_PREFLIGHT_INSTALL_ROOT`); the build runs the editor preflight reports | `reusable-build-platform.yml` step `unity-preflight`; [UNITY_PREFLIGHT.md § In CI](UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes) |
 | The **exact** Editor version the project pins | `UNITY_VERSION` comes from the consumer's `ProjectSettings/ProjectVersion.txt`; a different installed version fails the path check | resolver → `inputs.unity-version` |
-| A `PlayerBuilder.Build` method in the project | `-buildTarget` only switches the active target; an `-executeMethod` that calls `BuildPipeline.BuildPlayer` is what produces a build. When `build-method` is empty the lane substitutes `PlayerBuilder.Build`. Copy [`templates/PlayerBuilder.cs`](../templates/PlayerBuilder.cs) if the project has none | `:842-843` (Windows), `:903` (bash) |
+| Nothing for the build script | The job copies the toolkit's Unity package into `Packages/` and runs `Company.BuildPipeline.Editor.PlayerBuilder.Build` when `build-method` is empty; see [TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md) | "Install toolkit build package" step |
 | An `AddressableBuilder.Build` method, if you build Addressables | The Addressables-only path calls it directly | `:806` |
 | Unity activated once through Unity Hub | The local lane never touches `UNITY_LICENSE` / `UNITY_EMAIL` / `UNITY_PASSWORD` | activation step is skipped for `build-engine=local` |
 | Git and Git LFS on `PATH` | `actions/checkout` needs them | — |
