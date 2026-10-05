@@ -465,8 +465,16 @@ jobs:
           PROJECT_PATH:     ${{ inputs.project-path }}
           EXPECTED_VERSION: ${{ inputs.unity-version }}
           UNITY_NO_ELEVATE: '1'
+          # Where this repository keeps its Unity editors, per runner OS
+          # (scripts/common/unity_editor_root.sh). Empty = runner configuration.
+          UNITY_EDITOR_ROOT_WINDOWS: ${{ vars.UNITY_EDITOR_ROOT_WINDOWS || '' }}
+          UNITY_EDITOR_ROOT_MACOS:   ${{ vars.UNITY_EDITOR_ROOT_MACOS || '' }}
         run: |
           set -Eeuo pipefail
+          # Older toolkit-ref checkouts predate this helper; they keep runner config.
+          if [[ -f .toolkit/scripts/common/unity_editor_root.sh ]]; then
+            source .toolkit/scripts/common/unity_editor_root.sh
+          fi
           args=(--project "${PROJECT_PATH}" --cli unity --format github-actions
                 --install-cli-to "${UNITY_PREFLIGHT_CLI_HOME:-${RUNNER_TOOL_CACHE}/unity-cli}"
                 --fallback-install-root "${USERPROFILE:-${HOME}}/Unity/Editors")
