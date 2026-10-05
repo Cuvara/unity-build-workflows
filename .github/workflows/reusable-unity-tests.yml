@@ -231,6 +231,34 @@ jobs:
       artifact-name: ${{ steps.set-result.outputs.artifact-name }}
 
     steps:
+      # On Windows, `shell: bash` resolves `bash` on PATH. On a self-hosted
+      # runner System32 usually comes before Git, so it found
+      # C:\WINDOWS\system32\bash.exe — the WSL launcher — and every bash step
+      # failed with "Windows Subsystem for Linux has no installed
+      # distributions". Ask git where it is installed, run that Git Bash to be
+      # sure, and put it first on PATH for the rest of the job.
+      - name: Use Git Bash (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $git = Get-Command git -ErrorAction SilentlyContinue
+          if (-not $git) {
+            Write-Output "::error title=Git for Windows not found::Install Git for Windows (Git Bash) for the runner account: https://git-scm.com/download/win"
+            exit 1
+          }
+          # git --exec-path -> <root>\mingw64\libexec\git-core
+          $root = (Resolve-Path (Join-Path (& $git.Source --exec-path) '..\..\..')).Path
+          $bin = Join-Path $root 'bin'
+          $bash = Join-Path $bin 'bash.exe'
+          $version = & $bash --version 2>$null | Select-Object -First 1
+          if (-not $version) {
+            Write-Output "::error title=Git Bash not runnable::$bash did not run. Reinstall Git for Windows."
+            exit 1
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin -Encoding utf8
+          Write-Output "Using Git Bash: $bash ($version)"
+
       # ── 1. Free disk space (docker / ubuntu-latest only) ─────────────────────
       - name: Free disk space
         if: ${{ inputs.build-engine == 'docker' }}
