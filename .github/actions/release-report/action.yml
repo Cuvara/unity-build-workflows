@@ -219,7 +219,13 @@ runs:
         request = urllib.request.Request(
             url,
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
+            # Discord's edge rejects urllib's default "Python-urllib/x.y"
+            # User-Agent with 403 Forbidden; it asks clients to identify
+            # themselves as "DiscordBot (<url>, <version>)".
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "DiscordBot (https://github.com/Cuvara/unity-build-workflows, 6)",
+            },
         )
         try:
             urllib.request.urlopen(request, timeout=20)

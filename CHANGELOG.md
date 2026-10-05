@@ -8,6 +8,18 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Release / Android and Release / iOS reports got `403 Forbidden` from
+  Discord.** The `release-report` action posted with Python's default
+  `Python-urllib` User-Agent, which Discord's edge rejects; it now identifies
+  itself as `DiscordBot (...)`. Build notifications use `curl` and were not
+  affected.
+
+---
+
 ## [6.20.0] — 2026-10-05
 
 ### Added

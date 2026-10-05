@@ -33,3 +33,10 @@ def test_release_report_posts_into_the_thread():
     assert action["inputs"]["discord-thread-id"]["default"] == ""
     text = ACTION.read_text(encoding="utf-8")
     assert '"thread_id=" + thread' in text
+
+
+def test_release_report_sends_a_user_agent_discord_accepts():
+    """urllib's default User-Agent gets 403 Forbidden from Discord (seen on the
+    first Release / Android run); the build pipeline uses curl and never hit it."""
+    text = ACTION.read_text(encoding="utf-8")
+    assert '"User-Agent": "DiscordBot (' in text
