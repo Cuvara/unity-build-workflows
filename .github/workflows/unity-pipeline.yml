@@ -154,6 +154,17 @@ on:
         default: 'auto'
         type: string
 
+      cache-library:
+        description: >-
+          auto|true|false — Restore and save Unity's Library folder through the
+          GitHub Actions cache for this run (auto = use the CACHE_LIBRARY_ENABLED
+          variable, default true). 'false' skips the download entirely, which
+          is usually faster on a self-hosted runner whose cache download is
+          slow or times out.
+        required: false
+        default: 'auto'
+        type: string
+
       android-export:
         description: >-
           DEPRECATED and no longer required. The Android output format is a
@@ -539,6 +550,7 @@ jobs:
           NEW_ARTIFACT_RETENTION_DAYS:  ${{ vars.ARTIFACT_RETENTION_DAYS }}
           NEW_ARTIFACT_COMPRESSION:     ${{ vars.ARTIFACT_COMPRESSION }}
           IN_CLEAN_BUILD:               ${{ inputs.clean-build || '' }}
+          IN_CACHE_LIBRARY:             ${{ inputs.cache-library || '' }}
         run: |
           set -euo pipefail
           echo "Flow resolver: event=${EVENT_NAME} ref=${REF_NAME} base=${BASE_REF:-<none>}"
