@@ -45,8 +45,8 @@ Related docs:
 
 The submodule is **not required** for CI — the caller workflow references the
 toolkit remotely via `uses: Cuvara/unity-build-workflows/...`. Add it only
-if you want local access to templates, documentation, and the
-`AddressableBuilder.cs` helper.
+if you want local access to templates and documentation. Build scripts come
+from the toolkit at build time ([TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md)).
 
 ```bash
 # From your project root
@@ -421,63 +421,22 @@ gh variable set BUILD_NUMBER_OFFSET_RELEASE     --repo "${REPO}" --body 462
 gh variable set BUILD_NUMBER_OFFSET_DEVELOPMENT --repo "${REPO}" --body 100000
 ```
 
-Its `PlayerBuilder.cs` must apply `BUILD_NUMBER` / `APP_VERSION`; copy them from
-`templates/PlayerBuilder.cs`. Details: [VERSIONING.md](VERSIONING.md).
+The toolkit's `PlayerBuilder` applies `BUILD_NUMBER` / `APP_VERSION`.
+Details: [VERSIONING.md](VERSIONING.md).
 
 ---
 
-## Step 5: (If Using Addressables) Add the AddressableBuilder Script
+## Step 5: Build scripts: nothing to add
 
-If your project uses Unity Addressables and you want the `build-addressables`
-pipeline step to work, you need a project-side Editor entry point that the
-pipeline calls via `-executeMethod AddressableBuilder.Build`.
+The project needs **no** `PlayerBuilder.cs` or `AddressableBuilder.cs`. Every
+build job copies the toolkit's Unity package into `Packages/` for that build
+and runs `Company.BuildPipeline.Editor.PlayerBuilder.Build` (player) and
+`Company.BuildPipeline.Editor.AddressableBuilder.Build` (Addressables, when the
+project has `com.unity.addressables`). See
+[TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md).
 
-```bash
-# Create the Editor scripts directory (adjust path as needed)
-mkdir -p Assets/BuildScripts/Editor
-
-# Copy the template
-# From submodule:
-cp unity-build-workflows/templates/AddressableBuilder.cs \
-   Assets/BuildScripts/Editor/AddressableBuilder.cs
-
-# Without submodule:
-curl -fsSL \
-  https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/AddressableBuilder.cs \
-  -o Assets/BuildScripts/Editor/AddressableBuilder.cs
-```
-
-Create an Editor assembly definition file next to it:
-
-```json
-// Assets/BuildScripts/Editor/BuildScripts.Editor.asmdef
-{
-    "name": "BuildScripts.Editor",
-    "references": [
-        "Unity.Addressables.Editor"
-    ],
-    "includePlatforms": ["Editor"],
-    "excludePlatforms": [],
-    "autoReferenced": false
-}
-```
-
-Commit both files:
-
-```bash
-git add Assets/BuildScripts/Editor/
-git commit -m "ci: add AddressableBuilder Editor script for pipeline"
-git push
-```
-
-If you do **not** use Addressables, skip this step entirely and keep
-`build-addressables=false` (the default).
-
-> **Moving builds to your own runner later?** The self-hosted lanes also need a
-> `PlayerBuilder.Build` method, which the default docker lane does not.
-> [`templates/PlayerBuilder.cs`](../templates/PlayerBuilder.cs) is a working
-> implementation — drop it in the same Editor assembly. See
-> [SELF\_HOSTED\_ORG\_RUNNER.md](SELF_HOSTED_ORG_RUNNER.md).
+A project that already has its own global `PlayerBuilder` keeps using it until
+it deletes it.
 
 ---
 

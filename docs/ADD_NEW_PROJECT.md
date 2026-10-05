@@ -85,50 +85,18 @@ Which C# method Unity runs depends on **which lane builds you**, and the two do 
 | Lane | Entry point | Who implements it |
 |---|---|---|
 | Docker / game-ci — the default | game-ci's own builder (`build-method` defaults to `''`) | Nobody: **no project-side method needed** |
-| Self-hosted (`BUILD_ENGINE=local`) — Android, WebGL, Windows, Linux | `PlayerBuilder.Build` | **You**, in your Unity project |
+| Self-hosted (`BUILD_ENGINE=local`) and Docker on Windows: Android, WebGL, Windows, Linux, iOS | `Company.BuildPipeline.Editor.PlayerBuilder.Build` | This package, copied into the project for each build |
 | iOS native — `unity-build-ios.yml`, `unity-release-ios.yml` | `Company.BuildPipeline.Editor.BuildCommand.Execute` | This package |
 
-The self-hosted lanes substitute `PlayerBuilder.Build` when `build-method` is empty
-(`reusable-build-platform.yml:842-843` for Windows, `:903` for bash), so a project that moves onto
-your own runner without that method builds nothing while the job still reports success. The docker
-lane is unaffected.
+**No build script in the project.** Each build job copies this package into
+`Packages/` and removes it afterwards, so the self-hosted and Windows-docker
+lanes find `PlayerBuilder` (and `AddressableBuilder`) without the project
+providing one. A project that still has its own global `PlayerBuilder` class
+keeps using it. Contract and migration: [TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md).
 
-You have two options:
-
-1. **Write a `PlayerBuilder`.** A public static parameterless method Unity can reach by name:
-
-   **A working reference implementation ships with this toolkit** —
-   [`templates/PlayerBuilder.cs`](../templates/PlayerBuilder.cs). Copy it and adjust:
-
-   ```bash
-   mkdir -p Assets/BuildScripts/Editor
-   cp path/to/unity-build-workflows/templates/PlayerBuilder.cs Assets/BuildScripts/Editor/
-
-   # or, without the submodule:
-   curl -fsSL https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/PlayerBuilder.cs \
-     -o Assets/BuildScripts/Editor/PlayerBuilder.cs
-   ```
-
-   It must be **in the global namespace** if you want `-executeMethod PlayerBuilder.Build` to resolve,
-   and it must live in an Editor assembly (the same `BuildScripts.Editor` asmdef as
-   `AddressableBuilder.cs` — see [CONSUMER_SETUP.md](CONSUMER_SETUP.md) Step 5).
-
-   **What CI actually passes**, verified against `reusable-build-platform.yml`:
-
-   | Variable | Value | Set at |
-   |---|---|---|
-   | `BUILD_OUTPUT_DIR` | always `build` — the artifact upload takes `build/` | `:737`, `:846`, `:906` |
-   | `ANDROID_APP_BUNDLE` | `true` for an `.aab`, otherwise `.apk` | `:770` |
-
-   That is the whole contract. **No keystore variables reach the Editor** on this path: Android
-   signing is a post-build host step (`scripts/android/sign_android_build.sh`, invoked from
-   `unity-build-android.yml:348`), so a `PlayerBuilder` that reads `ANDROID_KEYSTORE*` finds nothing.
-   The template also exits non-zero when `BuildPipeline.BuildPlayer` reports a failed result —
-   necessary because Unity started with `-quit` otherwise exits 0 on a failed build.
-
-2. **Point the lane at this package instead**, by setting the repository variable
-   `UNITY_BUILD_METHOD` to `Company.BuildPipeline.Editor.BuildCommand.Execute`. It flows through
-   `unity-pipeline.yml` into the `build-method` input.
+To use the BuildConfig-driven builder instead, set the repository variable
+`UNITY_BUILD_METHOD` to `Company.BuildPipeline.Editor.BuildCommand.Execute`
+(this needs the `BuildConfig/` files of Step 2).
 
 **Known inconsistency:** `reusable-build-platform.yml` never calls `scripts/ios/run_unity_ios.sh`, and
 that script hardcodes `BuildCommand.Execute` as `readonly` with no override. So the two iOS routes use

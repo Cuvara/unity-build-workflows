@@ -87,7 +87,7 @@ def test_the_output_directory_is_the_one_the_upload_takes():
 
 KEYSTORE_SECRETS = ("ANDROID_KEYSTORE_PASS", "ANDROID_KEY_PASS")
 PIPELINE = REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml"
-TEMPLATE = (REPO_ROOT / "templates" / "PlayerBuilder.cs").read_text(encoding="utf-8")
+TEMPLATE = (REPO_ROOT / "unity-package/Packages/com.company.build-pipeline/Editor/Builders/PlayerBuilder.cs").read_text(encoding="utf-8")
 
 
 def _on(doc):
@@ -118,7 +118,7 @@ def test_only_the_native_build_steps_see_the_keystore_passwords():
                      if any(k in (s.get("env") or {}) for k in KEYSTORE_SECRETS))
     # redact-log-secrets needs the values to scrub them from Editor.log, into
     # which Unity dumps the environment when Gradle fails; it never expands them.
-    assert holders == ["build-macos", "build-windows", "redact-log-secrets"]
+    assert holders == ["build-docker-windows", "build-macos", "build-windows", "redact-log-secrets"]
     for s in steps:
         for secret in KEYSTORE_SECRETS:
             assert "$" + secret not in str(s.get("run", "")) \

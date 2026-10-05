@@ -18,8 +18,8 @@
 #
 # Building on your own machine instead of GitHub-hosted runners: leave the
 # runner inputs blank here and set the RUNNER_TYPE / BUILD_ENGINE /
-# RUNNER_LABELS variables, or pass them per run. The self-hosted lane requires
-# a PlayerBuilder.Build method in the project — see docs/SELF_HOSTED_ORG_RUNNER.md.
+# RUNNER_LABELS variables, or pass them per run. The project needs no build
+# script: the toolkit package is copied in per build (docs/TOOLKIT_BUILD_PACKAGE.md).
 #
 # See docs/CONSUMER_SETUP.md for the full onboarding walkthrough.
 # ──────────────────────────────────────────────────────────────────────────────

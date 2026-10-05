@@ -141,11 +141,11 @@ gh variable set BUILD_NUMBER_OFFSET_DEVELOPMENT --repo OWNER/REPO --body 100000
 | Lane | Applied by |
 |---|---|
 | Docker / game-ci | `game-ci/unity-builder` inputs: `version`, `androidVersionCode` (Android), `BUILD_NUMBER` env |
-| **Native** (`BUILD_ENGINE=local`, self-hosted macOS / Windows) | The project's `PlayerBuilder.Build`, from the environment the build step sets: `BUILD_NUMBER` and `APP_VERSION` |
+| **Native** (`BUILD_ENGINE=local`, self-hosted macOS / Windows) and Docker on Windows | The toolkit package's `PlayerBuilder`, from the environment the build step sets: `BUILD_NUMBER` and `APP_VERSION` |
 | iOS native (`unity-build-ios.yml`) | `Company.BuildPipeline.Editor.BuildCommand` (`IOSBuilder`) |
 
-On the native lane the project's `PlayerBuilder` must apply them —
-`templates/PlayerBuilder.cs` does:
+On these lanes `Company.BuildPipeline.Editor.PlayerBuilder` applies them
+([TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md)):
 
 | Target | Setting |
 |---|---|
@@ -159,10 +159,10 @@ the runner's `ProjectSettings.asset` is not modified. Without `BUILD_NUMBER`
 (a manual Editor build) the project's own number is used, with a warning; a
 `BUILD_NUMBER` that is not a positive integer fails the build.
 
-**A project whose `PlayerBuilder` predates this** ships its own
-`versionCode` / `CFBundleVersion` on every native build — identical every time —
-and the second store upload of a version is rejected. Copy the
-`ApplyVersion` / `VersionState` part of `templates/PlayerBuilder.cs` into it.
+**A project that still has its own global `PlayerBuilder`** keeps using it,
+and if that copy predates version handling it ships the project's own
+`versionCode` / `CFBundleVersion` on every native build, so the second store
+upload of a version is rejected. Delete it to use the toolkit's.
 
 ---
 

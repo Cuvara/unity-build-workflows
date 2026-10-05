@@ -235,24 +235,12 @@ builds. They are independent, and three of the four combinations are supported:
 |---|---|---|
 | Unity for the project's exact version | Installed by hand, or provisioned by the job's Unity preflight step (Python 3.8+, writable `UNITY_PREFLIGHT_INSTALL_ROOT`) | `reusable-build-platform.yml` step `unity-preflight`; [UNITY_PREFLIGHT.md](UNITY_PREFLIGHT.md#in-ci-self-hosted-native-lanes) |
 | The **exact** version from `ProjectVersion.txt` | a different installed version fails that path check | resolver → `unity-version` |
-| **`PlayerBuilder.Build`** in an Editor assembly, global namespace | the lane substitutes it when `build-method` is empty; `-buildTarget` alone builds nothing and still exits 0 | `:842-843` (Windows), `:903` (bash) |
-| `AddressableBuilder.Build`, if you build Addressables | called directly | `:806` |
+| Nothing for the build script | the job copies the toolkit package into `Packages/` and runs `Company.BuildPipeline.Editor.PlayerBuilder.Build` / `AddressableBuilder.Build` ([TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md)) | "Install toolkit build package" step |
 | Unity activated once via Unity Hub | this lane never reads `UNITY_LICENSE`/`EMAIL`/`PASSWORD` | activation step skipped for `local` |
 | Git + Git LFS on `PATH` | `actions/checkout` | — |
 
-Copy the reference implementation rather than writing one:
-
-```bash
-mkdir -p Assets/BuildScripts/Editor
-curl -fsSL \
-  https://raw.githubusercontent.com/Cuvara/unity-build-workflows/main/templates/PlayerBuilder.cs \
-  -o Assets/BuildScripts/Editor/PlayerBuilder.cs
-```
-
-It reads the whole CI contract and nothing more — `BUILD_OUTPUT_DIR` (always
-`build`) and `ANDROID_APP_BUNDLE` — and exits non-zero when
-`BuildPipeline.BuildPlayer` reports failure. It is shipped as reviewed but
-**uncompiled**: `templates/` is not part of a Unity project, so no CI builds it.
+The project needs no `PlayerBuilder.cs`: the toolkit's package provides it
+for every build and removes it afterwards.
 
 iOS cannot build on the Windows lane (`:815`); it needs macOS.
 
