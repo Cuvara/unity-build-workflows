@@ -159,6 +159,7 @@ read `DISCORD_THREAD_ID` only.
 | `unity-build-ios.yml` | `build` | `if: always()` — fires on success, failure, and cancelled | iOS (direct caller) |
 | `unity-release-ios.yml` | `release-build` | `if: always()` — fires on success, failure, and cancelled | iOS production release |
 | `unity-release.yml` | `notify` (dedicated job) | `if: always()` — fires on success, failure, and cancelled | Android, WebGL, Linux64 production release |
+| `pipeline-android-release.yml`, `pipeline-ios-release.yml` | `report` | `if: always()`; posts to the `production` thread of its platform from `.github/discord.json` (same lookup and variable overrides as builds). The caller passes `DISCORD_WEBHOOK_URL` | Store releases (Release / Android, Release / iOS) |
 
 The `unity-build.yml` orchestrator report job also covers iOS when called via `unity-build.yml`. `unity-build-ios.yml` called directly (e.g. from your project workflow) sends its own notification.
 

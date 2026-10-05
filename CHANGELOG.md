@@ -8,6 +8,21 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Release / Android and Release / iOS post into the project's release
+  thread.** The report job of `pipeline-android-release.yml` and
+  `pipeline-ios-release.yml` now reads the project's `.github/discord.json`
+  (or `DISCORD_CONFIG_FILE`) for the `production` environment and its own
+  platform, with the same resolver and `DISCORD_THREAD_ID_*` variable
+  overrides as the build pipeline, and posts there instead of the webhook's
+  channel. New `discord-thread-id` input on the `release-report` action. The
+  caller must pass `DISCORD_WEBHOOK_URL` for any notification to be sent.
+
+---
+
 ## [6.19.0] — 2026-10-05
 
 ### Fixed

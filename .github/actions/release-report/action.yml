@@ -45,6 +45,10 @@ inputs:
     description: Discord webhook. Empty disables the notification.
     required: false
     default: ''
+  discord-thread-id:
+    description: Discord thread (or forum post) to post into. Empty = the webhook's channel.
+    required: false
+    default: ''
   toolkit-path:
     description: Where the toolkit is checked out, for the shared progress renderer.
     required: false
@@ -170,6 +174,7 @@ runs:
       shell: bash
       env:
         WEBHOOK: ${{ inputs.discord-webhook }}
+        THREAD_ID: ${{ inputs.discord-thread-id }}
         PLATFORM: ${{ inputs.platform }}
         DESTINATION: ${{ inputs.destination }}
         BUILD_VERSION: ${{ inputs.build-version }}
@@ -207,8 +212,12 @@ runs:
             "color": colour,
             "fields": fields,
         }]}
+        url = env["WEBHOOK"]
+        thread = (env.get("THREAD_ID") or "").strip()
+        if thread:
+            url += ("&" if "?" in url else "?") + "thread_id=" + thread
         request = urllib.request.Request(
-            env["WEBHOOK"],
+            url,
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
