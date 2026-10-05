@@ -8,6 +8,22 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **A cancelled run blocked the next build on a self-hosted runner** with
+  `Aborting batchmode due to fatal error: It looks like another Unity
+  instance is running with this project open`. Cancelling a job could leave
+  its Unity running with the shared workspace's project open. The native lanes
+  now stop any Unity holding *this* project before the first Unity step
+  (`scripts/common/stop_stale_unity.py`, matched by `-projectPath`, never by
+  process name, so other projects and a person's Editor are left alone), clear
+  `Temp/UnityLockfile`, and run the same check with `always()` at the end of
+  the job so a cancelled job cleans up after itself.
+
+---
+
 ## [6.17.0] — 2026-10-05
 
 ### Added
