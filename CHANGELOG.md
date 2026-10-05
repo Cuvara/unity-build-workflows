@@ -8,6 +8,36 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **One variable name per setting, with a value per GitHub Environment.**
+  `BUILD_PLATFORMS`, `TEST_ENABLED`, `ADDRESSABLES_ENABLED` and
+  `UNITY_DEFINE_SYMBOLS` replace the per-branch families
+  (`BUILD_{DEVELOP,STAGING,RELEASE}_PLATFORMS`, ...). Set them under
+  **Settings → Environments → development / staging / production**. They win
+  over the per-branch names, which keep working unchanged. A manual dispatch
+  with an empty `define-symbols` field now takes the chosen environment's
+  `UNITY_DEFINE_SYMBOLS`.
+- `unity-pipeline.yml` has a new first job, **Select Environment**
+  (`ubuntu-latest`, about ten seconds). It picks the environment before
+  `resolve-config` starts, so `resolve-config` can declare it. Every variable
+  `resolve-config` reads (`BUILD_NUMBER_OFFSET`, `BUILD_IOS_SIGN_DEVELOPMENT`,
+  `RUNNER_*`, `CACHE_*`, ...) can therefore be overridden per environment.
+  Pull requests and `BUILD_ENVIRONMENT_SECRETS=false` still declare no
+  environment and read repository values only.
+  See `docs/ENVIRONMENT_VARIABLES.md`.
+
+### Changed
+
+- **The environment's protection rules now gate `resolve-config`.**
+  Required reviewers, wait timers and deployment-branch policies apply at the
+  start of a run instead of at the first build job. The build jobs already
+  declared the same environment, so no run needs an approval it did not need
+  before. `resolve-config` also records one more deployment per run.
+---
+
 ## [6.13.0] — 2026-10-05
 
 ### Added

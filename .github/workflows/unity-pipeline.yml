@@ -288,11 +288,67 @@ env:
 jobs:
 
   # ════════════════════════════════════════════════════════════════════════════
+  # JOB 0: select-environment
+  # ════════════════════════════════════════════════════════════════════════════
+  # Picks the GitHub Environment (development | staging | production) before
+  # resolve-config starts, so resolve-config can declare it. A job only sees an
+  # environment's variables when it declares that environment, and `vars.X`
+  # then yields the environment value, else the repository value. That is what
+  # lets one generic name -- BUILD_PLATFORMS, TEST_ENABLED, ... -- replace the
+  # per-branch BUILD_DEVELOP_PLATFORMS / BUILD_STAGING_PLATFORMS / ... family.
+  # Same resolver, same answer as the build job's secrets-environment: empty
+  # for pull requests and when BUILD_ENVIRONMENT_SECRETS=false.
+  # docs/ENVIRONMENT_VARIABLES.md
+  select-environment:
+    name: Select Environment
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.select.outputs.secrets-environment }}
+    steps:
+      - name: Checkout toolkit (for resolve_build_flow.sh)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref:        ${{ inputs.toolkit-ref }}
+          path:       .toolkit
+          sparse-checkout: |
+            scripts/common
+            config
+          sparse-checkout-cone-mode: true
+
+      - name: Select environment
+        id: select
+        shell: bash
+        env:
+          EVENT_NAME:            ${{ github.event_name }}
+          REF_NAME:              ${{ github.ref_name }}
+          BASE_REF:              ${{ github.base_ref }}
+          IN_PLATFORM:           ${{ inputs.platform || '' }}
+          IN_ENVIRONMENT:        ${{ inputs.environment || '' }}
+          IN_RUN_TESTS:          ${{ inputs.run-tests || '' }}
+          IN_TEST_MODE:          ${{ inputs.test-mode || '' }}
+          IN_BUILD_ADDRESSABLES: ${{ inputs.build-addressables || '' }}
+          IN_BUILD_TYPE:         ${{ inputs.build-type || '' }}
+          # Repository level only: this job has no environment yet.
+          NEW_BUILD_ENVIRONMENT_SECRETS: ${{ vars.BUILD_ENVIRONMENT_SECRETS }}
+        run: |
+          set -euo pipefail
+          # Only secrets-environment is used. Platform lists and toggles are
+          # resolved again in resolve-config, with the environment's variables.
+          bash .toolkit/scripts/common/resolve_build_flow.sh > /dev/null
+          grep '^secrets-environment=' "$GITHUB_OUTPUT" || echo "secrets-environment=<none>"
+
+  # ════════════════════════════════════════════════════════════════════════════
   # JOB 1: resolve-config
   # ════════════════════════════════════════════════════════════════════════════
   resolve-config:
     name: Resolve Build Config
+    needs: [select-environment]
     runs-on: ubuntu-latest
+    # Declaring the environment makes every vars.* below resolve to the
+    # environment's value first (BUILD_PLATFORMS, BUILD_NUMBER_OFFSET, ...).
+    # Empty (pull requests, BUILD_ENVIRONMENT_SECRETS=false) = repository only.
+    environment: ${{ needs.select-environment.outputs.name }}
     outputs:
       # ── Unity / project ────────────────────────────────────────────────────
       unity-version:      ${{ steps.version.outputs.version }}
@@ -501,6 +557,14 @@ jobs:
           VAR_DEVELOP_DEFINE_SYMBOLS:     ${{ vars.DEVELOP_DEFINE_SYMBOLS || '' }}
           VAR_STAGING_DEFINE_SYMBOLS:     ${{ vars.STAGING_DEFINE_SYMBOLS || '' }}
           VAR_RELEASE_DEFINE_SYMBOLS:     ${{ vars.RELEASE_DEFINE_SYMBOLS || '' }}
+          # ── Environment-scoped generic names (win over per-branch names) ───
+          # Set once per GitHub Environment; this job declares it, so vars.X
+          # is the environment value, else the repository value.
+          # docs/ENVIRONMENT_VARIABLES.md
+          NEW_ENV_BUILD_PLATFORMS:      ${{ vars.BUILD_PLATFORMS }}
+          NEW_ENV_TEST_ENABLED:         ${{ vars.TEST_ENABLED }}
+          NEW_ENV_ADDRESSABLES_ENABLED: ${{ vars.ADDRESSABLES_ENABLED }}
+          NEW_ENV_UNITY_DEFINE_SYMBOLS: ${{ vars.UNITY_DEFINE_SYMBOLS }}
           # ── New grouped Repository Variables (New > Legacy > Default) ──────
           NEW_BUILD_DEVELOP_PLATFORMS:  ${{ vars.BUILD_DEVELOP_PLATFORMS }}
           NEW_BUILD_STAGING_PLATFORMS:  ${{ vars.BUILD_STAGING_PLATFORMS }}
