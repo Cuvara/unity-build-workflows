@@ -304,18 +304,36 @@ jobs:
           # organization — git reports it as "not found". Fetch them here instead,
           # so the URLs in .gitmodules are used exactly as written.
           _key_file=""
-          cleanup() { [[ -n "${_key_file}" ]] && rm -f "${_key_file}" || true; }
+          cleanup() { rm -f "${_key_file:-}" "${_known_hosts:-}" 2>/dev/null || true; }
           trap cleanup EXIT
 
-          _ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+          # The runner's own SSH credentials need a home directory: a Windows
+          # runner service has no HOME in Git Bash, so ssh looked in /.ssh
+          # (the Git install), found no key and could not write known_hosts.
+          if [[ -z "${HOME:-}" || "${HOME}" == "/" ]] && [[ -n "${USERPROFILE:-}" ]]; then
+            export HOME="$(cygpath -u "${USERPROFILE}" 2>/dev/null || printf '%s' "${USERPROFILE}")"
+          fi
+          _known_hosts="$(mktemp)"
+          _ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o UserKnownHostsFile=${_known_hosts}"
           if [[ -n "${SUBMODULE_SSH_KEY:-}" ]]; then
             _key_file="$(mktemp)"
             printf '%s\n' "${SUBMODULE_SSH_KEY}" > "${_key_file}"
             chmod 600 "${_key_file}"
             _ssh_opts="-i ${_key_file} -o IdentitiesOnly=yes ${_ssh_opts}"
             echo "Authenticating submodules with SUBMODULE_SSH_KEY."
+          elif [[ -n "${SUBMODULE_SSH_KEY_FILE:-}" ]]; then
+            # A key file on the runner machine, named in the runner's .env.
+            _machine_key="$(cygpath -u "${SUBMODULE_SSH_KEY_FILE}" 2>/dev/null || printf '%s' "${SUBMODULE_SSH_KEY_FILE}")"
+            if [[ ! -r "${_machine_key}" ]]; then
+              echo "::error::SUBMODULE_SSH_KEY_FILE=${SUBMODULE_SSH_KEY_FILE} is not readable by $(whoami)."
+              exit 1
+            fi
+            _ssh_opts="-i ${_machine_key} -o IdentitiesOnly=yes ${_ssh_opts}"
+            echo "Authenticating submodules with the runner's key file ${SUBMODULE_SSH_KEY_FILE}."
           else
-            echo "SUBMODULE_SSH_KEY is not set — using the runner's own SSH credentials."
+            echo "Using the runner account's own SSH keys: $(whoami), ${HOME}/.ssh"
+            ls "${HOME}/.ssh" 2>/dev/null | grep -E '^id_' | sed 's/^/  /' \
+              || echo "::warning::No id_* key in ${HOME}/.ssh. Put a key with read access to the submodules there, or set SUBMODULE_SSH_KEY_FILE in the runner's .env, or the SUBMODULE_SSH_KEY secret."
           fi
 
           export GIT_SSH_COMMAND="ssh ${_ssh_opts}"
