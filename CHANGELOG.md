@@ -8,6 +8,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Runner dropdown kept in sync with the real runners.** A workflow_dispatch
+  choice list is static, so the new reusable workflow `sync-runner-choices.yml`
+  (and `scripts/common/sync_runner_choices.py`) reads the organization's and
+  repository's self-hosted runners on a schedule and rewrites the lines marked
+  `# sync-runner-choices` in the caller workflows: the Runner input's options
+  become the real runner names, and `runner-labels` maps each name to labels
+  that reach only that machine (adding the name, with a warning, when another
+  runner carries the same labels). Commits only when the list changed. Caller
+  template `templates/consumer-30-sync-runners.yml`; secret
+  `RUNNER_SYNC_TOKEN`. Docs: `MULTI_RUNNER_SCHEDULING.md` §18 (one job per
+  runner — capacity is the number of registered runners) and §19.
+
+---
+
 ## [6.10.2] — 2026-10-05
 
 ### Fixed

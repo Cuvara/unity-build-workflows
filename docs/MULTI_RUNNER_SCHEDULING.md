@@ -32,6 +32,8 @@ Design record: [ADR 004, stage 2c](adr/004-runner-selection.md).
 15. [What you see in a run](#15-what-you-see-in-a-run)
 16. [Migration](#16-migration)
 17. [Known limitations](#17-known-limitations)
+18. [Capacity: one job per runner](#18-capacity-one-job-per-runner)
+19. [Choosing a machine in the Run workflow form](#19-choosing-a-machine-in-the-run-workflow-form)
 
 ---
 
@@ -708,3 +710,49 @@ routing for every job a policy does not cover.
 - **Legacy GitHub-hosted iOS** (no policy, `RUNNER_TYPE=github-hosted`) is still
   routed to `macos-latest` and reported *blocked*, as before. A policy cannot send
   iOS to GitHub-hosted.
+
+## 18. Capacity: one job per runner
+
+A GitHub Actions runner runs **one job at a time** — there is no slot count to
+configure. The `busy` flag the scheduler reads is exactly that: busy = its one
+job slot is taken. A machine builds N jobs in parallel only when N runners are
+registered on it (separate folders, separate names, e.g. `mac-mini-1`,
+`mac-mini-2`); give them a shared label and list that label as a pool target so
+the scheduler counts them as one pool with N slots. Before running several
+Unity builds on one machine, check its RAM, disk and Unity licence seats.
+
+## 19. Choosing a machine in the Run workflow form
+
+A `workflow_dispatch` choice list is static YAML: GitHub cannot fill it from the
+runner API when the form opens. `sync-runner-choices.yml` keeps it current
+instead. On a schedule it reads the organization's and the repository's
+self-hosted runners and rewrites the two lines marked `# sync-runner-choices`
+in the caller workflows:
+
+```yaml
+inputs:
+  runner:
+    description: "RUNNER · Machine to build on (auto = runner policy / repository variables)"
+    type: choice
+    default: 'auto'
+    options: ['auto', 'mac-mini', 'win-build'] # sync-runner-choices
+...
+with:
+  runner-labels: ${{ inputs.runner != 'auto' && toJSON(fromJSON('{"mac-mini":["self-hosted","macOS","ARM64"],…}')[inputs.runner]) || '' }} # sync-runner-choices
+```
+
+- The dropdown shows **real runner names**; the mapping turns the chosen name
+  into labels that reach only that machine (`runs-on` never matches names).
+  A runner's own labels are used when no other runner carries all of them;
+  otherwise the name is added and the run warns to give the runner a label
+  equal to its name (§2).
+- `auto` leaves the choice to the runner policy — the scheduler picks an idle,
+  eligible runner (§7–§9) — or to the `RUNNER_*` variables when there is none.
+- The list is as fresh as the last sync (hourly in the template, or run it by
+  hand). A machine picked while offline is reported by the scheduler instead of
+  waiting forever in the queue.
+- Caller: `templates/consumer-30-sync-runners.yml`. Secret `RUNNER_SYNC_TOKEN`,
+  a fine-grained token with organization *Self-hosted runners: read* and, on
+  the repository, *Administration: read*, *Contents: read & write* and
+  *Workflows: read & write* — `GITHUB_TOKEN` can neither list runners nor push
+  a workflow change.
