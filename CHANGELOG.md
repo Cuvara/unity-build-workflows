@@ -42,6 +42,7 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   get `ENABLE_BITCODE=NO`; the `BuildCommand` path is unchanged.
 - `templates/PlayerBuilder.cs` and `templates/AddressableBuilder.cs` are
   removed; the package is the single copy.
+
 ---
 
 ## [6.15.0] — 2026-10-05
