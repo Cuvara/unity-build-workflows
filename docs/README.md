@@ -42,6 +42,7 @@ drift apart quietly.
 | [IOS_RELEASE.md](IOS_RELEASE.md) · [IOS_SIGNING.md](IOS_SIGNING.md) · [IOS_VERIFICATION.md](IOS_VERIFICATION.md) | The iOS lane, signing before the immutable boundary, and verification |
 | [GITHUB_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md) | Environment protection, approvals, deployment hygiene |
 | [MIGRATING_TO_ENVIRONMENT_SECRETS.md](MIGRATING_TO_ENVIRONMENT_SECRETS.md) | Move signing secrets from repository level to one set per environment |
+| [VERSIONING.md](VERSIONING.md) | Version name and build number: where they come from, per-build-type offsets, how they reach the app |
 | [DISCORD_NOTIFICATIONS.md](DISCORD_NOTIFICATIONS.md) | Build and release notifications |
 
 ## Per-platform notes

@@ -650,7 +650,9 @@ jobs:
           BUILD_TYPE_IN: ${{ steps.flow.outputs.build-type }}
           IN_PLATFORM:   ${{ inputs.platform }}
           RUN_NUMBER:    ${{ github.run_number }}
-          BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET || '0' }}
+          BUILD_NUMBER_OFFSET: ${{ vars.BUILD_NUMBER_OFFSET }}
+          BUILD_NUMBER_OFFSET_DEVELOPMENT: ${{ vars.BUILD_NUMBER_OFFSET_DEVELOPMENT }}
+          BUILD_NUMBER_OFFSET_RELEASE: ${{ vars.BUILD_NUMBER_OFFSET_RELEASE }}
           PRODUCT_NAME:  ${{ steps.meta.outputs.product-name }}
           APP_VERSION:   ${{ steps.meta.outputs.app-version }}
           RETENTION_DAYS:   ${{ steps.flow.outputs.artifact-retention-days }}
@@ -693,14 +695,31 @@ jobs:
           # Android was the broken one: AndroidBuilder derived versionCode from
           # the MAJOR version, so every 1.x.y release uploaded versionCode 1 and
           # Play rejected the second one.
-          OFFSET="${BUILD_NUMBER_OFFSET:-0}"
+          #
+          # One offset per build type. Development and release builds come
+          # from different workflows, each with its own run_number, so a shared
+          # offset let a development build outnumber the next release (a tester
+          # then cannot install that release over it). The per-type variable
+          # wins; the shared BUILD_NUMBER_OFFSET is the fallback for projects
+          # that set only that one. See docs/VERSIONING.md.
+          case "${BUILD_TYPE_IN:-}" in
+            release) OFFSET_NAME="BUILD_NUMBER_OFFSET_RELEASE";     OFFSET="${BUILD_NUMBER_OFFSET_RELEASE:-}" ;;
+            *)       OFFSET_NAME="BUILD_NUMBER_OFFSET_DEVELOPMENT"; OFFSET="${BUILD_NUMBER_OFFSET_DEVELOPMENT:-}" ;;
+          esac
+          if [ -z "${OFFSET}" ] && [ -n "${BUILD_NUMBER_OFFSET:-}" ]; then
+            OFFSET_NAME="BUILD_NUMBER_OFFSET"; OFFSET="${BUILD_NUMBER_OFFSET}"
+          fi
+          if [ -z "${OFFSET}" ]; then
+            OFFSET_NAME="default"; OFFSET=0
+          fi
           case "${OFFSET}" in
-            ''|*[!0-9]*)
-              echo "::error::BUILD_NUMBER_OFFSET must be a non-negative integer, got '${OFFSET}'"
+            *[!0-9]*)
+              echo "::error::${OFFSET_NAME} must be a non-negative integer, got '${OFFSET}'"
               exit 1
               ;;
           esac
           BUILD_NUMBER=$(( RUN_NUMBER + OFFSET ))
+          echo "[matrix] build number ${BUILD_NUMBER} = run ${RUN_NUMBER} + offset ${OFFSET} (${OFFSET_NAME})"
           if [ "${BUILD_NUMBER}" -le 0 ]; then
             echo "::error::Resolved build number ${BUILD_NUMBER} is not positive"
             exit 1
