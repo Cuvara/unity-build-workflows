@@ -142,10 +142,24 @@ The toolkit's `shell: bash` steps need **Git Bash**, not
 `C:\WINDOWS\system32\bash.exe` (the WSL launcher), which a runner finds first
 when System32 precedes Git on `PATH` — every bash step then fails with
 "Windows Subsystem for Linux has no installed distributions". The build and
-test jobs handle this themselves: their first step (`Use Git Bash (Windows)`)
+test jobs handle this themselves: their first step (`Use Git Bash and long paths (Windows)`)
 asks `git --exec-path` where Git is installed, runs that `bash.exe`, and puts
 its directory first on the job's `PATH`. All it needs is `git` on the runner's
 `PATH`.
+
+**Long paths.** Unity projects nest assets deep, and the runner workspace
+(`<runner>\_work\<repo>\<repo>\...`) adds to it, so files cross Windows' 260
+character limit and `git checkout` fails with `Filename too long`. The same
+first step sets `git config --global core.longpaths true` for the runner
+account. Unity and Gradle also need the operating-system setting, which takes
+an administrator once per machine (the step warns while it is off):
+
+```powershell
+New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' `
+  -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
+```
+
+A short runner work folder (e.g. register the runner under `C:\r`) helps too.
 
 ### 3.4 Git LFS
 
