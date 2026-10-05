@@ -8,6 +8,20 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Every bash step failed on self-hosted Windows runners.** `shell: bash`
+  resolves `bash` on PATH, and on a self-hosted runner System32 usually comes
+  before Git, so steps ran `C:\WINDOWS\system32\bash.exe` — the WSL launcher —
+  and failed with "Windows Subsystem for Linux has no installed distributions".
+  The build and test jobs now start with `Use Git Bash (Windows)` (PowerShell):
+  it asks `git --exec-path` where Git is installed, runs that Git Bash, and
+  puts it first on the job's PATH.
+
+---
+
 ## [6.10.0] — 2026-10-02
 
 ### Added

@@ -138,6 +138,15 @@ Ensure `git` is on the system `PATH`:
 git --version
 ```
 
+The toolkit's `shell: bash` steps need **Git Bash**, not
+`C:\WINDOWS\system32\bash.exe` (the WSL launcher), which a runner finds first
+when System32 precedes Git on `PATH` — every bash step then fails with
+"Windows Subsystem for Linux has no installed distributions". The build and
+test jobs handle this themselves: their first step (`Use Git Bash (Windows)`)
+asks `git --exec-path` where Git is installed, runs that `bash.exe`, and puts
+its directory first on the job's `PATH`. All it needs is `git` on the runner's
+`PATH`.
+
 ### 3.4 Git LFS
 
 Git LFS is **required** — the Unity project stores large binary assets (textures,
