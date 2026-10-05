@@ -45,7 +45,8 @@ def isolated(tmp_path, *dirs):
     # Only our fakes plus coreutils; hide any real python on the CI host.
     core = tmp_path / "core"
     core.mkdir(exist_ok=True)
-    for tool in ("bash", "sort", "head", "dirname", "uname", "mkdir", "chmod", "printf", "tr", "env", "cat"):
+    for tool in ("bash", "sort", "head", "dirname", "uname", "mkdir", "chmod", "printf", "tr", "env",
+                 "cat", "unzip", "rm", "cp"):
         src = next((Path(d) / tool for d in BASE.split(":") if (Path(d) / tool).exists()), None)
         if src and not (core / tool).exists():
             (core / tool).symlink_to(src)
@@ -95,3 +96,26 @@ def test_runs_before_the_preflight(workflow, anchor):
     i = names.index("Ensure Python (self-hosted)")
     assert i < names.index(anchor)
     assert "ensure_python.sh" in steps[i]["run"]
+
+
+def test_windows_without_winget_unpacks_the_nuget_package(tmp_path):
+    # A runner service account has no winget: fall back to python.org's NuGet
+    # zip in the tool cache, then find it there on the next run.
+    import zipfile
+    pkg = tmp_path / "python.nupkg"
+    with zipfile.ZipFile(pkg, "w") as z:
+        info = zipfile.ZipInfo("tools/python.exe")
+        info.external_attr = 0o755 << 16
+        z.writestr(info, '#!/usr/bin/env bash\necho "3.12.10 $0"\n')
+    exe(tmp_path / "net" / "curl", f'out=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done; cp "{pkg}" "$out"\n')
+    exe(tmp_path / "stub" / "python3", "exit 9009\n")
+    path = isolated(tmp_path, tmp_path / "stub", tmp_path / "net")
+    cache = tmp_path / "toolcache"
+    env = {"ENSURE_PYTHON_NO_INSTALL": "0", "ENSURE_PYTHON_PLATFORM": "windows",
+           "RUNNER_TOOL_CACHE": str(cache), "RUNNER_TEMP": str(tmp_path / "rt")}
+    r, out = run(path, tmp_path, **env)
+    assert r.returncode == 0, r.stderr
+    assert out["python-source"] == "installed:nuget"
+    assert (tmp_path / "rt" / "toolkit-python3" / "python3").exists(), "python3 wrapper on Windows"
+    r2, out2 = run(path, tmp_path, **env)
+    assert out2["python-source"] == "cache", r2.stderr
