@@ -46,7 +46,7 @@ def test_stops_only_the_unity_holding_this_project(tmp_path):
         r = subprocess.run([sys.executable, str(SCRIPT), "--project", "Proj"],
                            cwd=workspace, capture_output=True, text=True, timeout=60)
         assert r.returncode == 0, r.stderr
-        assert ours.wait(timeout=20) is not None, "the leftover editor must be stopped"
+        assert ours.wait(timeout=20) is not None, r.stderr
         assert other.poll() is None, "an editor holding another project must be left alone"
         assert not lock.exists()
     finally:

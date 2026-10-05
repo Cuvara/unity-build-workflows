@@ -68,8 +68,9 @@ def unity_processes() -> List[Tuple[int, str]]:
         data = json.loads(raw)
         rows = data if isinstance(data, list) else [data]
         return [(int(r["ProcessId"]), r.get("CommandLine") or "") for r in rows]
-    # -A -o pid= -o args= reads the same on macOS (BSD ps) and Linux (procps).
-    result = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "args="],
+    # -A -ww -o pid= -o args= reads the same on macOS (BSD ps) and Linux (procps);
+    # -ww: never cut a long command line (piped output defaults to 80 columns).
+    result = subprocess.run(["ps", "-A", "-ww", "-o", "pid=", "-o", "args="],
                             capture_output=True, text=True, timeout=60)
     found = []
     for line in result.stdout.splitlines():
