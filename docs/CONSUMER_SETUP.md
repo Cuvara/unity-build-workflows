@@ -263,6 +263,21 @@ Where the key comes from:
 | Self-hosted | Nothing. The runner's own SSH credentials are used — if `git ls-remote git@github.com:<org>/<repo>.git` works for the account the runner service runs as, the build works. |
 | GitHub-hosted | A `SUBMODULE_SSH_KEY` secret holding a private key that can read every private submodule. |
 
+**Self-hosted: which key the runner uses.** The build logs it. Without the
+`SUBMODULE_SSH_KEY` secret, the step uses, in order:
+
+1. `SUBMODULE_SSH_KEY_FILE` from the runner's `.env` (e.g.
+   `E:\actions-runner\.env` → `SUBMODULE_SSH_KEY_FILE=C:\Users\builder\.ssh\id_ed25519`) —
+   a key file on that machine, readable by the runner account;
+2. the `id_*` keys in the **runner account's** `~/.ssh`. On Windows the job sets
+   `HOME` from `USERPROFILE` first: a runner service has no `HOME` in Git Bash,
+   so ssh used to look in `/.ssh` and fail with `Permission denied (publickey)`.
+
+A runner installed as a Windows service usually runs as `NT AUTHORITY\NETWORK
+SERVICE`, whose profile is not yours, so your `C:\Users\<you>\.ssh` key is not
+used. Either point `SUBMODULE_SSH_KEY_FILE` at a copy of the key the service
+account can read, or run the runner service as your account.
+
 A **deploy key** authenticates one repository only, so it covers a single private submodule.
 For several, use one key belonging to a machine account that has read access to all of them.
 

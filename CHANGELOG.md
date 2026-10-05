@@ -8,6 +8,22 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Private submodules failed on a Windows runner using its own SSH key.**
+  Without the `SUBMODULE_SSH_KEY` secret the step relies on the runner's SSH
+  credentials, but a Windows runner service has no `HOME` in Git Bash: ssh
+  looked in `/.ssh`, found no key, could not write `known_hosts`, and every
+  private submodule failed with `Permission denied (publickey)`. The step now
+  sets `HOME` from `USERPROFILE` when it is missing, keeps `known_hosts` in a
+  temp file, logs which account and keys it uses, and accepts
+  `SUBMODULE_SSH_KEY_FILE` from the runner's `.env` for a key file on the
+  machine. See `docs/CONSUMER_SETUP.md` § Private git submodules.
+
+---
+
 ## [6.12.1] — 2026-10-05
 
 ### Fixed
