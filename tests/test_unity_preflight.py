@@ -15,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,8 @@ class Machine:
             "FAKE_UNITY_LOG": str(self.log),
             "FAKE_UNITY_MODE": mode,
             "FAKE_UNITY_INSTALL_DELAY": str(delay),
+            # Never read the real machine's Unity Hub records in a test.
+            "UNITY_PREFLIGHT_HUB_CONFIG_DIRS": "",
         })
         env.update(extra or {})
         return env
@@ -1023,3 +1026,92 @@ class TestEditorDiscovery:
         assert (cli_home / "bin" / "unity").is_file()
         assert Path(parse_env(proc.stdout)["UNITY_EDITOR"]) == exe
         assert machine.install_calls() == []
+
+
+# ---------------------------------------------------------------------------
+# Unity Hub's own records: an editor installed with Hub, in a custom location,
+# by another account (the runner service has its own empty profile).
+# ---------------------------------------------------------------------------
+
+class TestHubRecords:
+    @HOSTS
+    def test_hub_custom_install_location_is_adopted(self, tmp_path, machine, host):
+        custom = tmp_path / "D-UnityEditors"
+        exe = place_editor(custom, VERSION, host)
+        hub = tmp_path / "person" / "UnityHub"
+        hub.mkdir(parents=True)
+        (hub / "secondaryInstallPath.json").write_text(json.dumps(str(custom)), encoding="utf-8")
+        proc = machine.run(make_project(tmp_path), "--host-os", host,
+                           extra_env={"UNITY_PREFLIGHT_HUB_CONFIG_DIRS": str(hub)})
+        assert proc.returncode == 0, proc.stderr
+        out = parse_env(proc.stdout)
+        assert out["UNITY_EDITOR_SOURCE"] == "existing"
+        assert machine.install_calls() == [], "found via Hub, nothing installed"
+        assert f"Found Unity {VERSION} on disk" in proc.stderr
+
+    def test_hub_editors_file_location_is_adopted(self, tmp_path, machine):
+        anywhere = tmp_path / "Some Folder"
+        exe = place_editor(anywhere, VERSION, "windows")
+        hub = tmp_path / "person" / "UnityHub"
+        hub.mkdir(parents=True)
+        (hub / "editors-v2.json").write_text(json.dumps({"schema_version": "v2", "data": [
+            {"version": OTHER_VERSION, "location": [str(tmp_path / "nope.exe")]},
+            {"version": VERSION, "location": [str(exe)], "manual": True}]}), encoding="utf-8")
+        proc = machine.run(make_project(tmp_path), "--host-os", "windows",
+                           extra_env={"UNITY_PREFLIGHT_HUB_CONFIG_DIRS": str(hub)})
+        assert proc.returncode == 0, proc.stderr
+        assert machine.install_calls() == []
+
+    def test_unreadable_or_broken_hub_files_are_ignored(self, tmp_path, machine):
+        hub = tmp_path / "person" / "UnityHub"
+        hub.mkdir(parents=True)
+        (hub / "editors-v2.json").write_text("{not json", encoding="utf-8")
+        (hub / "secondaryInstallPath.json").write_text('""', encoding="utf-8")
+
+        proc = machine.run(make_project(tmp_path), extra_env={
+            "UNITY_PREFLIGHT_HUB_CONFIG_DIRS": str(hub)})
+        assert proc.returncode == 0, proc.stderr  # falls through to installing
+
+    def test_hub_reported_editors_parses_both_schemas(self, tmp_path, monkeypatch):
+        hub = tmp_path / "UnityHub"
+        hub.mkdir()
+        (hub / "secondaryInstallPath.json").write_text(json.dumps(r"E:\Unity"), encoding="utf-8")
+        (hub / "editors.json").write_text(json.dumps(
+            {VERSION: {"version": VERSION, "location": [r"F:\U\Editor\Unity.exe"]}}), encoding="utf-8")
+        monkeypatch.setenv("UNITY_PREFLIGHT_HUB_CONFIG_DIRS", str(hub))
+        found = [str(p) for p in up.hub_reported_editors(VERSION, "windows")]
+        assert any(VERSION in p and p.startswith("E:") for p in found)
+        assert r"F:\U\Editor\Unity.exe" in found
+
+
+# ---------------------------------------------------------------------------
+# Running the CLI: never wait on a prompt, never outlive the timeout.
+# ---------------------------------------------------------------------------
+
+class TestRun:
+    def test_stdin_is_closed(self, tmp_path):
+        # A CLI that prompts must read EOF, not wait for a console.
+        r = up._run([sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"], 30)
+        assert r.returncode == 0 and "''" in r.stdout
+
+    @pytest.mark.skipif(os.name == "nt", reason="process-group kill is POSIX; Windows uses taskkill")
+    def test_timeout_kills_the_whole_tree(self, tmp_path):
+        # The child keeps the output pipe open after its parent is killed —
+        # exactly what hung a Windows job for two hours.
+        script = ("import subprocess, sys, time\n"
+                  "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                  "time.sleep(60)\n")
+        started = time.monotonic()
+        with pytest.raises(up.PreflightError, match="timed out after 1s"):
+            up._run([sys.executable, "-c", script], 1)
+        assert time.monotonic() - started < 20
+
+    def test_stream_echoes_output(self, tmp_path, capsys):
+        r = up._run([sys.executable, "-c", "print('downloading editor')"], 30, stream=True)
+        assert r.returncode == 0
+        assert "  | downloading editor" in capsys.readouterr().err
+
+    def test_install_timeout_option(self, monkeypatch):
+        monkeypatch.delenv("UNITY_PREFLIGHT_INSTALL_TIMEOUT", raising=False)
+        assert up.parse_args(["--project", "."]).install_timeout == 3600
+        assert up.parse_args(["--project", ".", "--install-timeout", "0"]).install_timeout == 0

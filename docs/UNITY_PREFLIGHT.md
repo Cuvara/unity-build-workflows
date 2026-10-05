@@ -255,9 +255,10 @@ this order, on every host:
 | 3 | `UNITY_PREFLIGHT_INSTALL_ROOT` / `--install-root` | Searched first, not only installed into |
 | 4 | `--fallback-install-root` | The runner-managed root CI installs into (`~/Unity/Editors`) |
 | 5 | The CLI's configured install path (`unity install-path --get`) | |
-| 6 | The standard locations this toolkit's lanes always used | Windows: `%ProgramFiles%\Unity\Hub\Editor\<v>\Editor\Unity.exe`, `%ProgramFiles%\Unity <v>\Editor\Unity.exe`; macOS: `/Applications/Unity/Hub/Editor/<v>/Unity.app`, `/Applications/Unity <v>/Unity.app` |
+| 6 | **What Unity Hub reports**, for every account on the machine | Hub's own records in each profile's Hub config folder (Windows `%APPDATA%\UnityHub`, for every `C:\Users\*`; macOS `~/Library/Application Support/UnityHub`, for every `/Users/*`): the custom editor install location (`secondaryInstallPath.json`) and the editors Hub installed or was pointed at (`editors-v2.json`, `editors.json`). Covers an editor installed with Hub, in a custom folder, by a person while the runner service has its own empty profile. Unreadable files are skipped |
+| 7 | The standard locations this toolkit's lanes always used | Windows: `%ProgramFiles%\Unity\Hub\Editor\<v>\Editor\Unity.exe`, `%ProgramFiles%\Unity <v>\Editor\Unity.exe`; macOS: `/Applications/Unity/Hub/Editor/<v>/Unity.app`, `/Applications/Unity <v>/Unity.app` |
 
-- **Matching:** locations 3–6 are checked for the exact version, as
+- **Matching:** locations 3–7 are checked for the exact version, as
   `<root>/<version>/Editor/Unity.exe` on Windows or `<root>/<version>/Unity.app`
   on macOS. A match is registered with `unity editors add`.
 - **Version check:** the CLI then reads the editor's real version. A folder
@@ -366,6 +367,22 @@ Override with `--lock-dir` or `UNITY_PREFLIGHT_LOCK_DIR`.
   - It does not see installs started from the Hub GUI.
   - The Unity CLI's own lock still prevents two installs of the same version
     from corrupting each other.
+
+## Running the Unity CLI
+
+- Every CLI command is logged before it runs (`[unity_preflight] $ unity …`),
+  so a log always shows what was in progress.
+- **stdin is closed.** A CLI that would prompt (first-run terms, sign-in) reads
+  end-of-file and fails with its message instead of waiting for a console that
+  never answers.
+- **Timeouts stop the whole process tree** — `taskkill /T /F` on Windows, the
+  process group elsewhere. Killing only the CLI was not enough: its helpers
+  kept the output pipe open and a 600-second query held a CI job for two hours.
+- **Installs are streamed and bounded.** The installer's output is echoed as
+  it arrives (`  | …`), a `... still running (N min)` line is logged every
+  minute, and the install is stopped after `--install-timeout` seconds
+  (`UNITY_PREFLIGHT_INSTALL_TIMEOUT`, default 3600; `0` = no limit) with the
+  last output in the error. Queries keep their 600-second limit.
 
 ## Exit codes
 
