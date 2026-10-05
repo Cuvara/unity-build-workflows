@@ -8,6 +8,21 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`cache-library` input on `unity-pipeline.yml`** (`auto` | `true` | `false`,
+  default `auto`). Turns the GitHub Actions cache of Unity's `Library/` folder
+  on or off for a single run. Precedence: input, then the
+  `CACHE_LIBRARY_ENABLED` variable, then the default (`true`). `auto` or a blank
+  value behaves exactly as before. On self-hosted runners a multi-GB Library
+  download can take longer than the import it saves, or expire part-way
+  (`Failed to restore: Server failed to authenticate the request`) and fall
+  back to a cold import anyway.
+
+---
+
 ## [6.12.2] — 2026-10-05
 
 ### Fixed

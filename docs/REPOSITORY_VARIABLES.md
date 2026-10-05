@@ -331,7 +331,7 @@ the corresponding cache.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `CACHE_LIBRARY_ENABLED` | `true` | Caches Unity's `Library/` folder between runs. Uploads/downloads via GitHub Actions cache. |
+| `CACHE_LIBRARY_ENABLED` | `true` | Caches Unity's `Library/` folder between runs. Uploads/downloads via GitHub Actions cache. Per run, the `cache-library` input of `unity-pipeline.yml` (`auto` \| `true` \| `false`) overrides it; `auto` uses this variable. On a self-hosted runner a multi-GB download can be slower than the import it saves, or time out (`Failed to restore`), so `false` is often the faster choice there. |
 | `CACHE_GRADLE_ENABLED` | `true` | Caches Gradle dependencies for Android builds (docker lane only). |
 | `CACHE_ADDRESSABLES_ENABLED` | `true` | Caches built Addressables content (docker lane only). |
 | `CACHE_NUGET_ENABLED` | `true` | Caches NuGet packages (docker lane only). |

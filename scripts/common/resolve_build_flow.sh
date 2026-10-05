@@ -896,7 +896,14 @@ _labels_json_for_platform() {
 # ---------------------------------------------------------------------------
 # Group: CACHE (all default true)
 # ---------------------------------------------------------------------------
+# The Library cache can also be chosen per run (`cache-library` input), because
+# whether it helps depends on the runner: on a self-hosted machine with a slow
+# link the multi-GB download can cost more than the import it saves. `auto`
+# (or empty) defers to the variable, exactly as before the input existed.
+_in_cache_library="$(printf '%s' "${IN_CACHE_LIBRARY:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+[[ "${_in_cache_library}" == "auto" ]] && _in_cache_library=""
 resolve_setting "true" "" \
+    dispatch "${_in_cache_library}" \
     variable-new "${NEW_CACHE_LIBRARY_ENABLED:-}" \
     variable-new "${CACHE_LIBRARY_ENABLED:-}"
 cache_library="${_resolved_value}"

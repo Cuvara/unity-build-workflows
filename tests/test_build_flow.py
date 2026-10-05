@@ -2147,3 +2147,40 @@ class TestIosSignDevelopment:
         r = run_flow({"EVENT_NAME": "push", "REF_NAME": "develop",
                       "NEW_BUILD_IOS_SIGN_DEVELOPMENT": "yes"})
         assert r.returncode != 0 and "BUILD_IOS_SIGN_DEVELOPMENT" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# cache-library input: input -> CACHE_LIBRARY_ENABLED variable -> default true
+# ---------------------------------------------------------------------------
+
+class TestCacheLibraryInput:
+    BASE = {"EVENT_NAME": "workflow_dispatch", "REF_NAME": "develop", "IN_PLATFORM": "Android"}
+
+    def _cache(self, **env):
+        r = run_flow({**self.BASE, **env})
+        assert r.returncode == 0, r.stderr
+        return parse_outputs(r.stdout)["cache-library"]
+
+    @pytest.mark.parametrize("value", ["", "auto", "AUTO", " auto "])
+    def test_auto_or_blank_defers_to_the_variable(self, value):
+        assert self._cache(IN_CACHE_LIBRARY=value) == "true"
+        assert self._cache(IN_CACHE_LIBRARY=value, NEW_CACHE_LIBRARY_ENABLED="false") == "false"
+
+    def test_input_false_overrides_variable_true(self):
+        assert self._cache(IN_CACHE_LIBRARY="false", NEW_CACHE_LIBRARY_ENABLED="true") == "false"
+
+    def test_input_true_overrides_variable_false(self):
+        assert self._cache(IN_CACHE_LIBRARY="true", NEW_CACHE_LIBRARY_ENABLED="false") == "true"
+
+    def test_invalid_input_fails(self):
+        r = run_flow({**self.BASE, "IN_CACHE_LIBRARY": "maybe"})
+        assert r.returncode != 0
+
+    def test_pipeline_exposes_and_passes_the_input(self):
+        import yaml
+        wf = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text(encoding="utf-8"))
+        on = wf.get("on", wf.get(True))
+        spec = on["workflow_call"]["inputs"]["cache-library"]
+        assert spec["default"] == "auto" and spec["type"] == "string" and spec.get("required") is False
+        flow = next(s for s in wf["jobs"]["resolve-config"]["steps"] if s.get("id") == "flow")
+        assert flow["env"]["IN_CACHE_LIBRARY"] == "${{ inputs.cache-library || '' }}"
