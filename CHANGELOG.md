@@ -8,6 +8,20 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Checkout failed on Windows with `Filename too long`.** A consumer's asset
+  pack paths, under the runner workspace, crossed Windows' 260-character limit;
+  `actions/checkout` runs plain `git` and has no input for it. The first
+  Windows step (now `Use Git Bash and long paths (Windows)`) sets
+  `git config --global core.longpaths true` for the runner account before
+  checkout, and warns — with the admin command — when the OS
+  `LongPathsEnabled` setting Unity and Gradle need is off.
+
+---
+
 ## [6.10.1] — 2026-10-05
 
 ### Fixed

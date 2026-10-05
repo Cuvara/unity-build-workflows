@@ -21,8 +21,9 @@ WORKFLOWS = Path(__file__).parent.parent / ".github" / "workflows"
 def test_git_bash_step_runs_before_any_bash_step(workflow, job):
     steps = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"][job]["steps"]
     first = steps[0]
-    assert first["name"] == "Use Git Bash (Windows)"
+    assert first["name"] == "Use Git Bash and long paths (Windows)"
     assert first["if"] == "${{ runner.os == 'Windows' }}"
     assert first["shell"] == "powershell", "it cannot itself depend on bash"
     assert "--exec-path" in first["run"] and "GITHUB_PATH" in first["run"]
     assert "--version" in first["run"], "Git Bash is run before it is trusted"
+    assert "core.longpaths true" in first["run"], "checkout must not hit MAX_PATH"
