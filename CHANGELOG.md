@@ -40,6 +40,7 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   start of a run instead of at the first build job. The build jobs already
   declared the same environment, so no run needs an approval it did not need
   before. `resolve-config` also records one more deployment per run.
+
 ---
 
 ## [6.13.0] — 2026-10-05
