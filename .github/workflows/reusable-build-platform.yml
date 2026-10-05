@@ -261,6 +261,17 @@ on:
         default: ''
         type: string
 
+      build-profile:
+        description: >-
+          Unity Build Profile for this platform: an asset name in
+          Assets/Settings/Build Profiles, or a project-relative .asset path.
+          Empty or 'ProjectSettings' = the project's own Player Settings. Read
+          by the toolkit's PlayerBuilder (BUILD_PROFILE) on the self-hosted
+          native and Windows-docker lanes; the GameCI lane rejects it.
+        required: false
+        default: ''
+        type: string
+
       runner-windows-label:
         description: Runner label used for the self-hosted-windows lane.
         required: false
@@ -557,17 +568,19 @@ jobs:
           RUNNER_NAME: ${{ runner.name }}
           RUNNER_OS:   ${{ runner.os }}
           RUNNER_ARCH: ${{ runner.arch }}
+          PROFILE:     ${{ inputs.build-profile }}
         run: |
           echo "Selected target: ${SELECTED:-<not recorded>}"
           echo "runs-on:         ${RUNS_ON}"
           echo "Assigned runner: ${RUNNER_NAME} (${RUNNER_OS}/${RUNNER_ARCH})"
           echo "Build engine:    ${ENGINE}"
+          echo "Build profile:   ${PROFILE:-ProjectSettings}"
           {
             echo "### Runner"
             echo ""
-            echo "| Selected | Assigned | OS | Engine |"
-            echo "|---|---|---|---|"
-            echo "| \`${SELECTED:-n/a}\` | \`${RUNNER_NAME}\` | ${RUNNER_OS}/${RUNNER_ARCH} | ${ENGINE} |"
+            echo "| Selected | Assigned | OS | Engine | Build profile |"
+            echo "|---|---|---|---|---|"
+            echo "| \`${SELECTED:-n/a}\` | \`${RUNNER_NAME}\` | ${RUNNER_OS}/${RUNNER_ARCH} | ${ENGINE} | \`${PROFILE:-ProjectSettings}\` |"
           } >> "${GITHUB_STEP_SUMMARY}" || true
 
       # ── Step 1: Guard — iOS requires macOS runner ──────────────────────────
@@ -1061,6 +1074,40 @@ jobs:
             exit 1
           fi
 
+      # A Build Profile is applied only by the toolkit's PlayerBuilder (it reads
+      # BUILD_PROFILE). The GameCI lane runs game-ci's own builder, and a
+      # project's own global PlayerBuilder or a custom build-method knows
+      # nothing about profiles. Fail with the reason rather than silently build
+      # with Player Settings instead.
+      - name: Guard — build profile needs PlayerBuilder
+        if: ${{ inputs.build-profile != '' && inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' }}
+        shell: bash
+        env:
+          PROFILE: ${{ inputs.build-profile }}
+          ENGINE: ${{ inputs.build-engine }}
+          CUSTOM_METHOD: ${{ inputs.build-method }}
+          PACKAGE_METHOD: ${{ steps.build-package.outputs.player-method }}
+        run: |
+          case "$(printf '%s' "${PROFILE}" | tr '[:upper:]' '[:lower:]')" in
+            projectsettings|project-settings|none|default|auto) exit 0 ;;
+          esac
+          toolkit_method="Company.BuildPipeline.Editor.PlayerBuilder.Build"
+          if [ "${ENGINE}" = "docker" ] && [ "${RUNNER_OS}" != "Windows" ]; then
+            echo "::error title=Build profile not supported on the GameCI lane::build-profile '${PROFILE}' is applied by the toolkit's PlayerBuilder, which runs on the self-hosted native lanes (build-engine=local) and the Windows docker lane. This job builds with game-ci/unity-builder on Linux. Use ProjectSettings, or build this platform on a self-hosted runner."
+            exit 1
+          fi
+          method="${CUSTOM_METHOD:-${PACKAGE_METHOD:-PlayerBuilder.Build}}"
+          if [ "${method}" != "${toolkit_method}" ]; then
+            if [ -n "${CUSTOM_METHOD}" ]; then
+              why="the build-method input / UNITY_BUILD_METHOD variable selects it"
+            else
+              why="the project has its own global PlayerBuilder class, which takes precedence over the toolkit's; delete it (the toolkit's does everything the reference copy did) to use profiles"
+            fi
+            echo "::error title=Build profile needs the toolkit's PlayerBuilder::build-profile '${PROFILE}' is applied by ${toolkit_method}, but this build runs ${method}: ${why}. Use ProjectSettings, or build with the toolkit's PlayerBuilder."
+            exit 1
+          fi
+          echo "Build profile '${PROFILE}' will be applied by ${toolkit_method}."
+
       # ── Step 9a: Build with GameCI (docker lane, non-Addressables) ─────────
       # game-ci/unity-builder is a Docker CONTAINER ACTION — GitHub Actions only
       # runs container actions on Linux runners. Excluded on Windows; see
@@ -1151,6 +1198,7 @@ jobs:
           ANDROID_KEY_PASS:      ${{ secrets.ANDROID_KEY_PASS }}
           BUILD_NUMBER:          ${{ inputs.build-number }}
           APP_VERSION:           ${{ inputs.app-version }}
+          BUILD_PROFILE:         ${{ inputs.build-profile }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -1298,7 +1346,7 @@ jobs:
             -e UNITY_LICENSE -e UNITY_EMAIL -e UNITY_PASSWORD `
             -e "BUILD_TARGET=$buildTarget" -e "BUILD_METHOD=$buildMethod" -e "EXTRA_PARAMS=$extraParams" `
             -e "ANDROID_APP_BUNDLE=$androidAppBundle" `
-            -e ANDROID_KEYSTORE_PASS -e ANDROID_KEY_PASS -e BUILD_NUMBER -e APP_VERSION `
+            -e ANDROID_KEYSTORE_PASS -e ANDROID_KEY_PASS -e BUILD_NUMBER -e APP_VERSION -e BUILD_PROFILE `
             -w /project `
             $image `
             bash /tmp/build.sh
@@ -1325,6 +1373,9 @@ jobs:
           # name this run decided (Android versionCode, iOS CFBundleVersion).
           BUILD_NUMBER: ${{ inputs.build-number }}
           APP_VERSION: ${{ inputs.app-version }}
+          # Read by PlayerBuilder: the Unity Build Profile for this platform
+          # (empty = Player Settings).
+          BUILD_PROFILE: ${{ inputs.build-profile }}
         run: |
           @echo off
           setlocal EnableDelayedExpansion
@@ -1420,6 +1471,9 @@ jobs:
           # name this run decided (Android versionCode, iOS CFBundleVersion).
           BUILD_NUMBER: ${{ inputs.build-number }}
           APP_VERSION: ${{ inputs.app-version }}
+          # Read by PlayerBuilder: the Unity Build Profile for this platform
+          # (empty = Player Settings).
+          BUILD_PROFILE: ${{ inputs.build-profile }}
         run: |
           set -euo pipefail
           PROJECT="${{ inputs.project-path }}"
