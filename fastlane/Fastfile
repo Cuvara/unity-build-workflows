@@ -12,6 +12,33 @@
 default_platform(:android)
 
 # ──────────────────────────────────────────────────────────────────────────
+# Uploads with a streamed body need a Content-Length.
+#
+# google-apis-core (used by firebase_app_distribution and supply) streams the
+# binary as an IO without saying how long it is. Net::HTTP refuses such a
+# request outright -- "Content-Length not given and Transfer-Encoding is not
+# `chunked'" -- and the net-http that ships with Ruby 3.4+ reaches that check
+# where older stacks did not. Seen on a self-hosted Mac (Ruby 4.0, net-http
+# 0.9.1) right after "Uploading the APK". The length of a file is known:
+# fill it in when the caller left it out, and change nothing otherwise.
+# ──────────────────────────────────────────────────────────────────────────
+require "net/http"
+
+module ToolkitBodyStreamLength
+  def send_request_with_body_stream(sock, ver, path, f, *rest)
+    if !content_length && !chunked?
+      size = if f.respond_to?(:size) then (f.size rescue nil)
+             elsif f.respond_to?(:length) then (f.length rescue nil)
+             end
+      self.content_length = size if size.is_a?(Integer)
+    end
+    super
+  end
+end
+Net::HTTPGenericRequest.prepend(ToolkitBodyStreamLength) unless
+  Net::HTTPGenericRequest.ancestors.include?(ToolkitBodyStreamLength)
+
+# ──────────────────────────────────────────────────────────────────────────
 # SHARED HELPERS
 # ──────────────────────────────────────────────────────────────────────────
 

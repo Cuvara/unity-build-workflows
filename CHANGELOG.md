@@ -8,6 +8,18 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Firebase (and Google Play) uploads failed on Ruby 3.4+/4.0** right after
+  `Uploading the APK` with `Content-Length not given and Transfer-Encoding is
+  not chunked`. google-apis-core streams the binary without a length and the
+  newer net-http refuses it. The toolkit Fastfile now fills in the length of
+  a streamed body when the caller left it out.
+
+---
+
 ## [6.21.1] — 2026-10-06
 
 ### Fixed
