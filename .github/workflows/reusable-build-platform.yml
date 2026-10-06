@@ -1964,6 +1964,13 @@ jobs:
             SA_FILE=$(mktemp)
             printf '%s' "${FIREBASE_SERVICE_ACCOUNT_JSON}" > "${SA_FILE}"
             trap 'rm -f "${SA_FILE}"' EXIT
+            # On Windows mktemp gives a Git Bash path (/tmp/...); the Ruby
+            # that runs fastlane is a native Windows program and cannot open
+            # it ("Service credentials file does not exist").
+            SA_PATH="${SA_FILE}"
+            if command -v cygpath >/dev/null 2>&1; then
+              SA_PATH="$(cygpath -w "${SA_FILE}")"
+            fi
 
             cd .toolkit
             # Fastlane and its Firebase plugin come from the toolkit Gemfile.
@@ -1988,7 +1995,7 @@ jobs:
             fi
             if ! bundle exec fastlane "${LANE[@]}" \
                 app_id:"${FIREBASE_APP_ID}" \
-                service_account_path:"${SA_FILE}" \
+                service_account_path:"${SA_PATH}" \
                 groups:"${FIREBASE_TESTER_GROUPS}" \
                 release_notes:"${FIREBASE_RELEASE_NOTES}"; then
               echo "::warning title=Firebase upload failed::fastlane firebase_distribute failed — see its output above. Check FIREBASE_APP_ID_ANDROID / FIREBASE_APP_ID_IOS, FIREBASE_SERVICE_ACCOUNT_JSON (role: Firebase App Distribution Admin) and FIREBASE_TESTER_GROUPS (groups must exist)."
