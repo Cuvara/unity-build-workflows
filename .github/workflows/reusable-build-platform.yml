@@ -1968,8 +1968,14 @@ jobs:
             # that runs fastlane is a native Windows program and cannot open
             # it ("Service credentials file does not exist").
             SA_PATH="${SA_FILE}"
+            # The lane writes the uploaded release's links here (tester page,
+            # 1-hour direct download) for the result file and Discord.
+            RI_FILE=$(mktemp)
+            trap 'rm -f "${SA_FILE}" "${RI_FILE}"' EXIT
+            RI_PATH="${RI_FILE}"
             if command -v cygpath >/dev/null 2>&1; then
               SA_PATH="$(cygpath -w "${SA_FILE}")"
+              RI_PATH="$(cygpath -w "${RI_FILE}")"
             fi
 
             cd .toolkit
@@ -1997,18 +2003,37 @@ jobs:
                 app_id:"${FIREBASE_APP_ID}" \
                 service_account_path:"${SA_PATH}" \
                 groups:"${FIREBASE_TESTER_GROUPS}" \
-                release_notes:"${FIREBASE_RELEASE_NOTES}"; then
+                release_notes:"${FIREBASE_RELEASE_NOTES}" \
+                release_info:"${RI_PATH}"; then
               echo "::warning title=Firebase upload failed::fastlane firebase_distribute failed — see its output above. Check FIREBASE_APP_ID_ANDROID / FIREBASE_APP_ID_IOS, FIREBASE_SERVICE_ACCOUNT_JSON (role: Firebase App Distribution Admin) and FIREBASE_TESTER_GROUPS (groups must exist)."
               exit 0
             fi
             cd "${GITHUB_WORKSPACE}"
 
-            # Construct console URL for Discord (Fastlane plugin doesn't output a tester link reliably)
-            PROJECT_ID=$(printf '%s' "${FIREBASE_SERVICE_ACCOUNT_JSON}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("project_id",""))' 2>/dev/null) || PROJECT_ID=""
-            if [ -n "${PROJECT_ID}" ]; then
-              DL_URL="https://console.firebase.google.com/project/${PROJECT_ID}/appdistribution"
-              echo "download-url=${DL_URL}" >> "${GITHUB_OUTPUT}"
-              echo "[publish] ${DL_URL}"
+            # Two links for the notification:
+            #   download-url  the release's tester page — does not expire; a
+            #                 tester signs in with the invited Google account
+            #   direct-url    the binary itself, signed by Firebase for about
+            #                 one hour — anyone holding it can download
+            # Without the lane's release info (older toolkit Fastfile, plugin
+            # change) fall back to the project's App Distribution console.
+            read_release() {
+              python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]) or "")' \
+                "${RI_FILE}" "$1" 2>/dev/null || true
+            }
+            TESTER_URL="$(read_release testingUri)"
+            DIRECT_URL="$(read_release binaryDownloadUri)"
+            if [ -z "${TESTER_URL}" ]; then
+              PROJECT_ID=$(printf '%s' "${FIREBASE_SERVICE_ACCOUNT_JSON}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("project_id",""))' 2>/dev/null) || PROJECT_ID=""
+              [ -n "${PROJECT_ID}" ] && TESTER_URL="https://console.firebase.google.com/project/${PROJECT_ID}/appdistribution"
+            fi
+            if [ -n "${TESTER_URL}" ]; then
+              echo "download-url=${TESTER_URL}" >> "${GITHUB_OUTPUT}"
+              echo "[publish] testers: ${TESTER_URL}"
+            fi
+            if [ -n "${DIRECT_URL}" ]; then
+              echo "direct-url=${DIRECT_URL}" >> "${GITHUB_OUTPUT}"
+              echo "[publish] direct download (expires in about 1 hour) recorded"
             fi
             exit 0
           fi
@@ -2242,7 +2267,7 @@ jobs:
           # "Android failed — CS0103 in Player.cs:42" instead of "Android
           # failed", and so a build that succeeded with two hundred new
           # warnings is visible without opening anything.
-          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s","errorCount":"%s","warningCount":"%s","firstError":"%s","artifactUrl":"%s","downloadUrl":"%s"}\n' \
+          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s","errorCount":"%s","warningCount":"%s","firstError":"%s","artifactUrl":"%s","downloadUrl":"%s","directDownloadUrl":"%s"}\n' \
             "${{ inputs.platform }}" \
             "${RESULT}" \
             "${{ steps.artifact-type.outputs.artifact-type }}" \
@@ -2255,6 +2280,7 @@ jobs:
             "$(printf '%s' "${{ steps.unity-log.outputs.first-error }}" | tr -d '"\\' | cut -c1-160)" \
             "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${{ steps.upload.outputs.artifact-id }}" \
             "${{ steps.publish.outputs.download-url }}" \
+            "${{ steps.publish.outputs.direct-url }}" \
             > "pipeline-results/build-${{ inputs.platform }}.json"
 
           # A link that starts the download, rather than one that opens a page

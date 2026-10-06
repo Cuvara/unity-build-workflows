@@ -38,6 +38,28 @@ end
 Net::HTTPGenericRequest.prepend(ToolkitBodyStreamLength) unless
   Net::HTTPGenericRequest.ancestors.include?(ToolkitBodyStreamLength)
 
+# Records the uploaded Firebase release's links for the pipeline (the
+# `release_info:` lane option): the tester page, which does not expire, and
+# the binary itself, which Firebase signs for about an hour. A failure here
+# never fails the upload that already succeeded.
+require "json"
+
+def write_firebase_release_info(release, path)
+  return if path.to_s.empty?
+  return if release.nil?
+  r = release.to_h.each_with_object({}) { |(k, v), h| h[k.to_s] = v }
+  pick = ->(*keys) { keys.map { |k| r[k] }.compact.first }
+  File.write(path, JSON.generate(
+    "testingUri"         => pick.call("testingUri", "testing_uri"),
+    "binaryDownloadUri"  => pick.call("binaryDownloadUri", "binary_download_uri"),
+    "firebaseConsoleUri" => pick.call("firebaseConsoleUri", "firebase_console_uri"),
+    "displayVersion"     => pick.call("displayVersion", "display_version"),
+    "buildVersion"       => pick.call("buildVersion", "build_version"),
+  ))
+rescue StandardError => e
+  UI.important("Could not record the Firebase release links: #{e.message}")
+end
+
 # ──────────────────────────────────────────────────────────────────────────
 # SHARED HELPERS
 # ──────────────────────────────────────────────────────────────────────────
@@ -141,13 +163,14 @@ platform :android do
       end
     end
 
-    firebase_app_distribution(
+    release = firebase_app_distribution(
       app:                       options[:app_id] || ENV["FIREBASE_APP_ID"],
       android_artifact_path:     options[:aab_path] || options[:apk_path],
       service_credentials_file:  options[:service_account_path],
       groups:                    options[:groups] || ENV["FIREBASE_TESTER_GROUPS"],
       release_notes:             notes,
     )
+    write_firebase_release_info(release, options[:release_info])
   end
 
   desc "Download and sync Google Play metadata to local directory"
@@ -254,13 +277,14 @@ platform :ios do
       end
     end
 
-    firebase_app_distribution(
+    release = firebase_app_distribution(
       app:                       options[:app_id] || ENV["FIREBASE_APP_ID"],
       ipa_path:                  options[:ipa_path],
       service_credentials_file:  options[:service_account_path],
       groups:                    options[:groups] || ENV["FIREBASE_TESTER_GROUPS"],
       release_notes:             notes,
     )
+    write_firebase_release_info(release, options[:release_info])
   end
 
   desc "Manage TestFlight beta testers"

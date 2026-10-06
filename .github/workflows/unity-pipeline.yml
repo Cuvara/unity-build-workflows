@@ -2492,9 +2492,11 @@ jobs:
             # A link a person can actually open, when the project publishes
             # builds somewhere. Empty otherwise, and Discord falls back to the
             # artifact URL — which only works for someone already signed in.
+            # Firebase also records a direct link to the binary, valid for
+            # about an hour; it rides in the same field after a "|".
             DL=$(find ./platform-results -name "build-${P}.json" -print 2>/dev/null \
               | head -1 | xargs -r cat 2>/dev/null \
-              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("downloadUrl",""))' 2>/dev/null) || DL=""
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); u=d.get("downloadUrl","") or ""; x=d.get("directDownloadUrl","") or ""; print(u + ("|" + x if x else ""))' 2>/dev/null) || DL=""
 
             DIAG="${DIAG}${P}=${errors},${warnings},${logsid},${binid},${ART},${DL}"$'\n'
             TOTAL_ERRORS=$(( TOTAL_ERRORS + ${errors:-0} ))
