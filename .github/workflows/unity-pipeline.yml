@@ -1941,9 +1941,15 @@ jobs:
               if not key.startswith("RJ_") or not raw.strip():
                   continue
               try:
-                  row = json.loads(raw)
-              except ValueError:
-                  print(f"::warning::{key} is not JSON; ignored")
+                  # hex (see reusable-build-platform.yml); raw JSON
+                  # from an older toolkit is accepted too.
+                  text = raw.strip()
+                  if not text.startswith("{"):
+                      text = bytes.fromhex(text).decode("utf-8")
+                  row = json.loads(text)
+                  raw = text
+              except (ValueError, UnicodeDecodeError):
+                  print(f"::warning::{key} is not a result; ignored")
                   continue
               name = f"build-{row.get('platform') or key[3:]}.json"
               if name in have:
@@ -2344,9 +2350,15 @@ jobs:
               if not key.startswith("RJ_") or not raw.strip():
                   continue
               try:
-                  row = json.loads(raw)
-              except ValueError:
-                  print(f"::warning::{key} is not JSON; ignored")
+                  # hex (see reusable-build-platform.yml); raw JSON
+                  # from an older toolkit is accepted too.
+                  text = raw.strip()
+                  if not text.startswith("{"):
+                      text = bytes.fromhex(text).decode("utf-8")
+                  row = json.loads(text)
+                  raw = text
+              except (ValueError, UnicodeDecodeError):
+                  print(f"::warning::{key} is not a result; ignored")
                   continue
               name = f"build-{row.get('platform') or key[3:]}.json"
               if name in have:

@@ -8,6 +8,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **The per-platform result output (v6.22.2) was dropped by GitHub** with
+  `Skip output result-json-<Platform> since it may contain secret`. GitHub masks
+  every line of a multi-line secret, so a service-account JSON registers `{`
+  and `}` as secrets and any output containing a brace is discarded. The
+  result is now passed hex-encoded; the report jobs decode it (raw JSON is
+  still accepted).
+
+---
+
 ## [6.22.2] — 2026-10-06
 
 ### Fixed
