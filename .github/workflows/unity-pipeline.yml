@@ -1916,6 +1916,44 @@ jobs:
           path: pipeline-results
           merge-multiple: true
 
+      # Fallback when a leg's pipeline-result artifact did not upload (e.g. the
+      # repository's artifact storage quota is full): each leg also returns
+      # the same JSON as its own result-json-<Platform> output.
+      - name: Fill missing platform results from build outputs
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          RESULTS_DIR: pipeline-results
+          RJ_Android:      ${{ needs.build.outputs.result-json-Android }}
+          RJ_WebGL:        ${{ needs.build.outputs.result-json-WebGL }}
+          RJ_Linux64:      ${{ needs.build.outputs.result-json-Linux64 }}
+          RJ_LinuxServer:  ${{ needs.build.outputs.result-json-LinuxServer }}
+          RJ_Windows64:    ${{ needs.build.outputs.result-json-Windows64 }}
+          RJ_iOS:          ${{ needs.build.outputs.result-json-iOS }}
+          RJ_Addressables: ${{ needs.build-addressables.outputs.result-json-Addressables }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["RESULTS_DIR"])
+          have = {p.name for p in root.rglob("build-*.json")} if root.is_dir() else set()
+          for key, raw in sorted(os.environ.items()):
+              if not key.startswith("RJ_") or not raw.strip():
+                  continue
+              try:
+                  row = json.loads(raw)
+              except ValueError:
+                  print(f"::warning::{key} is not JSON; ignored")
+                  continue
+              name = f"build-{row.get('platform') or key[3:]}.json"
+              if name in have:
+                  continue
+              target = root / "from-outputs" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(raw)
+              print(f"[results] {name} taken from the build output (artifact missing)")
+          PY
+
       - name: Write step summary
         id: report
         shell: bash
@@ -2280,6 +2318,44 @@ jobs:
         with:
           pattern: pipeline-result-build-*
           path: ./platform-results
+
+      # Fallback when a leg's pipeline-result artifact did not upload (e.g. the
+      # repository's artifact storage quota is full): each leg also returns
+      # the same JSON as its own result-json-<Platform> output.
+      - name: Fill missing platform results from build outputs
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          RESULTS_DIR: ./platform-results
+          RJ_Android:      ${{ needs.build.outputs.result-json-Android }}
+          RJ_WebGL:        ${{ needs.build.outputs.result-json-WebGL }}
+          RJ_Linux64:      ${{ needs.build.outputs.result-json-Linux64 }}
+          RJ_LinuxServer:  ${{ needs.build.outputs.result-json-LinuxServer }}
+          RJ_Windows64:    ${{ needs.build.outputs.result-json-Windows64 }}
+          RJ_iOS:          ${{ needs.build.outputs.result-json-iOS }}
+          RJ_Addressables: ${{ needs.build-addressables.outputs.result-json-Addressables }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["RESULTS_DIR"])
+          have = {p.name for p in root.rglob("build-*.json")} if root.is_dir() else set()
+          for key, raw in sorted(os.environ.items()):
+              if not key.startswith("RJ_") or not raw.strip():
+                  continue
+              try:
+                  row = json.loads(raw)
+              except ValueError:
+                  print(f"::warning::{key} is not JSON; ignored")
+                  continue
+              name = f"build-{row.get('platform') or key[3:]}.json"
+              if name in have:
+                  continue
+              target = root / "from-outputs" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(raw)
+              print(f"[results] {name} taken from the build output (artifact missing)")
+          PY
 
       - name: Derive overall status
         id: status

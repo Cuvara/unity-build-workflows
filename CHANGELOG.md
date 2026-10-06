@@ -8,6 +8,20 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **A full artifact storage quota no longer hides a green build.** The
+  per-platform result file reached the report only as an artifact; when the
+  repository quota was full the upload failed, the report called the build
+  `unreported` and Discord lost its download links. Each build leg now also
+  returns the result as its own `result-json-<Platform>` output of
+  `reusable-build-platform.yml`, and Final Report and Notify Discord fill in
+  any result the artifacts did not bring.
+
+---
+
 ## [6.22.1] — 2026-10-06
 
 ### Fixed
