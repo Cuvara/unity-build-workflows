@@ -124,7 +124,7 @@ def _windows_fakes(tmp_path):
     _exe(bin_dir / "cygpath", 'shift; for a in "$@"; do printf "%s\n" "$a"; done\n')
     _exe(bin_dir / "where.exe", "exit 1\n")
     template = tmp_path / "ruby.template"
-    fake_ruby(template, "3.4.11")
+    fake_ruby(template, "9.9.1")  # above any real Ruby on the test machine
     installer = (
         '#!/usr/bin/env bash\n'
         'for a in "$@"; do case "$a" in /dir=*) d="${a#/dir=}";; esac; done\n'
@@ -146,7 +146,8 @@ fi
 def test_windows_without_winget_installs_rubyinstaller_into_the_tool_cache(tmp_path):
     bin_dir = _windows_fakes(tmp_path)
     cache = tmp_path / "tc"
-    env = {"RUNNER_TOOL_CACHE": str(cache), "RUNNER_TEMP": str(tmp_path)}
+    # RUBY_MIN 9.0 rejects whatever real Ruby the test machine has on PATH.
+    env = {"RUNNER_TOOL_CACHE": str(cache), "RUNNER_TEMP": str(tmp_path), "RUBY_MIN": "9.0"}
     r, out = run(f"{bin_dir}:{BASE_PATH}", tmp_path, **env)
     assert r.returncode == 0, r.stderr
     assert out["ruby-source"] == "installed:rubyinstaller"
