@@ -481,6 +481,31 @@ on:
         description: Build configuration this artifact was produced under.
         value: ${{ jobs.build.outputs.configuration }}
 
+      # This platform's stage-03 result (the pipeline-result-build-<Platform>
+      # JSON), under a key only its own leg sets. A fallback for the report
+      # jobs when the artifact upload fails.
+      result-json-Android:
+        description: Stage-03 result JSON when platform is Android, else empty.
+        value: ${{ jobs.build.outputs.result-json-Android }}
+      result-json-WebGL:
+        description: Stage-03 result JSON when platform is WebGL, else empty.
+        value: ${{ jobs.build.outputs.result-json-WebGL }}
+      result-json-Linux64:
+        description: Stage-03 result JSON when platform is Linux64, else empty.
+        value: ${{ jobs.build.outputs.result-json-Linux64 }}
+      result-json-LinuxServer:
+        description: Stage-03 result JSON when platform is LinuxServer, else empty.
+        value: ${{ jobs.build.outputs.result-json-LinuxServer }}
+      result-json-Windows64:
+        description: Stage-03 result JSON when platform is Windows64, else empty.
+        value: ${{ jobs.build.outputs.result-json-Windows64 }}
+      result-json-iOS:
+        description: Stage-03 result JSON when platform is iOS, else empty.
+        value: ${{ jobs.build.outputs.result-json-iOS }}
+      result-json-Addressables:
+        description: Stage-03 result JSON when platform is Addressables, else empty.
+        value: ${{ jobs.build.outputs.result-json-Addressables }}
+
 jobs:
   build:
     name: ${{ inputs.node-label != '' && inputs.node-label || format('Build {0}', inputs.platform) }}
@@ -510,6 +535,16 @@ jobs:
       artifact-sha256:        ${{ steps.manifest.outputs.artifact-sha256 }}
       manifest-artifact-name: ${{ steps.set-outputs.outputs.manifest-artifact-name }}
       configuration:          ${{ steps.set-outputs.outputs.configuration }}
+      # One key per platform: called with a matrix, a reusable workflow's
+      # output keeps the value of the leg that actually set it, so distinct
+      # keys survive side by side where a shared key would be last-wins.
+      result-json-Android:      ${{ inputs.platform == 'Android'      && steps.set-outputs.outputs.result-json || '' }}
+      result-json-WebGL:        ${{ inputs.platform == 'WebGL'        && steps.set-outputs.outputs.result-json || '' }}
+      result-json-Linux64:      ${{ inputs.platform == 'Linux64'      && steps.set-outputs.outputs.result-json || '' }}
+      result-json-LinuxServer:  ${{ inputs.platform == 'LinuxServer'  && steps.set-outputs.outputs.result-json || '' }}
+      result-json-Windows64:    ${{ inputs.platform == 'Windows64'    && steps.set-outputs.outputs.result-json || '' }}
+      result-json-iOS:          ${{ inputs.platform == 'iOS'          && steps.set-outputs.outputs.result-json || '' }}
+      result-json-Addressables: ${{ inputs.platform == 'Addressables' && steps.set-outputs.outputs.result-json || '' }}
 
     steps:
       # On Windows, `shell: bash` resolves `bash` on PATH. On a self-hosted
@@ -2290,6 +2325,11 @@ jobs:
             "${{ steps.publish.outputs.download-url }}" \
             "${{ steps.publish.outputs.direct-url }}" \
             > "pipeline-results/build-${{ inputs.platform }}.json"
+          # The same result as a job output (result-json-<Platform> below).
+          # The report jobs read it when the artifact upload of this file
+          # fails -- a full artifact storage quota turned a green build into
+          # "unreported" and dropped its download links.
+          echo "result-json=$(tr -d '\n' < "pipeline-results/build-${{ inputs.platform }}.json")" >> "$GITHUB_OUTPUT"
 
           # A link that starts the download, rather than one that opens a page
           # and leaves you to find the file. actions/upload-artifact@v4 hands
