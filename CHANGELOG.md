@@ -8,6 +8,27 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Firebase builds get two download links in Discord.** The Firebase lanes
+  record the uploaded release (`release_info:`), and the Discord row reads
+  `[⬇️ testers](…) · [⬇️ direct, 1 h](…)`: the release's tester page, which
+  does not expire, and the file itself, which Firebase signs for about an
+  hour. The tester link replaces the generic App Distribution console page.
+  The per-platform result file carries both (`downloadUrl`,
+  `directDownloadUrl`).
+
+### Changed
+
+- **`unreported` in Discord is explained.** A platform that built but whose
+  result file never arrived (for example, artifact storage quota full)
+  renders as `➖ … built; result not reported (artifact storage full?) · run`
+  instead of `❓ unreported`.
+
+---
+
 ## [6.21.2] — 2026-10-06
 
 ### Fixed

@@ -155,6 +155,15 @@ APKs server-side for tester devices.
    `Firebase App Distribution Admin` role, a tester group that does not exist)
    is a `Firebase upload failed` warning on the run — never a failed build, and
    never silent.
+8. The Discord build message links the uploaded release twice:
+
+   | Link | Opens | Lasts |
+   |---|---|---|
+   | `⬇️ testers` | the release's tester page (`appdistribution.firebase.google.com/testerapps/…`); sign in with a Google account in the tester group, then **Download** | does not expire |
+   | `⬇️ direct, 1 h` | the APK / IPA file itself, signed by Firebase | about **one hour**; anyone holding it can download, so keep it inside the team |
+
+   Firebase does not offer a longer-lived direct link. For a permanent public
+   file URL use `BUILD_DELIVERY=r2` or a self-hosted file server instead.
 
 **Variables** (public ids, not secrets):
 
