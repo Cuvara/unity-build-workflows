@@ -8,6 +8,7 @@ pin the step wiring and the script that now supplies team, bundle ID and
 profile from the provisioning profile.
 """
 
+import os
 import plistlib
 import subprocess
 import sys
@@ -190,3 +191,40 @@ def test_sign_matrix_includes_opted_in_development_builds():
     text = (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text(encoding="utf-8")
     assert '[ "${IOS_SIGN_DEV:-false}" = "true" ]' in text
     assert "NEW_BUILD_IOS_SIGN_DEVELOPMENT: ${{ vars.BUILD_IOS_SIGN_DEVELOPMENT }}" in text
+
+
+def _find_project(tmp_path, *projects):
+    """Run the "iOS — Find Xcode project" step over a fake build/ tree."""
+    for rel in projects:
+        (tmp_path / "build" / rel).mkdir(parents=True)
+    out = tmp_path / "out"
+    out.write_text("")
+    script = tmp_path / "find.sh"
+    script.write_text(_step("iOS — Find Xcode project")["run"], encoding="utf-8")
+    r = subprocess.run(["bash", str(script)], cwd=tmp_path, capture_output=True, text=True,
+                       env={"PATH": os.environ.get("PATH", ""), "GITHUB_OUTPUT": str(out)})
+    return r, out.read_text()
+
+
+@pytest.mark.parametrize("order", [0, 1])
+def test_find_project_ignores_the_pods_project(tmp_path, order):
+    """CocoaPods adds Pods/Pods.xcodeproj next to Unity-iPhone.xcodeproj; the
+    step used to take whichever `find` listed first and signing then failed
+    with "target 'Unity-iPhone' not found"."""
+    projects = ["iOS/My Game/Pods/Pods.xcodeproj", "iOS/My Game/Unity-iPhone.xcodeproj"]
+    r, out = _find_project(tmp_path, *(projects if order else reversed(projects)))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert out.strip() == "project-dir=build/iOS/My Game"
+
+
+def test_find_project_takes_the_shallowest_non_pods_project(tmp_path):
+    r, out = _find_project(tmp_path, "iOS/Game/Pods/Pods.xcodeproj", "iOS/Game/Custom.xcodeproj",
+                           "iOS/Game/Libraries/Plugin/Plugin.xcodeproj")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert out.strip() == "project-dir=build/iOS/Game"
+
+
+def test_find_project_fails_without_a_project(tmp_path):
+    r, _ = _find_project(tmp_path, "iOS/Game/Pods/Pods.xcodeproj")
+    assert r.returncode == 1
+    assert "No .xcodeproj found" in r.stdout

@@ -8,6 +8,17 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Signed iOS builds failed with "target 'Unity-iPhone' not found".** Once
+  CocoaPods has run, `Pods/Pods.xcodeproj` sits next to Unity's
+  `Unity-iPhone.xcodeproj`, and "iOS — Find Xcode project" took whichever
+  `find` listed first, so signing was configured on the Pods project. The step
+  now takes `Unity-iPhone.xcodeproj`, otherwise the shallowest project outside
+  `Pods/`.
+
 ## [6.22.0] — 2026-10-06
 
 ### Added

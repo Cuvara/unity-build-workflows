@@ -1787,7 +1787,15 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          XCODEPROJ=$(find build/ -name '*.xcodeproj' -type d | head -1)
+          # Once CocoaPods has run, Pods/Pods.xcodeproj sits next to Unity's
+          # project and `find` order is arbitrary. Take Unity's own project
+          # (always Unity-iPhone.xcodeproj); otherwise the shallowest one
+          # outside Pods/.
+          XCODEPROJ=$(find build/ -name 'Unity-iPhone.xcodeproj' -type d -not -path '*/Pods/*' | head -1)
+          if [[ -z "${XCODEPROJ}" ]]; then
+            XCODEPROJ=$(find build/ -name '*.xcodeproj' -type d -not -path '*/Pods/*' \
+              | awk '{ print gsub("/", "/"), $0 }' | sort -n | head -1 | cut -d' ' -f2-)
+          fi
           if [[ -z "${XCODEPROJ}" ]]; then
             echo "::error::No .xcodeproj found in build output"
             exit 1
