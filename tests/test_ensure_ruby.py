@@ -112,3 +112,62 @@ def test_bundler_is_installed_when_missing(tmp_path):
     r, _ = run(f"{tmp_path}/r/bin:{BASE_PATH}", tmp_path)
     assert r.returncode == 0, r.stderr
     assert "installing Bundler" in r.stderr
+
+
+# ── Windows without winget: RubyInstaller+DevKit into the tool cache ────────
+# A runner service has no winget (a per-user Store app). Fakes stand in for
+# cygpath, curl and the installer; the installer "installs" a fake ruby.exe
+# where /dir= points.
+
+def _windows_fakes(tmp_path):
+    bin_dir = tmp_path / "winbin"
+    _exe(bin_dir / "cygpath", 'shift; for a in "$@"; do printf "%s\n" "$a"; done\n')
+    _exe(bin_dir / "where.exe", "exit 1\n")
+    template = tmp_path / "ruby.template"
+    fake_ruby(template, "9.9.1")  # above any real Ruby on the test machine
+    installer = (
+        '#!/usr/bin/env bash\n'
+        'for a in "$@"; do case "$a" in /dir=*) d="${a#/dir=}";; esac; done\n'
+        f'mkdir -p "$d/bin" && cp "{template}/ruby" "$d/bin/ruby.exe"\n'
+    )
+    _exe(bin_dir / "curl", f"""
+out=""
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && {{ out="$2"; shift; }}; shift; done
+if [ -n "$out" ]; then cat > "$out" <<'INST'
+{installer}INST
+chmod +x "$out"; echo "$out" >> "{tmp_path}/downloads"
+else
+  echo '"browser_download_url": "https://example.invalid/RubyInstaller-3.4.11-1/rubyinstaller-devkit-3.4.11-1-x64.exe"'
+fi
+""")
+    return bin_dir
+
+
+def test_windows_without_winget_installs_rubyinstaller_into_the_tool_cache(tmp_path):
+    bin_dir = _windows_fakes(tmp_path)
+    cache = tmp_path / "tc"
+    # RUBY_MIN 9.0 rejects whatever real Ruby the test machine has on PATH.
+    env = {"RUNNER_TOOL_CACHE": str(cache), "RUNNER_TEMP": str(tmp_path), "RUBY_MIN": "9.0"}
+    r, out = run(f"{bin_dir}:{BASE_PATH}", tmp_path, **env)
+    assert r.returncode == 0, r.stderr
+    assert out["ruby-source"] == "installed:rubyinstaller"
+    assert out["ruby-bin"] == f"{cache}/rb34/bin/ruby.exe"
+    assert "rubyinstaller-devkit-3.4.11-1-x64.exe" in r.stderr
+
+    # The next job finds it there and downloads nothing.
+    r2, out2 = run(f"{bin_dir}:{BASE_PATH}", tmp_path, **env)
+    assert r2.returncode == 0, r2.stderr
+    assert out2["ruby-source"] == "toolcache"
+    assert len((tmp_path / "downloads").read_text().split()) == 1
+
+
+@pytest.mark.parametrize("cc_works,code", [(True, 0), (False, 3)])
+def test_macos_needs_a_working_c_compiler(tmp_path, cc_works, code):
+    fake_ruby(tmp_path / "r/bin", "3.4.1")
+    _exe(tmp_path / "mac/uname", 'echo Darwin\n')
+    _exe(tmp_path / "mac/cc", "exit 0\n" if cc_works else
+         'echo "You have not agreed to the Xcode license agreements." >&2; exit 69\n')
+    r, _ = run(f"{tmp_path}/r/bin:{tmp_path}/mac:{BASE_PATH}", tmp_path)
+    assert r.returncode == code, r.stderr
+    if not cc_works:
+        assert "sudo xcodebuild -license accept" in r.stdout

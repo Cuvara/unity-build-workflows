@@ -133,11 +133,24 @@ APKs server-side for tester devices.
    version: `ruby` on PATH, then what `brew --prefix ruby`, `rbenv which ruby`,
    `asdf which ruby` or `where ruby` report. macOS's system Ruby 2.6 is
    rejected (too old; its Bundler needs sudo). With no usable Ruby it installs
-   one — `brew install ruby` on macOS, `winget install
-   RubyInstallerTeam.RubyWithDevKit.3.3` on Windows — puts it on PATH for the
-   job, installs Bundler, and the gems go to the runner's tool cache (no sudo).
-   A machine without Homebrew/winget gets the exact command to run instead, and
-   the step warns `Firebase delivery skipped`; the build stays green.
+   one — `brew install ruby` on macOS; on Windows `winget install
+   RubyInstallerTeam.RubyWithDevKit.3.4`, or, where winget is missing (a
+   runner service never has it), the RubyInstaller+DevKit download installed
+   silently, per user, into `<tool cache>\rb34` and reused by later jobs. It
+   puts Ruby on PATH for the job, installs Bundler, and the gems go to the
+   runner's tool cache (no sudo). A machine without Homebrew gets the exact
+   command to run instead, and the step warns `Firebase delivery skipped`; the
+   build stays green.
+
+   fastlane's gems compile C code. The Windows DevKit ships its own GCC. On
+   macOS the compiler is Apple's clang, which refuses to run until the Xcode
+   licence is accepted; the step then fails with `No working C compiler on
+   this Mac`. Fix it once, as an administrator on the runner:
+   `sudo xcodebuild -license accept && xcode-select --install`.
+
+   Keep the Windows tool cache path short (`RUNNER_TOOL_CACHE`, e.g.
+   `C:\t`): MSYS2 nests headers deep enough to pass the 260-character limit
+   under a long root.
 7. A failed upload (wrong app ID, service account without the
    `Firebase App Distribution Admin` role, a tester group that does not exist)
    is a `Firebase upload failed` warning on the run — never a failed build, and
