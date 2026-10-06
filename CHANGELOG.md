@@ -8,6 +8,17 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Firebase upload failed on Windows runners** with `Service credentials file
+  does not exist: /tmp/tmp.XXXX`. The service account was written to a Git Bash
+  temp path that the native Windows Ruby running fastlane cannot open; the path
+  is now converted with `cygpath -w`.
+
+---
+
 ## [6.21.0] — 2026-10-06
 
 ### Added
