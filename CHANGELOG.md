@@ -8,6 +8,28 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Firebase delivery on a Windows runner without winget.** A runner service
+  has no winget, so `ensure_ruby.sh` could not install Ruby and every upload
+  was skipped. It now downloads the newest RubyInstaller+DevKit
+  (`RUBY_WINDOWS_SERIES`, default 3.4), installs it silently per user into
+  `<tool cache>\rb34`, and finds it there on later jobs. The DevKit's GCC
+  builds fastlane's native gems.
+
+### Changed
+
+- **macOS: a missing compiler is named, not buried.** `ensure_ruby.sh` checks
+  that `cc` works before `bundle install`; when Apple's clang refuses to run
+  (Xcode licence not accepted, no Command Line Tools) the step fails with
+  `No working C compiler on this Mac` and the command to fix it, instead of a
+  `Gem::Ext::BuildError` from deep inside mkmf.
+- Windows Ruby series is 3.4 (was 3.3 via winget).
+
+---
+
 ## [6.20.1] — 2026-10-05
 
 ### Fixed
