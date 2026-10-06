@@ -529,6 +529,9 @@ runs:
             skipped)   RE="⏭️" ;;
             cancelled) RE="🚫" ;;
             blocked)   RE="⛔" ;;
+            # Built (the matrix succeeded) but its result file never arrived,
+            # e.g. the repository's artifact storage quota was full.
+            unreported) RE="➖" ;;
             *)         RE="❓" ;;
           esac
 
@@ -545,6 +548,12 @@ runs:
           # artifact URL 404s for anyone not signed in with repository access,
           # which is most of the people a build notification is for.
           _P_DLURL="${_PLAT_DLURL[${PLAT}]:-}"
+          # "<link>|<direct>": Firebase delivery adds the binary itself,
+          # signed for about an hour, after the tester page.
+          DIRECT_URL=""
+          case "${_P_DLURL}" in
+            *"|"*) DIRECT_URL="${_P_DLURL#*|}"; _P_DLURL="${_P_DLURL%%|*}" ;;
+          esac
           BIN_URL=""
           if [ -n "${_P_DLURL}" ]; then
             BIN_URL="${_P_DLURL}"
@@ -608,7 +617,10 @@ runs:
               SIZE_TEXT="size unknown"
             fi
 
-            if [ -n "${BIN_URL}" ]; then
+            if [ -n "${BIN_URL}" ] && [ -n "${DIRECT_URL}" ]; then
+              # Firebase: the tester page lasts; the direct file link does not.
+              DELIVERY="${SIZE_TEXT} · [⬇️ testers](${BIN_URL}) · [⬇️ direct, 1 h](${DIRECT_URL})"
+            elif [ -n "${BIN_URL}" ]; then
               # binaryArtifactId available → direct download link (most useful)
               DELIVERY="${SIZE_TEXT} · [⬇️ download](${BIN_URL})"
             elif [ "${ATTACHED}" -eq 1 ]; then
@@ -619,6 +631,10 @@ runs:
               DELIVERY="${SIZE_TEXT}"
             fi
 
+          elif [ "${RESULT}" = "unreported" ]; then
+            # Say what is known instead of a bare "unreported".
+            DELIVERY="built; result not reported (artifact storage full?)"
+            [ -n "${INPUT_RUN_URL:-}" ] && DELIVERY="${DELIVERY} · [run](${INPUT_RUN_URL})"
           elif [ "${RESULT}" = "failure" ]; then
             if [ -n "${INPUT_RUN_URL:-}" ]; then
               DELIVERY="[📄 logs](${INPUT_RUN_URL})"
