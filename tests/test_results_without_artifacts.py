@@ -5,6 +5,7 @@ artifact fail to upload; the report then called a green Android build
 "unreported" and Discord lost its download links. Each leg now also returns
 the JSON as its own result-json-<Platform> output, and the report jobs fill
 in what the artifacts did not bring."""
+
 import json
 import os
 import subprocess
@@ -34,7 +35,9 @@ def test_each_platform_has_its_own_output_key():
             % (p, " " * (12 - len(p))))
         assert wf_outputs[f"result-json-{p}"]["value"] == "${{ jobs.build.outputs.result-json-%s }}" % p
     run = next(s for s in doc["jobs"]["build"]["steps"] if s.get("id") == "set-outputs")["run"]
-    assert 'echo "result-json=$(tr -d' in run
+    # Hex: a multi-line secret masks "{" and "}", and an output with a brace
+    # is dropped as "may contain secret".
+    assert 'echo "result-json=$(od -An -v -tx1' in run
 
 
 @pytest.mark.parametrize("job,results_dir", [("final-report", "pipeline-results"),
@@ -58,7 +61,7 @@ def test_fill_writes_only_what_is_missing(tmp_path):
     (tmp_path / "r" / "art").mkdir(parents=True)
     (tmp_path / "r" / "art" / "build-iOS.json").write_text('{"platform":"iOS","result":"failure"}')
     env = dict(os.environ, RESULTS_DIR=str(tmp_path / "r"),
-               RJ_Android='{"platform":"Android","result":"success"}',
+               RJ_Android=b'{"platform":"Android","result":"success"}'.hex(),
                RJ_iOS='{"platform":"iOS","result":"success"}', RJ_WebGL="")
     subprocess.run([sys.executable, "-c", script], env=env, check=True)
     files = sorted(p.relative_to(tmp_path / "r").as_posix() for p in (tmp_path / "r").rglob("*.json"))

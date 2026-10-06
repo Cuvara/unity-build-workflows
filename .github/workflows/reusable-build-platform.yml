@@ -2329,7 +2329,12 @@ jobs:
           # The report jobs read it when the artifact upload of this file
           # fails -- a full artifact storage quota turned a green build into
           # "unreported" and dropped its download links.
-          echo "result-json=$(tr -d '\n' < "pipeline-results/build-${{ inputs.platform }}.json")" >> "$GITHUB_OUTPUT"
+          # Hex, not raw JSON: GitHub masks every line of a multi-line secret,
+          # so a service-account JSON registers "{" and "}" as secrets and any
+          # output containing a brace is dropped ("Skip output ... since it may
+          # contain secret"). Base64 is risky too (the runner also hides base64
+          # forms of secrets); hex digits are not.
+          echo "result-json=$(od -An -v -tx1 "pipeline-results/build-${{ inputs.platform }}.json" | tr -d ' \n\r')" >> "$GITHUB_OUTPUT"
 
           # A link that starts the download, rather than one that opens a page
           # and leaves you to find the file. actions/upload-artifact@v4 hands
