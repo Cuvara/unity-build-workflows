@@ -22,6 +22,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   lane's container all call it, instead of each spelling the same rules in its
   own shell. Step ids, conditions and env are unchanged. The Windows lane now
   runs under Git Bash, like every other bash step of the job.
+- **Build delivery is one action.** The five delivery steps of the build job
+  (Fastlane setup ×2, Firebase / R2 / local publish, Google Play internal,
+  TestFlight) are now `.github/actions/deliver-build`, called once as step
+  `publish` (its `download-url` / `direct-url` outputs are unchanged). It stays
+  in the build job: with `ARTIFACT_STORAGE=firebase` the binary exists only on
+  the build runner. Store uploads now also require the build job to have
+  succeeded so far (`job-status`), as they did before the tester delivery gained
+  `always()`; the delivery as a whole is `continue-on-error`, matching
+  "delivery never fails a build".
+- **Notify Discord downloads only what it can attach.** It downloaded every
+  artifact of the build type — binaries of hundreds of MB — to attach files up
+  to 8 MB. It now reads the platform results and downloads only successful
+  builds whose measured size is within the attachment threshold.
 
 ## [6.22.6] — 2026-10-07
 

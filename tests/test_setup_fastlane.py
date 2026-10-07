@@ -14,6 +14,7 @@ import yaml
 REPO_ROOT = Path(__file__).parent.parent
 ACTION = REPO_ROOT / ".github" / "actions" / "setup-fastlane" / "action.yml"
 BUILD_PLATFORM = REPO_ROOT / ".github" / "workflows" / "reusable-build-platform.yml"
+DELIVER = REPO_ROOT / ".github" / "actions" / "deliver-build" / "action.yml"
 
 
 def _steps():
@@ -35,6 +36,11 @@ def test_self_hosted_runners_use_their_own_ruby():
 
 
 def test_delivery_setup_never_fails_the_build():
-    steps = yaml.safe_load(BUILD_PLATFORM.read_text(encoding="utf-8"))["jobs"]["build"]["steps"]
+    steps = yaml.safe_load(DELIVER.read_text(encoding="utf-8"))["runs"]["steps"]
     step = next(s for s in steps if s.get("name") == "Setup Fastlane (delivery)")
     assert step.get("continue-on-error") is True
+    # Nor does the delivery as a whole: a store upload problem is a warning.
+    build = yaml.safe_load(BUILD_PLATFORM.read_text(encoding="utf-8"))["jobs"]["build"]["steps"]
+    caller = next(s for s in build if s.get("id") == "publish")
+    assert caller["uses"] == "./.toolkit/.github/actions/deliver-build"
+    assert caller.get("continue-on-error") is True

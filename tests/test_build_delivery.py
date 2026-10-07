@@ -26,6 +26,7 @@ import yaml
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "common" / "publish_build.py"
 BUILD_LANE = REPO_ROOT / ".github" / "workflows" / "reusable-build-platform.yml"
+DELIVER = REPO_ROOT / ".github" / "actions" / "deliver-build" / "action.yml"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "common"))
 from publish_build import sign_key  # noqa: E402
@@ -282,7 +283,8 @@ def test_the_build_lane_publishes_and_the_choice_is_an_input():
     workflow = yaml.safe_load(BUILD_LANE.read_text())
     inputs = (workflow.get("on") or workflow[True])["workflow_call"]["inputs"]
     assert inputs["build-delivery"]["default"] == "none", "must be opt-in"
-    assert "publish_build.py" in BUILD_LANE.read_text()
+    assert "./.toolkit/.github/actions/deliver-build" in BUILD_LANE.read_text()
+    assert "publish_build.py" in DELIVER.read_text()
 
 
 def test_the_credentials_are_optional_on_the_interface():
@@ -310,20 +312,22 @@ def test_discord_prefers_a_link_a_person_can_open():
 def test_the_key_includes_the_commit_so_a_public_bucket_is_not_a_listing():
     """Branch, run number and short SHA. A public bucket with predictable
     paths is a directory listing for anyone who guesses the scheme."""
-    body = BUILD_LANE.read_text()
+    body = DELIVER.read_text()
     assert 'KEY="${GITHUB_REF_NAME//\\//-}/${GITHUB_RUN_NUMBER}/${GITHUB_SHA:0:7}/' in body
 
 
 def test_no_credential_is_passed_on_a_command_line():
     """`ps` is readable by other processes on a self-hosted runner."""
-    body = BUILD_LANE.read_text()
+    body = DELIVER.read_text()
     publish = body[body.index("Publish the build for download"):]
-    publish = publish[:publish.index("Summarise the Unity log")]
+    publish = publish[:publish.index("Setup Fastlane (release)")]
     assert "--file" in publish and "--key" in publish
+    steps = yaml.safe_load(BUILD_LANE.read_text())["jobs"]["build"]["steps"]
+    caller = next(s for s in steps if s.get("id") == "publish")
     for secret in ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"):
-        # Present as an env var, never as an argument.
+        # An env var of the calling step, never an argument.
         assert f"--{secret.lower()}" not in publish
-        assert f"{secret}:" in publish
+        assert caller["env"][secret] == "${{ secrets.%s }}" % secret
 
 
 @pytest.mark.parametrize("suffix", [".apk", ".aab", ".ipa"])

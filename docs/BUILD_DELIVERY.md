@@ -22,6 +22,14 @@ So the link in a build notification was unusable by testers, artists, producers
 Delivery copies the build somewhere that serves it, and puts that URL in the
 Discord message instead.
 
+Delivery is `.github/actions/deliver-build`, called once from the build job of
+`reusable-build-platform.yml` (step id `publish`). It runs there, not in a job
+of its own, because with `ARTIFACT_STORAGE=firebase` the binary exists only on
+the build runner's disk. The same action uploads a Production build to Google
+Play internal / TestFlight in that mode. Tester delivery runs even when a later
+step of the build failed; the store uploads run only when the job so far
+succeeded. Neither ever fails the build.
+
 ## Choosing a provider
 
 One repository variable, `BUILD_DELIVERY`:
