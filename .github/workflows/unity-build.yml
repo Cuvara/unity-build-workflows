@@ -1,5 +1,10 @@
 name: Unity Build
 
+# DEPRECATED — legacy entry point, kept working for existing callers. New
+# projects call unity-pipeline.yml (build) and pipeline-*-release.yml
+# (promotion); see docs/ARCHITECTURE.md § Legacy entry points. Planned for
+# removal in the next major version.
+
 # Orchestrator for all supported Unity platforms.
 # Docker platforms (Android, WebGL, Linux64, LinuxServer): run inside containers on ubuntu-latest.
 # iOS: runs natively on the ios-runner-label runner, else the runner policy's choice

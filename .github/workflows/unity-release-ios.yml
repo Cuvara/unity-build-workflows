@@ -1,5 +1,10 @@
 name: Unity Release iOS
 
+# DEPRECATED — legacy entry point, kept working for existing callers. New
+# projects call unity-pipeline.yml (build) and pipeline-*-release.yml
+# (promotion); see docs/ARCHITECTURE.md § Legacy entry points. Planned for
+# removal in the next major version.
+
 # Distribution signing, archive, IPA export, and optional TestFlight upload.
 # Runs on macos-unity-xcode. Never executes in Docker.
 # Requires ios-production GitHub Environment (protected) for deployment secrets.
