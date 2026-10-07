@@ -228,3 +228,25 @@ def test_find_project_fails_without_a_project(tmp_path):
     r, _ = _find_project(tmp_path, "iOS/Game/Pods/Pods.xcodeproj")
     assert r.returncode == 1
     assert "No .xcodeproj found" in r.stdout
+
+
+def test_find_project_reports_the_projects_minimum_ios(tmp_path):
+    """The archive builds every target, Pods included, at this version."""
+    settings = tmp_path / "Game" / "ProjectSettings" / "ProjectSettings.asset"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("PlayerSettings:\n  iOSTargetOSVersionString: 15.0\r\n  tvOSTargetOSVersionString: 15.0\n")
+    (tmp_path / "build" / "iOS" / "Game" / "Unity-iPhone.xcodeproj").mkdir(parents=True)
+    out = tmp_path / "out"
+    out.write_text("")
+    script = tmp_path / "find.sh"
+    script.write_text(_step("iOS — Find Xcode project")["run"], encoding="utf-8")
+    r = subprocess.run(["bash", str(script)], cwd=tmp_path, capture_output=True, text=True,
+                       env={"PATH": os.environ.get("PATH", ""), "GITHUB_OUTPUT": str(out),
+                            "PROJECT_PATH": "Game"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "deployment-target=15.0" in out.read_text().splitlines()
+
+
+def test_archive_receives_the_projects_minimum_ios():
+    with_ = _step("iOS — Archive and export IPA")["with"]
+    assert with_["deployment-target"] == "${{ steps.ios-find-project.outputs.deployment-target }}"

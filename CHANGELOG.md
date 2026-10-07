@@ -8,6 +8,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **iOS archive still failed on Pods below Xcode's minimum (v6.22.6).** The
+  deployment-target read from `Unity-iPhone.xcodeproj` came back empty on the
+  Mac, so Pods kept 9.0-13.0. The minimum now comes from the project's
+  Player Settings (`iOSTargetOSVersionString`, read by "iOS — Find Xcode
+  project" and passed as the new `ios-archive-export` input
+  `deployment-target`); `xcode_archive.sh` falls back to the project file
+  (parsed with `grep -o`, portable) and then to
+  `xcodebuild -showBuildSettings`, and its warning now says what it found.
+
 ## [6.23.0] — 2026-10-07
 
 ### Changed

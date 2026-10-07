@@ -38,6 +38,13 @@ inputs:
     description: Path to write xcode-export.log
     required: false
     default: Logs/iOS/xcode-export.log
+  deployment-target:
+    description: >-
+      Minimum iOS version applied to every target, Pods included (e.g. the
+      project's iOSTargetOSVersionString). Empty = read it from the
+      Unity-iPhone Xcode project.
+    required: false
+    default: ''
 
 outputs:
   archive-path:
@@ -73,6 +80,7 @@ runs:
         LOG_PATH: ${{ inputs.archive-log-path }}
         DEVELOPMENT_TEAM: ${{ inputs.development-team }}
         KEYCHAIN_PATH: ${{ env.KEYCHAIN_PATH }}
+        IOS_DEPLOYMENT_TARGET: ${{ inputs.deployment-target }}
       run: bash "${{ github.action_path }}/../../../scripts/ios/xcode_archive.sh"
 
     - name: xcodebuild exportArchive

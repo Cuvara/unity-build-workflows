@@ -58,20 +58,30 @@ fi
 # every target in the workspace, so build them all at the app's own minimum,
 # which is what each pod has to support anyway.
 DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-}"
-if [[ -z "${DEPLOYMENT_TARGET}" ]]; then
-  PROJECT_ROOT=$(dirname "${PROJECT_ARGS[1]}")
-  PBXPROJ="${PROJECT_ROOT}/Unity-iPhone.xcodeproj/project.pbxproj"
-  if [[ -f "${PBXPROJ}" ]]; then
-    DEPLOYMENT_TARGET=$(sed -n 's/.*IPHONEOS_DEPLOYMENT_TARGET = "\{0,1\}\([0-9][0-9.]*\)"\{0,1\};.*/\1/p' "${PBXPROJ}" \
-      | sort -t. -k1,1n -k2,2n | tail -1)
-  fi
+TARGET_SOURCE="IOS_DEPLOYMENT_TARGET"
+PROJECT_ROOT=$(dirname "${PROJECT_ARGS[1]}")
+UNITY_XCODEPROJ="${PROJECT_ROOT}/Unity-iPhone.xcodeproj"
+PBXPROJ="${UNITY_XCODEPROJ}/project.pbxproj"
+# 1. The highest value written in the Unity project file. grep -o + awk:
+#    the same on macOS (BSD) and Linux.
+if [[ -z "${DEPLOYMENT_TARGET}" && -f "${PBXPROJ}" ]]; then
+  DEPLOYMENT_TARGET=$( { grep -o 'IPHONEOS_DEPLOYMENT_TARGET = [^;]*' "${PBXPROJ}" || true; } \
+    | tr -d '"' | awk '$3 ~ /^[0-9][0-9.]*$/ { print $3 }' | sort -t. -k1,1n -k2,2n | tail -1)
+  TARGET_SOURCE="${PBXPROJ}"
+fi
+# 2. What Xcode resolves for the app target (covers an inherited value).
+if [[ -z "${DEPLOYMENT_TARGET}" && -d "${UNITY_XCODEPROJ}" ]]; then
+  DEPLOYMENT_TARGET=$( { xcodebuild -showBuildSettings -project "${UNITY_XCODEPROJ}" \
+      -target Unity-iPhone -configuration "${CONFIGURATION}" 2>/dev/null || true; } \
+    | awk '$1 == "IPHONEOS_DEPLOYMENT_TARGET" && $2 == "=" { print $3; exit }')
+  TARGET_SOURCE="xcodebuild -showBuildSettings"
 fi
 BUILD_SETTINGS=()
 if [[ -n "${DEPLOYMENT_TARGET}" ]]; then
   BUILD_SETTINGS+=("IPHONEOS_DEPLOYMENT_TARGET=${DEPLOYMENT_TARGET}")
-  echo "[xcode_archive] Deployment target (all targets, Pods included): ${DEPLOYMENT_TARGET}"
+  echo "[xcode_archive] Deployment target (all targets, Pods included): ${DEPLOYMENT_TARGET} (from ${TARGET_SOURCE})"
 else
-  echo "::warning::[xcode_archive] Could not read IPHONEOS_DEPLOYMENT_TARGET from the Unity-iPhone project; Pods keep their own minimums"
+  echo "::warning::[xcode_archive] Could not read IPHONEOS_DEPLOYMENT_TARGET (project: ${UNITY_XCODEPROJ}, exists: $([[ -d "${UNITY_XCODEPROJ}" ]] && echo yes || echo no), mentions in project.pbxproj: $( { grep -c IPHONEOS_DEPLOYMENT_TARGET "${PBXPROJ}" 2>/dev/null || true; } )); Pods keep their own minimums. Set IOS_DEPLOYMENT_TARGET to force one."
 fi
 
 echo "[xcode_archive] Scheme: ${SCHEME} | Config: ${CONFIGURATION}"
