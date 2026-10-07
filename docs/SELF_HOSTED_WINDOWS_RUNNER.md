@@ -283,16 +283,22 @@ Build step shell selection:
 - uses: game-ci/unity-builder@v4
   ...
 
-# self-hosted-windows lane
-- name: Build (Windows)
-  shell: cmd
+# self-hosted-windows lane (Git Bash, like the macOS lane)
+- name: Build with local Unity (Windows)
+  shell: bash
+  env:
+    UNITY_EDITOR: ${{ steps.unity-preflight.outputs.unity_editor }}
   run: |
-    "%UNITY_EXE%" -batchmode -buildTarget %BUILD_TARGET% ...
+    bash .toolkit/scripts/build/run_unity_player.sh --platform ... --project ...
 ```
 
-`UNITY_EXE` is the editor that the job's Unity preflight step reported
+`UNITY_EDITOR` is the editor that the job's Unity preflight step reported
 (`steps.unity-preflight.outputs.unity_editor`). That's the exact version from
 `ProjectVersion.txt`, installed by preflight if it was missing.
+`scripts/build/run_unity_player.sh` is the one Unity command line of every
+native lane (Windows, macOS, the Addressables pre-step, and the Windows docker
+container): target mapping, build method, `BUILD_OUTPUT_DIR`, the AAB flag.
+The job's first step puts Git Bash ahead of the WSL launcher on `PATH`.
 
 ---
 

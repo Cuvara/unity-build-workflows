@@ -149,7 +149,7 @@ The two iOS routes do not share an entry point, and this is deliberate, document
 | Lane | `-executeMethod` target | Overridable |
 |---|---|---|
 | Docker / game-ci — the default lane (Android, WebGL, Linux, pipeline's iOS job) | **game-ci's own default builder** — `build-method` defaults to `''` (`reusable-build-platform.yml:146`, passed through at `:574`); no consumer method needed | yes: `build-method` input / `UNITY_BUILD_METHOD` variable |
-| Self-hosted (Windows `.bat`, bash) and Docker on Windows | `Company.BuildPipeline.Editor.PlayerBuilder.Build` — from `unity-package/`, which `scripts/common/install_build_package.sh` copies into the project's `Packages/` per build; a project's own global `PlayerBuilder` still wins (`docs/TOOLKIT_BUILD_PACKAGE.md`) | yes, same two knobs |
+| Self-hosted (Windows, macOS: `scripts/build/run_unity_player.sh`) and Docker on Windows | `Company.BuildPipeline.Editor.PlayerBuilder.Build` — from `unity-package/`, which `scripts/common/install_build_package.sh` copies into the project's `Packages/` per build; a project's own global `PlayerBuilder` still wins (`docs/TOOLKIT_BUILD_PACKAGE.md`) | yes, same two knobs |
 | iOS native (`unity-build-ios.yml`, `unity-release-ios.yml`) | `Company.BuildPipeline.Editor.BuildCommand.Execute` — from `unity-package/` | no: `readonly` in `scripts/ios/run_unity_ios.sh` |
 
 So `UNITY_BUILD_METHOD` has no effect on the native iOS route. See `docs/ARCHITECTURE.md`

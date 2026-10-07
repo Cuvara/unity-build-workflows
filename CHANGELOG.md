@@ -8,6 +8,21 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **One Unity command line for every native lane.**
+  `scripts/build/run_unity_player.sh` now owns the platform → `-buildTarget`
+  mapping (and the LinuxServer subtarget), the build-method fallback
+  (`build-method` → toolkit / project `PlayerBuilder` → `PlayerBuilder.Build`),
+  `BUILD_OUTPUT_DIR=build`, the `ANDROID_APP_BUNDLE` flag, Addressables-only
+  builds and the exit code. The self-hosted Windows lane (was a `cmd`
+  script), the macOS lane, the Addressables pre-step and the Windows docker
+  lane's container all call it, instead of each spelling the same rules in its
+  own shell. Step ids, conditions and env are unchanged. The Windows lane now
+  runs under Git Bash, like every other bash step of the job.
+
 ## [6.22.6] — 2026-10-07
 
 ### Fixed
