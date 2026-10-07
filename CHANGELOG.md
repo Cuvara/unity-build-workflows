@@ -8,6 +8,17 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **iOS archive failed when the product name has a space.** Unity names the
+  Xcode output folder after the product (`build/iOS/Backpack Legends/`), and
+  `xcode_archive.sh` built `-workspace <path>` as one unquoted string, so
+  xcodebuild got the path split in two: `Unknown build action
+  'Legends/Unity-iPhone.xcworkspace'`. The project arguments are now a bash
+  array.
+
 ## [6.22.4] — 2026-10-07
 
 ### Fixed
