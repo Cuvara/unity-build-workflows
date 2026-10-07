@@ -249,7 +249,8 @@ fatal: clone of 'git@github.com:<other-org>/<repo>.git' into submodule path '...
 ```
 
 Set `submodule-auth: ssh` on the pipeline to fetch submodules in a separate step over SSH
-instead, leaving the URLs in `.gitmodules` exactly as written:
+instead, leaving the URLs in `.gitmodules` exactly as written (the build and the tests job
+both run `scripts/common/fetch_submodules_ssh.sh` for it):
 
 ```yaml
     with:

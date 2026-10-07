@@ -14,11 +14,17 @@ import yaml
 WORKFLOWS = Path(__file__).parent.parent / ".github" / "workflows"
 
 
+SCRIPT = WORKFLOWS.parent.parent / "scripts" / "common" / "fetch_submodules_ssh.sh"
+
+
 @pytest.mark.parametrize("workflow", ["reusable-build-platform.yml", "reusable-unity-tests.yml"])
 def test_submodule_step_uses_the_machine_key_properly(workflow):
     jobs = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"]
     steps = next(iter(jobs.values()))["steps"]
-    run = next(s for s in steps if s.get("name") == "Fetch submodules over SSH")["run"]
+    step = next(s for s in steps if s.get("name") == "Fetch submodules over SSH")
+    # Both jobs run the one script (tests/test_shared_job_steps.py).
+    assert "fetch_submodules_ssh.sh" in step["run"]
+    run = SCRIPT.read_text(encoding="utf-8")
     assert 'export HOME="$(cygpath -u "${USERPROFILE}"' in run, "HOME from USERPROFILE"
     assert "UserKnownHostsFile=${_known_hosts}" in run, "known_hosts in a writable temp file"
     assert "SUBMODULE_SSH_KEY_FILE" in run, "a key file on the runner, named in its .env"
