@@ -67,3 +67,62 @@ def test_fill_writes_only_what_is_missing(tmp_path):
     files = sorted(p.relative_to(tmp_path / "r").as_posix() for p in (tmp_path / "r").rglob("*.json"))
     assert files == ["art/build-iOS.json", "from-outputs/build-Android.json"]
     assert json.loads((tmp_path / "r" / "art" / "build-iOS.json").read_text())["result"] == "failure"
+
+
+# ── Notify Discord downloads only what it can attach ──────────────────────
+
+def _discord_steps():
+    return yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))["jobs"]["notify-discord"]["steps"]
+
+
+def _pick(tmp_path, rows):
+    run = next(s for s in _discord_steps() if s.get("id") == "attachable")["run"]
+    script = run.split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
+    (tmp_path / "r").mkdir()
+    for i, row in enumerate(rows):
+        (tmp_path / "r" / f"build-{i}.json").write_text(json.dumps(row))
+    out = tmp_path / "out"
+    env = dict(os.environ, RESULTS_DIR=str(tmp_path / "r"), ATTACH_MAX_BYTES="8388608",
+               GITHUB_OUTPUT=str(out))
+    subprocess.run([sys.executable, "-c", script], env=env, check=True)
+    return out.read_text().strip().split("=", 1)[1]
+
+
+def test_discord_never_downloads_every_artifact_of_the_run():
+    steps = _discord_steps()
+    downloads = [s for s in steps if "download-artifact" in str(s.get("uses", ""))]
+    patterns = [s["with"]["pattern"] for s in downloads]
+    assert patterns == ["pipeline-result-build-*", "${{ steps.attachable.outputs.pattern }}"]
+    attach = downloads[1]
+    assert "steps.attachable.outputs.pattern != ''" in attach["if"], \
+        "an empty pattern downloads everything"
+    names = [s.get("name") for s in steps]
+    assert names.index("Fill missing platform results from build outputs") \
+        < names.index("Pick the builds small enough to attach")
+    call = next(s for s in steps if "discord-upload-build" in str(s.get("uses", "")))
+    threshold = int(call["with"]["attach-size-threshold-mb"]) * 1024 * 1024
+    pick = next(s for s in steps if s.get("id") == "attachable")
+    assert int(pick["env"]["ATTACH_MAX_BYTES"]) == threshold
+
+
+def test_only_small_successful_builds_are_picked(tmp_path):
+    rows = [
+        {"platform": "Android", "result": "success", "artifactName": "development-android-apk",
+         "artifactSizeBytes": "5000000"},
+        {"platform": "WebGL", "result": "success", "artifactName": "development-webgl",
+         "artifactSizeBytes": "90000000"},
+        {"platform": "iOS", "result": "failure", "artifactName": "", "artifactSizeBytes": "100"},
+    ]
+    assert _pick(tmp_path, rows) == "development-android-apk"
+
+
+def test_several_small_builds_become_one_brace_pattern(tmp_path):
+    rows = [{"result": "success", "artifactName": n, "artifactSizeBytes": "10"}
+            for n in ("b-linux", "a-android")]
+    assert _pick(tmp_path, rows) == "{a-android,b-linux}"
+
+
+def test_nothing_small_means_no_pattern(tmp_path):
+    rows = [{"result": "success", "artifactName": "big", "artifactSizeBytes": "999999999"},
+            {"result": "success", "artifactName": "unmeasured", "artifactSizeBytes": ""}]
+    assert _pick(tmp_path, rows) == ""
