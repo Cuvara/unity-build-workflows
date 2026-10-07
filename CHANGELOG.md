@@ -8,6 +8,15 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Tests
+
+- A failed artifact-manifest or IPA-manifest upload (a full Actions storage
+  quota) must not block the store uploads: both uploads keep
+  `continue-on-error`, run before "Deliver the build", and the delivery step
+  still receives `job.status`. Pinned in `test_firebase_delivery_paths.py`.
+
 ## [6.24.2] — 2026-10-07
 
 ### Changed

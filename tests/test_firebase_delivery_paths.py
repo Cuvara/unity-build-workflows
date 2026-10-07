@@ -103,3 +103,25 @@ def test_the_build_job_hands_delivery_everything_it_needs():
     # Composite actions cannot read secrets or vars themselves.
     text = DELIVER.read_text(encoding="utf-8")
     assert "secrets." not in text and "vars." not in text
+
+
+def _build_steps():
+    wf = yaml.safe_load(REUSABLE.read_text(encoding="utf-8"))
+    return [s for job in wf["jobs"].values() for s in job.get("steps", [])]
+
+
+def test_a_failed_manifest_upload_does_not_block_testflight():
+    """The manifests still go to GitHub, but a failed upload (a full Actions
+    storage quota) counts as skipped: continue-on-error keeps job.status at
+    success, which the store uploads require. Run 37590951784 (v6.23.1, no
+    continue-on-error on the IPA manifest) went red after delivering to
+    Firebase, which would have skipped TestFlight on a Production build."""
+    steps = _build_steps()
+    names = [s.get("name") for s in steps]
+    deliver = names.index("Deliver the build")
+    for name in ("Upload artifact manifest", "iOS — Upload IPA artifact manifest"):
+        step = steps[names.index(name)]
+        assert step.get("continue-on-error") is True, name
+        assert "firebase" not in str(step.get("if", "")), f"{name} must still upload"
+        assert names.index(name) < deliver, f"{name} runs before delivery"
+    assert steps[deliver]["with"]["job-status"] == "${{ job.status }}"
