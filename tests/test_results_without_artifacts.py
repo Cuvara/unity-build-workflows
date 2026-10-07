@@ -18,6 +18,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REUSABLE = REPO_ROOT / ".github" / "workflows" / "reusable-build-platform.yml"
 PIPELINE = REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml"
+RESULTS = REPO_ROOT / "scripts" / "common" / "pipeline_results.py"
 PLATFORMS = ["Android", "WebGL", "Linux64", "LinuxServer", "Windows64", "iOS", "Addressables"]
 
 
@@ -46,7 +47,11 @@ def test_report_jobs_fill_missing_results_before_reading(job, results_dir):
     steps = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))["jobs"][job]["steps"]
     names = [s.get("name") for s in steps]
     fill = steps[names.index("Fill missing platform results from build outputs")]
-    assert fill["env"]["RESULTS_DIR"] == results_dir
+    assert fill["run"] == ("python3 .toolkit/scripts/common/pipeline_results.py fill-missing "
+                           "--results-dir %s" % results_dir)
+    # The script comes from the toolkit checkout, which must come first.
+    checkout = next(i for i, s in enumerate(steps) if str(s.get("name", "")).startswith("Checkout toolkit"))
+    assert checkout < names.index("Fill missing platform results from build outputs")
     assert fill["env"]["RJ_Android"] == "${{ needs.build.outputs.result-json-Android }}"
     assert fill["env"]["RJ_Addressables"] == "${{ needs.build-addressables.outputs.result-json-Addressables }}"
     download = next(i for i, s in enumerate(steps) if "download-artifact" in str(s.get("uses", "")) and
@@ -55,15 +60,13 @@ def test_report_jobs_fill_missing_results_before_reading(job, results_dir):
 
 
 def test_fill_writes_only_what_is_missing(tmp_path):
-    steps = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))["jobs"]["final-report"]["steps"]
-    run = next(s for s in steps if s.get("name") == "Fill missing platform results from build outputs")["run"]
-    script = run.split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
     (tmp_path / "r" / "art").mkdir(parents=True)
     (tmp_path / "r" / "art" / "build-iOS.json").write_text('{"platform":"iOS","result":"failure"}')
-    env = dict(os.environ, RESULTS_DIR=str(tmp_path / "r"),
+    env = dict(os.environ,
                RJ_Android=b'{"platform":"Android","result":"success"}'.hex(),
                RJ_iOS='{"platform":"iOS","result":"success"}', RJ_WebGL="")
-    subprocess.run([sys.executable, "-c", script], env=env, check=True)
+    subprocess.run([sys.executable, str(RESULTS), "fill-missing", "--results-dir", str(tmp_path / "r")],
+                   env=env, check=True)
     files = sorted(p.relative_to(tmp_path / "r").as_posix() for p in (tmp_path / "r").rglob("*.json"))
     assert files == ["art/build-iOS.json", "from-outputs/build-Android.json"]
     assert json.loads((tmp_path / "r" / "art" / "build-iOS.json").read_text())["result"] == "failure"
@@ -76,15 +79,13 @@ def _discord_steps():
 
 
 def _pick(tmp_path, rows):
-    run = next(s for s in _discord_steps() if s.get("id") == "attachable")["run"]
-    script = run.split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
     (tmp_path / "r").mkdir()
     for i, row in enumerate(rows):
         (tmp_path / "r" / f"build-{i}.json").write_text(json.dumps(row))
     out = tmp_path / "out"
-    env = dict(os.environ, RESULTS_DIR=str(tmp_path / "r"), ATTACH_MAX_BYTES="8388608",
-               GITHUB_OUTPUT=str(out))
-    subprocess.run([sys.executable, "-c", script], env=env, check=True)
+    env = dict(os.environ, GITHUB_OUTPUT=str(out))
+    subprocess.run([sys.executable, str(RESULTS), "attachable", "--results-dir", str(tmp_path / "r"),
+                    "--max-bytes", "8388608"], env=env, check=True)
     return out.read_text().strip().split("=", 1)[1]
 
 
@@ -102,7 +103,7 @@ def test_discord_never_downloads_every_artifact_of_the_run():
     call = next(s for s in steps if "discord-upload-build" in str(s.get("uses", "")))
     threshold = int(call["with"]["attach-size-threshold-mb"]) * 1024 * 1024
     pick = next(s for s in steps if s.get("id") == "attachable")
-    assert int(pick["env"]["ATTACH_MAX_BYTES"]) == threshold
+    assert pick["run"].endswith("--max-bytes %d" % threshold)
 
 
 def test_only_small_successful_builds_are_picked(tmp_path):

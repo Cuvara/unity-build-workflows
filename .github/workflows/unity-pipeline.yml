@@ -1908,6 +1908,18 @@ jobs:
       failed-stage: ${{ steps.report.outputs.failed-stage }}
       platform-summary: ${{ steps.report.outputs.platform-summary }}
     steps:
+      # The report logic is scripts/common/pipeline_results.py, shared with
+      # Notify Discord. A local (./) path in a reusable workflow resolves
+      # against the caller's repository, so the toolkit is checked out here.
+      - name: Checkout toolkit (report scripts)
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref:        ${{ inputs.toolkit-ref }}
+          path:       .toolkit
+          sparse-checkout: scripts/common
+
       - name: Collect platform results
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -1924,7 +1936,6 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          RESULTS_DIR: pipeline-results
           RJ_Android:      ${{ needs.build.outputs.result-json-Android }}
           RJ_WebGL:        ${{ needs.build.outputs.result-json-WebGL }}
           RJ_Linux64:      ${{ needs.build.outputs.result-json-Linux64 }}
@@ -1932,33 +1943,7 @@ jobs:
           RJ_Windows64:    ${{ needs.build.outputs.result-json-Windows64 }}
           RJ_iOS:          ${{ needs.build.outputs.result-json-iOS }}
           RJ_Addressables: ${{ needs.build-addressables.outputs.result-json-Addressables }}
-        run: |
-          python3 - <<'PY'
-          import json, os, pathlib
-          root = pathlib.Path(os.environ["RESULTS_DIR"])
-          have = {p.name for p in root.rglob("build-*.json")} if root.is_dir() else set()
-          for key, raw in sorted(os.environ.items()):
-              if not key.startswith("RJ_") or not raw.strip():
-                  continue
-              try:
-                  # hex (see reusable-build-platform.yml); raw JSON
-                  # from an older toolkit is accepted too.
-                  text = raw.strip()
-                  if not text.startswith("{"):
-                      text = bytes.fromhex(text).decode("utf-8")
-                  row = json.loads(text)
-                  raw = text
-              except (ValueError, UnicodeDecodeError):
-                  print(f"::warning::{key} is not a result; ignored")
-                  continue
-              name = f"build-{row.get('platform') or key[3:]}.json"
-              if name in have:
-                  continue
-              target = root / "from-outputs" / name
-              target.parent.mkdir(parents=True, exist_ok=True)
-              target.write_text(raw)
-              print(f"[results] {name} taken from the build output (artifact missing)")
-          PY
+        run: python3 .toolkit/scripts/common/pipeline_results.py fill-missing --results-dir pipeline-results
 
       - name: Write step summary
         id: report
@@ -1989,300 +1974,13 @@ jobs:
           R_ADDR:        ${{ needs.build-addressables.result }}
           R_BUILD:       ${{ needs.build.result }}
           R_VALIDATION:  ${{ needs.validate-artifact.result }}
-        run: |
-          set -Eeuo pipefail
-          python3 - <<'PY'
-          import json, os, pathlib, sys
-
-          env = os.environ
-          results_dir = pathlib.Path("pipeline-results")
-
-          # ── Collect what the matrix legs reported ────────────────────────
-          builds, validations = {}, {}
-          for path in sorted(results_dir.rglob("*.json")) if results_dir.is_dir() else []:
-              try:
-                  row = json.loads(path.read_text())
-              except (OSError, json.JSONDecodeError):
-                  continue
-              target = builds if row.get("stage") == "03" else validations
-              target[row.get("platform", "?")] = row
-
-          # Platforms the pipeline INTENDED to build. One present here but absent
-          # from `builds` did not report its result.
-          #
-          # Whether that is a failure depends on the matrix's own verdict. If
-          # the build matrix succeeded, a missing file is a REPORTING gap and
-          # must not fail an otherwise green run — that exact bug failed
-          # NDCUnityTemplate run 34567145749, where Android and WebGL both
-          # built and validated and only the report went red. If the matrix did
-          # not succeed, a missing file means that leg died, and it counts.
-          try:
-              planned = [r["platform"] for r in json.loads(env.get("BUILD_MATRIX") or "[]")]
-          except json.JSONDecodeError:
-              planned = []
-          matrix_result = env.get("R_BUILD", "")
-          unreported = "unreported" if matrix_result == "success" else ""
-          for platform in planned:
-              builds.setdefault(platform, {"platform": platform, "stage": "03",
-                                           "result": unreported, "artifactType": "",
-                                           "artifactSizeBytes": "0", "durationSeconds": "0"})
-
-          EMOJI = {"success": "✅", "failure": "❌", "skipped": "⏭️",
-                   "cancelled": "🚫", "blocked": "⛔", "unreported": "➖"}
-          def emoji(result):
-              return EMOJI.get(result, "❓")
-
-          def mib(value):
-              try:
-                  n = int(value)
-              except (TypeError, ValueError):
-                  return "—"
-              return f"{n / 1048576:.1f} MB" if n else "—"
-
-          def dur(value):
-              try:
-                  n = int(value)
-              except (TypeError, ValueError):
-                  return "—"
-              return f"{n // 60}m {n % 60}s" if n else "—"
-
-          def passed(result):
-              # "unreported" = the leg's result file is missing but the matrix
-              # succeeded. Surfaced in the table, never fatal.
-              return result in ("success", "skipped", "unreported")
-
-          # ── Overall verdict + the stage that broke it ────────────────────
-          failed_stage = ""
-          ordered = [
-              # First, because everything else is skipped when it fails and
-              # `skipped` counts as a pass.
-              ("01 PREPARE / Resolve Build Config",   env.get("R_RESOLVE", "")),
-              ("01 PREPARE / Validate Unity Project", env.get("R_VALIDATE", "")),
-              ("01 PREPARE / Validate Unity License", env.get("R_LICENSE", "")),
-              ("02 QUALITY GATE / Unity Tests",       env.get("R_TESTS", "")),
-              ("02 QUALITY GATE",                     env.get("R_GATE", "")),
-              ("03 BUILD ARTIFACTS / Addressables",   env.get("R_ADDR", "")),
-          ]
-          for label, result in ordered:
-              if not passed(result) and not failed_stage:
-                  failed_stage = f"{label} ({result or 'no result'})"
-          if not failed_stage and env.get("GATE_BLOCKER"):
-              failed_stage = f"02 QUALITY GATE / {env['GATE_BLOCKER']}"
-          for platform, row in sorted(builds.items()):
-              if not passed(row.get("result", "")) and not failed_stage:
-                  failed_stage = f"03 BUILD ARTIFACTS / {platform} ({row.get('result') or 'no result'})"
-          for platform, row in sorted(validations.items()):
-              if not passed(row.get("result", "")) and not failed_stage:
-                  failed_stage = f"04 ARTIFACT VALIDATION / {platform} ({row.get('result') or 'no result'})"
-
-          overall = "failure" if failed_stage else "success"
-
-          # ── Step summary ─────────────────────────────────────────────────
-          build_type = env.get("BUILD_TYPE") or "development"
-          out = []
-          w = out.append
-
-          # GitHub renders no progress indicator on a workflow node, so the
-          # closest honest thing is to draw the pipeline's shape here: which
-          # stages ran, which are green, and where it stopped.
-          def bar(done, total, width=24):
-              if total <= 0:
-                  return "░" * width
-              filled = max(0, min(width, round(width * done / total)))
-              return "█" * filled + "░" * (width - filled)
-
-          STAGES = [
-              ("01 Prepare", [env.get("R_RESOLVE", ""), env.get("R_VALIDATE", ""),
-                              env.get("R_LICENSE", "")]),
-              ("02 Quality Gate", [env.get("R_TESTS", ""), env.get("R_GATE", "")]),
-              ("03 Build", [env.get("R_ADDR", "")] + [r.get("result", "") for r in builds.values()]),
-              ("04 Validate", [r.get("result", "") for r in validations.values()]),
-          ]
-
-          w("## Unity Build — Final Report")
-          w("")
-          w(f"**{emoji(overall)} {overall.upper()}**"
-            + (f" — failed at **{failed_stage}**" if failed_stage else ""))
-          w("")
-          w("```text")
-          for label, results in STAGES:
-              results = [r for r in results if r != ""]
-              if not results:
-                  w(f"{label:<16} {bar(0, 1)}  —")
-                  continue
-              ok = sum(1 for r in results if r in ("success", "skipped", "unreported"))
-              bad = [r for r in results if r not in ("success", "skipped", "unreported")]
-              mark = "FAILED" if bad else "ok"
-              w(f"{label:<16} {bar(ok, len(results))}  {ok}/{len(results)} {mark}")
-          w("```")
-          w("")
-          w("| Field | Value |")
-          w("|---|---|")
-          w(f"| Environment | `{env.get('ENVIRONMENT') or 'unknown'}` "
-            f"({env.get('CONFIGURATION') or '—'}) |")
-          w(f"| Version | `{env.get('APP_VERSION') or 'unknown'}` |")
-          w(f"| Build number | `{env.get('BUILD_NUMBER')}` |")
-          w(f"| Commit | `{(env.get('COMMIT') or '')[:8]}` |")
-          w(f"| Branch | `{env.get('REF_NAME')}` |")
-          w(f"| Flow | `{env.get('FLOW_TYPE') or 'unknown'}` |")
-          w(f"| Unity | `{env.get('UNITY_VERSION') or 'unknown'}` |")
-          w(f"| Signing | `{env.get('SIGNING') or 'none'}` |")
-          w(f"| Run | [{env.get('RUN_ID')}]({env.get('RUN_URL')}) |")
-          w("")
-          w("### 01–02 — Prepare & Quality Gate")
-          w("| Node | Result |")
-          w("|---|---|")
-          for label, key in (("01 / Resolve Build Config", "R_RESOLVE"),
-                             ("01 / Validate Unity Project", "R_VALIDATE"),
-                             ("01 / Validate Unity License", "R_LICENSE"),
-                             (f"02 / Unity Tests ({env.get('TEST_MODE') or 'N/A'})", "R_TESTS"),
-                             ("02 / Quality Gate", "R_GATE")):
-              result = env.get(key, "")
-              w(f"| {label} | {emoji(result)} `{result or 'no result'}` |")
-          if env.get("GATE_BLOCKER"):
-              w("")
-              w(f"> ⛔ Gate closed at **{env['GATE_BLOCKER']}** — no platform build was started.")
-          w("")
-          w("### 03 — Build Artifacts")
-          if builds:
-              done = sum(1 for r in builds.values()
-                         if r.get("result") in ("success", "skipped", "unreported"))
-              w("")
-              w("```text")
-              for platform, row in sorted(builds.items()):
-                  result = row.get("result", "")
-                  glyph = {"success": "████████ done",
-                           "failure": "██░░░░░░ FAILED",
-                           "cancelled": "██░░░░░░ cancelled",
-                           "skipped": "░░░░░░░░ skipped"}.get(result, "░░░░░░░░ " + (result or "no result"))
-                  w(f"  {platform:<14} {glyph}")
-              w(f"  {'':<14} {done}/{len(builds)} platforms")
-              w("```")
-              w("")
-              w("| Platform | Result | Type | Size | Duration | Errors | Warnings | Artifact |")
-              w("|---|---|---|---|---|---|")
-              addr = env.get("R_ADDR", "")
-              w(f"| Addressables | {emoji(addr)} `{addr or 'no result'}` | — | — | — | "
-                f"`{build_type}-addressables` |")
-              for platform, row in sorted(builds.items()):
-                  result = row.get("result", "")
-                  errs = int(row.get("errorCount") or 0)
-                  warns = int(row.get("warningCount") or 0)
-                  w(f"| {platform} | {emoji(result)} `{result or 'no result'}` | "
-                    f"`{row.get('artifactType') or '—'}` | {mib(row.get('artifactSizeBytes'))} | "
-                    f"{dur(row.get('durationSeconds'))} | "
-                    f"{'**' + str(errs) + '**' if errs else '0'} | {warns} | "
-                    f"`{row.get('artifactName') or '—'}` |")
-              # A count tells you something is wrong; the message tells you
-              # what. Stage 07 is where someone looks after a red run, so the
-              # first error belongs here rather than in a log artifact.
-              failed_with_reason = [(p, r) for p, r in sorted(builds.items())
-                                    if r.get("firstError")]
-              if failed_with_reason:
-                  w("")
-                  w("**First error per platform**")
-                  w("")
-                  for platform, row in failed_with_reason:
-                      w(f"- **{platform}** — {row['firstError']}")
-          else:
-              w("_No platform build ran._")
-          w("")
-          w("### 04 — Artifact Validation")
-          if validations:
-              w("| Platform | Result | Report |")
-              w("|---|---|---|")
-              for platform, row in sorted(validations.items()):
-                  result = row.get("result", "")
-                  artifact = builds.get(platform, {}).get("artifactName", "")
-                  report_name = f"{artifact}-validation-report" if artifact else "—"
-                  w(f"| {platform} | {emoji(result)} `{result or 'no result'}` | "
-                    f"`{report_name}` |")
-          else:
-              w("_No artifact validation ran._")
-          w("")
-          # A Build / Release run produces immutable artifacts and stops. Nothing
-          # in the graph said what to do with them, which is why the release layer
-          # looked absent — this hands the reader straight to it.
-          RELEASE_LANES = {
-              "Android": ("Release / Android", "20-release-android.yml", "Google Play"),
-              "iOS": ("Release / iOS", "21-release-ios.yml", "App Store Connect"),
-              "WebGL": ("Release / WebGL", "22-release-webgl.yml", "hosting / CDN"),
-              "Windows64": ("Release / Windows", "23-release-windows.yml", "Steam"),
-              "Linux64": ("Release / Linux", "24-release-linux.yml", "Steam"),
-          }
-          if build_type == "release" and not failed_stage:
-              shippable = [p for p, row in sorted(builds.items())
-                           if row.get("result") == "success" and p in RELEASE_LANES]
-              if shippable:
-                  w("### Next: promote these artifacts")
-                  w("")
-                  w("These are immutable. The release workflows publish *this* binary — "
-                    "nothing is rebuilt, so what QA approves is what ships.")
-                  w("")
-                  w("| Platform | Artifact | Run | Publishes to |")
-                  w("|---|---|---|---|")
-                  for platform in shippable:
-                      lane, wf, dest = RELEASE_LANES[platform]
-                      artifact = builds[platform].get("artifactName", "")
-                      w(f"| {platform} | `{artifact}` | **{lane}** (`{wf}`) | {dest} |")
-                  w("")
-                  # The release workflows never build. They pull the artifact
-                  # from THIS run, so the run id is not optional context — it is
-                  # how the promotion finds the binary.
-                  first = shippable[0]
-                  lane, wf, _ = RELEASE_LANES[first]
-                  w("```bash")
-                  w(f"gh workflow run {wf} --ref main \\")
-                  w(f"  -f build-version={env.get('APP_VERSION') or '<version>'} \\")
-                  w(f"  -f artifact-name={builds[first].get('artifactName', '')} \\")
-                  w(f"  -f source-run-id={env.get('RUN_ID', '')}")
-                  w("```")
-                  w("")
-          elif build_type == "development":
-              w("> This is a development build. It is not signed for release and "
-                "cannot be published — use **Build / Release** for that.")
-              w("")
-          w(f"> Logs: `{build_type}-<platform>-<artifact>-logs`. "
-            f"Manifests: `{build_type}-<platform>-<artifact>-manifest`.")
-          w("> Publishing is a separate pipeline — see `pipeline-android-release.yml`, "
-            "`pipeline-ios-release.yml`, `pipeline-webgl-release.yml`.")
-
-          summary = "\n".join(out)
-          with open(env["GITHUB_STEP_SUMMARY"], "a") as fh:
-              fh.write(summary + "\n")
-
-          # ── Outputs for the Discord stage ────────────────────────────────
-          compact = [
-              {"platform": p,
-               "build": builds[p].get("result", ""),
-               "validation": validations.get(p, {}).get("result", ""),
-               "artifactType": builds[p].get("artifactType", ""),
-               "artifactSizeBytes": builds[p].get("artifactSizeBytes", "0")}
-              for p in sorted(builds)
-          ]
-          with open(env["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"overall={overall}\n")
-              fh.write(f"failed-stage={failed_stage}\n")
-              fh.write("platform-summary=" + json.dumps(compact) + "\n")
-
-          if failed_stage:
-              print(f"::error::Pipeline failed at {failed_stage}. See the matching job logs.")
-              sys.exit(1)
-          PY
+        # Verdict, the stage that broke it, the step summary, and the
+        # platform-summary Discord reads. Exits 1 on a failed run.
+        run: python3 .toolkit/scripts/common/pipeline_results.py final-report --results-dir pipeline-results
 
       # Where every Unity job was sent and why, rendered from the same
       # runner-selection document stage 01 routed on. Reporting only: a failure
       # here must never turn a green run red.
-      - name: Checkout toolkit (runner selection report)
-        if: always()
-        continue-on-error: true
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.toolkit-repo }}
-          ref:        ${{ inputs.toolkit-ref }}
-          path:       .toolkit
-          sparse-checkout: scripts/common
-
       - name: Runner selection report
         if: always()
         continue-on-error: true
@@ -2311,6 +2009,18 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      # A local (./) composite action resolves from the runner workspace, which
+      # for a reusable workflow is the CALLER's repo — not this toolkit. So we
+      # check the toolkit out and reference the action (and the shared
+      # scripts/common/pipeline_results.py) from there.
+      - name: Checkout toolkit (for the Discord action)
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
       - name: Download platform results
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -2326,7 +2036,6 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          RESULTS_DIR: ./platform-results
           RJ_Android:      ${{ needs.build.outputs.result-json-Android }}
           RJ_WebGL:        ${{ needs.build.outputs.result-json-WebGL }}
           RJ_Linux64:      ${{ needs.build.outputs.result-json-Linux64 }}
@@ -2334,33 +2043,7 @@ jobs:
           RJ_Windows64:    ${{ needs.build.outputs.result-json-Windows64 }}
           RJ_iOS:          ${{ needs.build.outputs.result-json-iOS }}
           RJ_Addressables: ${{ needs.build-addressables.outputs.result-json-Addressables }}
-        run: |
-          python3 - <<'PY'
-          import json, os, pathlib
-          root = pathlib.Path(os.environ["RESULTS_DIR"])
-          have = {p.name for p in root.rglob("build-*.json")} if root.is_dir() else set()
-          for key, raw in sorted(os.environ.items()):
-              if not key.startswith("RJ_") or not raw.strip():
-                  continue
-              try:
-                  # hex (see reusable-build-platform.yml); raw JSON
-                  # from an older toolkit is accepted too.
-                  text = raw.strip()
-                  if not text.startswith("{"):
-                      text = bytes.fromhex(text).decode("utf-8")
-                  row = json.loads(text)
-                  raw = text
-              except (ValueError, UnicodeDecodeError):
-                  print(f"::warning::{key} is not a result; ignored")
-                  continue
-              name = f"build-{row.get('platform') or key[3:]}.json"
-              if name in have:
-                  continue
-              target = root / "from-outputs" / name
-              target.parent.mkdir(parents=True, exist_ok=True)
-              target.write_text(raw)
-              print(f"[results] {name} taken from the build output (artifact missing)")
-          PY
+        run: python3 .toolkit/scripts/common/pipeline_results.py fill-missing --results-dir ./platform-results
 
       # Only a binary small enough to attach is worth downloading: the
       # message links everything else. Downloading every artifact of the run
@@ -2370,32 +2053,8 @@ jobs:
         if: always()
         continue-on-error: true
         shell: bash
-        env:
-          RESULTS_DIR: ./platform-results
-          # Keep in step with attach-size-threshold-mb below.
-          ATTACH_MAX_BYTES: '8388608'
-        run: |
-          python3 - <<'PY'
-          import json, os, pathlib
-          root = pathlib.Path(os.environ["RESULTS_DIR"])
-          limit = int(os.environ["ATTACH_MAX_BYTES"])
-          names = set()
-          for path in sorted(root.rglob("build-*.json")) if root.is_dir() else []:
-              try:
-                  row = json.loads(path.read_text())
-                  size = int(row.get("artifactSizeBytes") or 0)
-              except (ValueError, OSError):
-                  continue
-              name = (row.get("artifactName") or "").strip()
-              if row.get("result") == "success" and name and 0 < size <= limit:
-                  names.add(name)
-          names = sorted(names)
-          # One name is a literal; minimatch expands {a,b} only with a comma.
-          pattern = names[0] if len(names) == 1 else ("{%s}" % ",".join(names) if names else "")
-          print(f"[attach] {', '.join(names) or 'nothing small enough to attach'}")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"pattern={pattern}\n")
-          PY
+        # Keep --max-bytes in step with attach-size-threshold-mb below.
+        run: python3 .toolkit/scripts/common/pipeline_results.py attachable --results-dir ./platform-results --max-bytes 8388608
 
       - name: Download attachable builds
         # An empty pattern would download every artifact of the run.
@@ -2420,80 +2079,10 @@ jobs:
           V_ALL:         ${{ needs.validate-artifact.result }}
           REPORT_OVERALL: ${{ needs.final-report.outputs.overall }}
           REPORT_FAILED_STAGE: ${{ needs.final-report.outputs.failed-stage }}
-        run: |
-          set -Eeuo pipefail
-          # Stage 07 already collected every matrix leg's result and decided the
-          # verdict; re-deriving it here from `needs` is impossible anyway,
-          # because a matrix job reports one aggregate result for all legs.
-          # This step only unpacks that summary into the per-platform inputs the
-          # Discord action takes.
-          python3 - <<'PY'
-          import json, os
-
-          env = os.environ
-          try:
-              summary = json.loads(env.get("PLATFORM_SUMMARY") or "[]")
-          except json.JSONDecodeError:
-              summary = []
-
-          by_platform = {row.get("platform", ""): row for row in summary}
-
-          # `ok` exists to detect a PARTIAL build — some platforms up, some down.
-          # A passing test run is not a platform that built, so tests/validate/
-          # Addressables count toward `fail` but never toward `ok`.
-          fail = ok = False
-          cancelled = env.get("R_BUILD") == "cancelled" or env.get("V_ALL") == "cancelled"
-          for key in ("R_VALIDATE", "R_TESTS", "R_ADDR"):
-              value = env.get(key, "")
-              if value == "cancelled":
-                  cancelled = True
-              elif value == "failure":
-                  fail = True
-
-          lines = []
-          for platform, row in by_platform.items():
-              build = row.get("build", "")
-              validation = row.get("validation", "")
-              if build == "cancelled" or validation == "cancelled":
-                  cancelled = True
-              if build == "failure" or validation == "failure":
-                  fail = True
-              if build == "success":
-                  ok = True
-              lines.append(f"result-{platform.lower()}={build or 'skipped'}")
-              if validation:
-                  lines.append(f"validation-{platform.lower()}={validation}")
-
-          if cancelled:
-              overall = "cancelled"
-          elif fail and ok:
-              overall = "partial"
-          elif fail:
-              overall = "failure"
-          else:
-              # Trust stage 07 when it saw something this step cannot.
-              overall = "failure" if env.get("REPORT_OVERALL") == "failure" else "success"
-
-          with open(env["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"overall={overall}\n")
-              for line in lines:
-                  fh.write(line + "\n")
-
-          print(f"Overall Discord status: {overall}")
-          if env.get("REPORT_FAILED_STAGE"):
-              print(f"Failed at: {env['REPORT_FAILED_STAGE']}")
-          PY
-
-      # A local (./) composite action resolves from the runner workspace, which
-      # for a reusable workflow is the CALLER's repo — not this toolkit. So we
-      # check the toolkit out and reference the action from there.
-      - name: Checkout toolkit (for the Discord action)
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          repository: ${{ inputs.toolkit-repo }}
-          ref: ${{ inputs.toolkit-ref }}
-          path: .toolkit
+        # Stage 07 already collected every matrix leg and decided the verdict
+        # (a matrix job reports one aggregate result through `needs`); this
+        # unpacks its platform-summary into the Discord action's inputs.
+        run: python3 .toolkit/scripts/common/pipeline_results.py discord-status
 
       - name: Gather run context (commit message, author, duration)
         id: ctx
@@ -2540,108 +2129,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BUILD_TYPE: ${{ needs.resolve-config.outputs.build-type }}
         run: |
-          set +e
-          DIAG=""
-          TOTAL_ERRORS=0
-          TOTAL_WARNINGS=0
-          # Whether anything was actually counted. Without it, a run where no
-          # platform produced a readable Editor.log reports "0 errors ·
-          # 0 warnings" — a clean bill of health nobody issued.
-          ANY_LOG=0
-
-          # ── Build name→id map from artifacts API ──────────────────────────
-          ARTIFACT_MAP=$(gh api \
+          set -uo pipefail
+          # This run's artifact names and ids, for the log and binary links.
+          gh api --paginate \
             "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-            -q '.artifacts[]|"\(.name) \(.id)"' 2>/dev/null) || true
-
-          # ── Per-platform scan ─────────────────────────────────────────────
-          # Artifacts are named {product}_{version}_{build}_{type}_{platform}_{artifact},
-          # so the platform's own artifact name is discovered from the map by
-          # matching the build-type and platform slug anywhere in the name.
-          for P in Android WebGL Linux64 LinuxServer Windows64 iOS; do
-            SLUG=$(printf '%s' "${P}" | tr '[:upper:]' '[:lower:]')
-            # Try GitHub artifact map first (ARTIFACT_STORAGE=github)
-            ART=$(printf '%s\n' "${ARTIFACT_MAP}" \
-              | awk '{print $1}' \
-              | grep -E "_${BUILD_TYPE}_${SLUG}(_[a-z0-9]+)?$" | head -1) || ART=""
-            # Fallback: read from pipeline-result JSON (ARTIFACT_STORAGE=firebase —
-            # binary not on GitHub but the result file still has the name).
-            if [ -z "${ART}" ]; then
-              ART=$(find ./platform-results -name "build-${P}.json" -print 2>/dev/null \
-                | head -1 | xargs -r cat 2>/dev/null \
-                | python3 -c 'import json,sys; print(json.load(sys.stdin).get("artifactName",""))' 2>/dev/null) || ART=""
-            fi
-            [ -z "${ART}" ] && continue
-
-            LOG=$(find ./artifacts -path "*${ART}-logs*Editor.log" \
-              -print 2>/dev/null | head -1) || true
-
-            # A missing log is not a missing platform. The Docker / game-ci
-            # lane streams Unity to the job console and writes no Editor.log at
-            # all, so this `find` comes back empty on every successful Android
-            # build — and skipping the platform here threw away its artifact
-            # NAME and its artifact ID along with the counters. The Discord
-            # embed then looked for the pre-build-type directory
-            # `./artifacts/unity-build-Android`, found nothing, and posted a
-            # 67 MB APK as "0 MB (linked)" with no download link. The row is
-            # emitted either way; only the counters depend on a log.
-            if [ -n "${LOG}" ]; then
-              errors=$(grep -cE '\): error |Aborting batchmode|BuildFailedException' \
-                "${LOG}" 2>/dev/null) || errors=0
-              warnings=$(grep -cE '\): warning ' \
-                "${LOG}" 2>/dev/null) || warnings=0
-              ANY_LOG=1
-            else
-              # Empty, not 0. "We did not read a log" and "the log said zero"
-              # are different claims, and a 0/0 nobody measured is the more
-              # expensive of the two to believe.
-              errors=""
-              warnings=""
-            fi
-
-            # Look up the artifact ids from the map
-            logsid=$(printf '%s\n' "${ARTIFACT_MAP}" \
-              | grep "^${ART}-logs " \
-              | awk '{print $2}' | head -1) || logsid=""
-
-            binid=$(printf '%s\n' "${ARTIFACT_MAP}" \
-              | grep "^${ART} " \
-              | awk '{print $2}' | head -1) || binid=""
-
-            # The artifact NAME travels too. Discord used to look for
-            # ./artifacts/unity-build-<Platform>/ — the pre-build-type naming —
-            # so the directory never matched, nothing was ever zipped, and
-            # every platform silently fell back to a link. A build small enough
-            # to attach was still posted as a URL nobody outside the repo can
-            # open.
-            # A link a person can actually open, when the project publishes
-            # builds somewhere. Empty otherwise, and Discord falls back to the
-            # artifact URL — which only works for someone already signed in.
-            # Firebase also records a direct link to the binary, valid for
-            # about an hour; it rides in the same field after a "|".
-            DL=$(find ./platform-results -name "build-${P}.json" -print 2>/dev/null \
-              | head -1 | xargs -r cat 2>/dev/null \
-              | python3 -c 'import json,sys; d=json.load(sys.stdin); u=d.get("downloadUrl","") or ""; x=d.get("directDownloadUrl","") or ""; print(u + ("|" + x if x else ""))' 2>/dev/null) || DL=""
-
-            DIAG="${DIAG}${P}=${errors},${warnings},${logsid},${binid},${ART},${DL}"$'\n'
-            TOTAL_ERRORS=$(( TOTAL_ERRORS + ${errors:-0} ))
-            TOTAL_WARNINGS=$(( TOTAL_WARNINGS + ${warnings:-0} ))
-          done
-
-          # ── Emit outputs ──────────────────────────────────────────────────
-          {
-            echo "platform-diagnostics<<EOF"
-            printf '%s' "${DIAG}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-          if [ "${ANY_LOG}" -eq 1 ]; then
-            echo "total-errors=${TOTAL_ERRORS}"   >> "$GITHUB_OUTPUT"
-            echo "total-warnings=${TOTAL_WARNINGS}" >> "$GITHUB_OUTPUT"
-          else
-            # Empty, so the embed omits the field instead of claiming a zero.
-            echo "total-errors="   >> "$GITHUB_OUTPUT"
-            echo "total-warnings=" >> "$GITHUB_OUTPUT"
-          fi
+            -q '.artifacts[]|"\(.name) \(.id)"' > "${RUNNER_TEMP}/artifact-map.txt" 2>/dev/null || true
+          # Counts come from each build leg's own log summary (result file),
+          # not from downloading the logs.
+          python3 .toolkit/scripts/common/pipeline_results.py diagnostics \
+            --results-dir ./platform-results \
+            --build-type "${BUILD_TYPE}" \
+            --artifact-map "${RUNNER_TEMP}/artifact-map.txt"
 
       - name: Post build to Discord thread
         uses: ./.toolkit/.github/actions/discord-upload-build

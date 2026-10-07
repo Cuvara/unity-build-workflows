@@ -2036,7 +2036,7 @@ jobs:
           # "Android failed — CS0103 in Player.cs:42" instead of "Android
           # failed", and so a build that succeeded with two hundred new
           # warnings is visible without opening anything.
-          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s","errorCount":"%s","warningCount":"%s","firstError":"%s","artifactUrl":"%s","downloadUrl":"%s","directDownloadUrl":"%s"}\n' \
+          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s","errorCount":"%s","warningCount":"%s","firstError":"%s","artifactUrl":"%s","downloadUrl":"%s","directDownloadUrl":"%s","logMeasured":"%s"}\n' \
             "${{ inputs.platform }}" \
             "${RESULT}" \
             "${{ steps.artifact-type.outputs.artifact-type }}" \
@@ -2050,6 +2050,7 @@ jobs:
             "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${{ steps.upload.outputs.artifact-id }}" \
             "${{ steps.publish.outputs.download-url }}" \
             "${{ steps.publish.outputs.direct-url }}" \
+            "${{ steps.unity-log.outputs.log-found || 'false' }}" \
             > "pipeline-results/build-${{ inputs.platform }}.json"
           # The same result as a job output (result-json-<Platform> below).
           # The report jobs read it when the artifact upload of this file
