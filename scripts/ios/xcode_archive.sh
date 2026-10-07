@@ -24,24 +24,25 @@ mkdir -p "$(dirname "${ARCHIVE_PATH}")"
 mkdir -p "$(dirname "${LOG_PATH}")"
 
 # ── Resolve .xcworkspace vs .xcodeproj ─────────────────────────────────────────
-PROJECT_ARG=""
+# An array, not a string: the path may contain spaces ("My Game/Unity-iPhone.xcworkspace").
+PROJECT_ARGS=()
 if [[ -d "${XCODE_PROJECT_PATH}" ]]; then
   WORKSPACE=$(find "${XCODE_PROJECT_PATH}" -maxdepth 1 -name "*.xcworkspace" 2>/dev/null | head -1 || true)
   XCPROJ=$(find "${XCODE_PROJECT_PATH}" -maxdepth 1 -name "*.xcodeproj" 2>/dev/null | head -1 || true)
   if [[ -d "${WORKSPACE}" ]]; then
-    PROJECT_ARG="-workspace ${WORKSPACE}"
+    PROJECT_ARGS=(-workspace "${WORKSPACE}")
     echo "[xcode_archive] Using workspace: ${WORKSPACE}"
   elif [[ -d "${XCPROJ}" ]]; then
-    PROJECT_ARG="-project ${XCPROJ}"
+    PROJECT_ARGS=(-project "${XCPROJ}")
     echo "[xcode_archive] Using project: ${XCPROJ}"
   else
     echo "::error::No .xcworkspace or .xcodeproj found in ${XCODE_PROJECT_PATH}" >&2
     exit 1
   fi
 elif [[ "${XCODE_PROJECT_PATH}" == *.xcworkspace ]]; then
-  PROJECT_ARG="-workspace ${XCODE_PROJECT_PATH}"
+  PROJECT_ARGS=(-workspace "${XCODE_PROJECT_PATH}")
 elif [[ "${XCODE_PROJECT_PATH}" == *.xcodeproj ]]; then
-  PROJECT_ARG="-project ${XCODE_PROJECT_PATH}"
+  PROJECT_ARGS=(-project "${XCODE_PROJECT_PATH}")
 else
   echo "::error::XCODE_PROJECT_PATH must be a directory, .xcworkspace, or .xcodeproj" >&2
   exit 1
@@ -51,10 +52,9 @@ echo "[xcode_archive] Scheme: ${SCHEME} | Config: ${CONFIGURATION}"
 echo "[xcode_archive] Archive: ${ARCHIVE_PATH}"
 echo "[xcode_archive] Log: ${LOG_PATH}"
 
-# shellcheck disable=SC2086
 set +e
 xcodebuild \
-  ${PROJECT_ARG} \
+  "${PROJECT_ARGS[@]}" \
   -scheme "${SCHEME}" \
   -configuration "${CONFIGURATION}" \
   -archivePath "${ARCHIVE_PATH}" \

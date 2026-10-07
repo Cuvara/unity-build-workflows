@@ -979,3 +979,35 @@ def test_setup_signing_has_a_timeout(workflow, step):
     steps = [s for job in wf["jobs"].values() for s in job.get("steps", [])]
     found = [s for s in steps if s.get("name") == step]
     assert found and all(0 < s.get("timeout-minutes", 0) <= 15 for s in found)
+
+
+# -----------------------------------------------------------------------
+# xcode_archive.sh passes a project path with spaces as ONE argument
+# -----------------------------------------------------------------------
+
+@pytest.mark.parametrize("kind", ["xcworkspace", "xcodeproj"])
+def test_archive_keeps_a_path_with_spaces_whole(tmp_path, kind):
+    """Unity names the output folder after the product ("Backpack Legends"):
+    the old string-built PROJECT_ARG split it and xcodebuild failed with
+    "Unknown build action 'Legends/Unity-iPhone.xcworkspace'"."""
+    project_dir = tmp_path / "build" / "iOS" / "My Game"
+    (project_dir / f"Unity-iPhone.{kind}").mkdir(parents=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    args_file = tmp_path / "args.txt"
+    archive = tmp_path / "out" / "Unity.xcarchive"
+    shim = bin_dir / "xcodebuild"
+    shim.write_text('#!/usr/bin/env bash\nprintf "%s\n" "$@" > "' + str(args_file) + '"\n'
+                    'mkdir -p "' + str(archive) + '"\n')
+    _make_executable(shim)
+    env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+           "XCODE_PROJECT_PATH": str(project_dir), "DEVELOPMENT_TEAM": "TEAMID1234",
+           "KEYCHAIN_PATH": str(tmp_path / "k.keychain-db"), "ARCHIVE_PATH": str(archive),
+           "LOG_PATH": str(tmp_path / "logs" / "archive.log")}
+    r = subprocess.run(["bash", str(ARCHIVE_IOS_SH)], capture_output=True, text=True,
+                       env=env, timeout=30)
+    assert r.returncode == 0, r.stdout + r.stderr
+    args = args_file.read_text().splitlines()
+    flag = "-workspace" if kind == "xcworkspace" else "-project"
+    assert args[args.index(flag) + 1] == str(project_dir / f"Unity-iPhone.{kind}")
+    assert args[-1] == "archive"
