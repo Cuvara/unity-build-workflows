@@ -1,5 +1,10 @@
 name: Unity Nightly Multi-Platform
 
+# DEPRECATED — legacy entry point, kept working for existing callers. New
+# projects call unity-pipeline.yml (build) and pipeline-*-release.yml
+# (promotion); see docs/ARCHITECTURE.md § Legacy entry points. Planned for
+# removal in the next major version.
+
 # Docker-mandatory nightly builds.
 # Supported matrix platforms: Android, WebGL, Linux64
 # iOS and Windows are not supported in Docker-only mode.

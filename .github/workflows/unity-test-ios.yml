@@ -1,5 +1,10 @@
 name: Unity Test iOS
 
+# DEPRECATED — legacy entry point, kept working for existing callers. New
+# projects call unity-pipeline.yml (build) and pipeline-*-release.yml
+# (promotion); see docs/ARCHITECTURE.md § Legacy entry points. Planned for
+# removal in the next major version.
+
 # Runs Unity EditMode tests on a macOS runner for the iOS platform.
 # Does NOT use distribution signing credentials.
 # Optional: tests Xcode project generation when license is available.

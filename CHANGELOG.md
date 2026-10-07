@@ -67,6 +67,18 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   verify it, the same as a job. A wrapper is checked through the promotion
   workflow it runs.
 
+### Deprecated
+
+- **The `unity-build.yml` family.** `unity-build.yml`, `unity-build-{android,webgl,linux,ios}.yml`,
+  `unity-build-gameci.yml`, `unity-validate.yml`, `unity-test.yml`,
+  `unity-test-ios.yml`, `unity-nightly.yml`, `unity-release.yml`,
+  `unity-release-ios.yml` and the `project-workflow.yml` /
+  `consumer-unity-build.yml` templates carry a `# DEPRECATED` header. Nothing
+  in the current flow or the numbered consumer templates calls them. They
+  keep working and are planned for removal in the next major version.
+  `docs/ARCHITECTURE.md` § Legacy entry points maps each one to its
+  replacement. The README's architecture diagram now shows the current flow.
+
 ## [6.22.6] — 2026-10-07
 
 ### Fixed

@@ -1,5 +1,10 @@
 name: Unity Build iOS
 
+# DEPRECATED — legacy entry point, kept working for existing callers. New
+# projects call unity-pipeline.yml (build) and pipeline-*-release.yml
+# (promotion); see docs/ARCHITECTURE.md § Legacy entry points. Planned for
+# removal in the next major version.
+
 # macOS-native workflow. Generates an Xcode project from Unity source.
 # Development/ad-hoc signing only. Does NOT upload to TestFlight.
 # Runner: ios-runner-label input, else the repository's runner policy (when opted
