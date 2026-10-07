@@ -688,8 +688,9 @@ job. There is no YAML to copy.
    `scripts/common/artifact_manifest.py`.
 2. **Resolver** — add `build-<platform>` to `scripts/common/resolve_build_flow.sh`
    and document it in [BRANCH_FLOW_CONTRACT.md](BRANCH_FLOW_CONTRACT.md).
-3. **Matrix** — add one `add` line to the `Resolve build matrix` step in
-   `unity-pipeline.yml`:
+3. **Matrix** — add one `add` line to `scripts/common/resolve_build_matrix.sh`
+   (the `Resolve build matrix` step of `unity-pipeline.yml`), and its
+   `SEL_<PLATFORM>` to that step's env:
 
    ```bash
    add "${SEL_SWITCH}" Switch NSP "${CONFIG}" switch
