@@ -29,26 +29,26 @@ Docker-mandatory reusable GitHub Actions workflows for building, testing, and re
 ## Architecture
 
 ```
-Your Project Repo
-  .github/workflows/build.yml
-       │ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@<ref>
-       │       secrets: inherit
+Your Project Repo (templates/consumer-*.yml)
+  01-ci / 10-build-development / 11-build-release
+       │ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-pipeline.yml@v6
        ▼
-unity-build-workflows
-  CI Runner (ubuntu-latest)
-       │
+  unity-pipeline.yml            stages 01–08: resolve, validate, test, build matrix, report, Discord
+       │ one job per platform
        ▼
-  Docker Engine
-       │
+  reusable-build-platform.yml   the one executor: Docker lane or a self-hosted
+                                Windows/macOS lane (scripts/build/run_unity_player.sh),
+                                then deliver-build (Firebase / R2 / stores)
+
+  20…24-release-<platform>
+       │ uses: …/pipeline-<platform>-release.yml@v6
        ▼
-  Pinned Unity Build Image (ghcr.io/<IMAGE_NAMESPACE>/unity-builder@sha256:...)
-       │
-       ▼
-  entrypoint.sh → Unity -batchmode -executeMethod BuildCommand.Execute
-       │
-       ▼
-  Artifacts, logs, reports → bind-mounted host directories
+  pipeline-*-release.yml        promote a Build / Release artifact: verify identity,
+                                validate, publish phase by phase (builds nothing)
 ```
+
+The older `unity-build.yml` family is deprecated — see
+[docs/ARCHITECTURE.md § Legacy entry points](docs/ARCHITECTURE.md#legacy-entry-points).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete layer diagram, and
 [docs/PIPELINE_ARCHITECTURE.md](docs/PIPELINE_ARCHITECTURE.md) for the pipeline stage graph.
@@ -73,6 +73,12 @@ Unsupported targets fail with an actionable error message. The repository never 
 ---
 
 ## Consumer Quickstart
+
+> **Deprecated path.** This quickstart wires up the legacy `unity-build.yml`
+> (with `BuildConfig/`). It keeps working, but new projects should use
+> [Use in Another Project (Quick Start)](#use-in-another-project-quick-start)
+> below and [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md), which call
+> `unity-pipeline.yml` and `pipeline-*-release.yml`.
 
 ### 1. Add the UPM Package
 

@@ -188,6 +188,26 @@ See [ADD_NEW_PROJECT.md](ADD_NEW_PROJECT.md) Step 1b for what a consumer must pr
 
 ---
 
+## Legacy entry points
+
+These workflows predate `unity-pipeline.yml` and the `pipeline-*-release.yml`
+promotions. Nothing in the current flow calls them, and none of the numbered
+`templates/consumer-NN-*.yml` entry workflows does. They are **deprecated**:
+each carries a `# DEPRECATED` header, they keep working for existing callers, and they are planned for removal in the
+next major version, with a migration guide.
+
+| Legacy workflow | Use instead |
+|---|---|
+| `unity-build.yml` and the per-platform `unity-build-{android,webgl,linux,ios}.yml` it calls | `unity-pipeline.yml` (templates `consumer-01/10/11`) |
+| `unity-build-gameci.yml` | `unity-pipeline.yml` — its Docker lane runs game-ci itself |
+| `unity-validate.yml`, `unity-test.yml`, `unity-test-ios.yml` | the validate and test stages of `unity-pipeline.yml` (`reusable-unity-tests.yml`) |
+| `unity-nightly.yml` | a scheduled caller of `unity-pipeline.yml` |
+| `unity-release.yml`, `unity-release-ios.yml` | Build / Release (`consumer-11`) + `pipeline-<platform>-release.yml` (`consumer-20…24`) |
+| `templates/project-workflow.yml`, `templates/consumer-unity-build.yml` | `templates/consumer-*.yml` |
+
+The native iOS route (`unity-build-ios.yml`, `unity-release-ios.yml`, the
+`BuildCommand.Execute` entry point in the table above) belongs to this family.
+
 ## Unity Package Layer
 
 The `unity-package/` directory contains a Unity Editor package (`com.company.build-pipeline`) providing:

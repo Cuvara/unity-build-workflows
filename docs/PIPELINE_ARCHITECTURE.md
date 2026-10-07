@@ -201,14 +201,16 @@ and it costs nothing structurally because the implementation is shared:
 20-release-android.yml  ──→ pipeline-android-release.yml   (promote a Build / Release artifact)
 21-release-ios.yml      ──→ pipeline-ios-release.yml
 22-release-webgl.yml    ──→ pipeline-webgl-release.yml
-23-release-windows.yml  ──→ pipeline-windows-release.yml
-24-release-linux.yml    ──→ pipeline-linux-release.yml
+23-release-windows.yml  ──→ pipeline-windows-release.yml ──┐  (interface only)
+24-release-linux.yml    ──→ pipeline-linux-release.yml   ──┴→ pipeline-desktop-release.yml
 ```
 
 Nesting: the build flow is entry → pipeline → executor = **3 of GitHub's 4**
 levels, so it cannot take another `workflow_call` layer. The release
 pipelines build nothing — they download the artifact of a Build / Release run
-by `source-run-id` — and use **2 of 4**. Shared logic is factored into
+by `source-run-id` — and use **2 of 4**; Windows and Linux use **3 of 4**,
+because their wrappers keep the interface consumers call and hand every job to
+the shared `pipeline-desktop-release.yml`. Shared logic is factored into
 composite actions, which do not count toward the limit.
 
 ### Input groups
@@ -373,11 +375,15 @@ fix lands once:
 |---|---|---|
 | `verify-release-artifact` | downloads the artifact and `release-manifest` from `source-run-id`, runs `release_manifest.py verify` (run, name, version, build number, SHA-256); `identity-only: 'true'` skips the download | every job that holds the artifact — stage 04 and each later phase, because each downloads again |
 | `release-report` | stage 07 summary + Discord; resolves the platform's **production** thread from `.github/discord.json` / `DISCORD_THREAD_*` (pass `discord-vars-json: ${{ toJSON(vars) }}`) | the `report` job |
+| `steam-publish` | resolves the Steam ids (fails closed before downloading), verifies through `verify-release-artifact`, installs SteamCMD, uploads | the three Steam phases of `pipeline-desktop-release.yml` |
 | `pipeline-progress` | the stage ladder | every job |
 
 The invariant checker (`validate_pipeline_invariants.py`, I-007 / I-017)
 counts a `verify-release-artifact` step as a verification only while the
-action itself still downloads from the source run and runs the verify.
+action itself still downloads from the source run and runs the verify, and an
+action that calls it (`steam-publish`) only through that call. An action that
+downloads the artifact itself must verify it, like a job. A wrapper whose one
+job runs another promotion workflow is checked through that workflow.
 
 **The arithmetic is the part worth knowing.** A phase skipped *on purpose* —
 a dry run, a later `start-phase`, a platform this project does not ship —

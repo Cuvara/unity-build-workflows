@@ -29,7 +29,13 @@ STEAM_DEPLOY = REPO_ROOT / "scripts" / "steam" / "deploy_steam.sh"
 MANIFEST = REPO_ROOT / "scripts" / "common" / "release_manifest.py"
 INVARIANTS = REPO_ROOT / "scripts" / "common" / "validate_pipeline_invariants.py"
 
-DESKTOP_PIPELINES = ["pipeline-windows-release.yml", "pipeline-linux-release.yml"]
+# The jobs live in one shared workflow; Windows and Linux are thin wrappers
+# that keep the interface consumers call (templates/consumer-23, -24).
+DESKTOP_PIPELINES = ["pipeline-desktop-release.yml"]
+DESKTOP_WRAPPERS = {"pipeline-windows-release.yml": ("Windows64", "Windows", "release-windows"),
+                    "pipeline-linux-release.yml": ("Linux64", "Linux", "release-linux")}
+INTERFACES = DESKTOP_PIPELINES + sorted(DESKTOP_WRAPPERS)
+STEAM_PUBLISH = REPO_ROOT / ".github" / "actions" / "steam-publish" / "action.yml"
 
 
 def load(name):
@@ -356,7 +362,7 @@ def test_a_missing_artifact_directory_fails(tmp_path):
 # The promotion workflows themselves
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", DESKTOP_PIPELINES)
+@pytest.mark.parametrize("name", INTERFACES)
 def test_desktop_promotion_cannot_build(name):
     """I-005. The invariant checker enforces this across every promotion
     workflow; this pins it for the two new ones specifically."""
@@ -366,14 +372,17 @@ def test_desktop_promotion_cannot_build(name):
         assert operation not in body, f"{name} contains a build operation: {operation}"
 
 
-@pytest.mark.parametrize("name", DESKTOP_PIPELINES)
+@pytest.mark.parametrize("name", INTERFACES)
 def test_desktop_promotion_pins_an_exact_run(name):
     inputs = triggers(name)["workflow_call"]["inputs"]
     assert inputs["source-run-id"]["required"] is True
     body = (WORKFLOWS / name).read_text()
     # Every download must name the run, or it silently takes this run's
-    # artifacts — of which there are none.
-    assert body.count("run-id: ${{ inputs.source-run-id }}") >= 4
+    # artifacts — of which there are none. Five jobs hold the artifact; a
+    # wrapper passes the run on to the one job it has.
+    import re
+    pinned = len(re.findall(r"run-id:\s+\$\{\{ inputs\.source-run-id \}\}", body))
+    assert pinned >= (1 if name in DESKTOP_WRAPPERS else 5), pinned
 
 
 @pytest.mark.parametrize("name", DESKTOP_PIPELINES)
@@ -386,7 +395,9 @@ def test_every_steam_phase_reverifies_the_artifact(name):
         if not job_id.startswith("steam-"):
             continue
         steps = json.dumps(job["steps"])
-        assert "/verify-release-artifact" in steps or "release_manifest.py verify" in steps,             f"{name}:{job_id}"
+        # steam-publish verifies through verify-release-artifact
+        # (test_verify_release_artifact.py pins that).
+        assert "/steam-publish" in steps or "/verify-release-artifact" in steps,             f"{name}:{job_id}"
 
 
 @pytest.mark.parametrize("name", DESKTOP_PIPELINES)
@@ -402,7 +413,7 @@ def test_steam_phases_are_environment_gated(name):
     }, environments
 
 
-@pytest.mark.parametrize("name", DESKTOP_PIPELINES)
+@pytest.mark.parametrize("name", INTERFACES)
 def test_steam_secrets_are_optional_at_the_workflow_level(name):
     """Required secrets are checked when the call is RESOLVED, so declaring
     them required would make a dry run unresolvable in a repository with no
@@ -417,8 +428,12 @@ def test_steam_secrets_are_optional_at_the_workflow_level(name):
 def test_no_steam_id_is_hardcoded_in_the_toolkit(name):
     """App and depot ids are project configuration, never toolkit constants."""
     workflow = (WORKFLOWS / name).read_text()
-    assert "vars.STEAM_APP_ID" in workflow
-    assert "vars.STEAM_DEPOTS" in workflow
+    # The Steam ids reach steam-publish as the project's vars, and the action
+    # hands every STEAM_* id to resolve_steam_config.py.
+    assert workflow.count("vars-json:         ${{ toJSON(vars) }}") == 3
+    action = STEAM_PUBLISH.read_text(encoding="utf-8")
+    assert 'key.startswith("STEAM_")' in action
+    assert "resolve_steam_config.py" in action
 
 
 def test_the_toolkit_hardcodes_no_steam_app_id():
@@ -586,15 +601,53 @@ def test_a_dry_run_reaches_the_staging_path(name):
         assert "!inputs.dry-run" not in str(job.get("if", "")), (
             f"{job_id} skips entirely on a dry run, so nothing is staged"
         )
-        steps = json.dumps(job["steps"])
-        assert "DRY_RUN" in steps, f"{job_id} does not tell the deploy script"
-        # Credentials are required for a real upload and not for a dry run.
-        assert "--require-credentials" in steps
+        publish = next(s for s in job["steps"] if str(s.get("uses", "")).endswith("/steam-publish"))
+        assert publish["with"]["dry-run"] == "${{ inputs.dry-run }}", job_id
+    # The deploy script is told, and credentials are required only for a
+    # real upload.
+    action = STEAM_PUBLISH.read_text(encoding="utf-8")
+    assert "DRY_RUN:           ${{ inputs.dry-run }}" in action
+    assert '--require-credentials' in action and 'os.environ.get("DRY_RUN") != "true"' in action
 
 
 @pytest.mark.parametrize("name", DESKTOP_PIPELINES)
 def test_steamcmd_is_not_installed_for_a_dry_run(name):
-    for job in load(name)["jobs"].values():
-        for step in job.get("steps", []):
-            if "Install SteamCMD" in str(step.get("name", "")):
-                assert "dry-run" in str(step.get("if", ""))
+    steps = [s for job in load(name)["jobs"].values() for s in job.get("steps", [])]
+    steps += yaml.safe_load(STEAM_PUBLISH.read_text(encoding="utf-8"))["runs"]["steps"]
+    installs = [s for s in steps if "Install SteamCMD" in str(s.get("name", ""))]
+    assert installs
+    for step in installs:
+        assert "dry-run" in str(step.get("if", ""))
+
+
+@pytest.mark.parametrize("name", sorted(DESKTOP_WRAPPERS))
+def test_a_wrapper_keeps_its_interface_and_delegates_everything(name):
+    """Consumers call pipeline-windows/linux-release.yml@v6; their inputs,
+    defaults, secrets and outputs must not move when the jobs did."""
+    platform, display, artifact = DESKTOP_WRAPPERS[name]
+    call = triggers(name)["workflow_call"]
+    shared = triggers("pipeline-desktop-release.yml")["workflow_call"]
+    assert call["inputs"]["artifact-name"]["default"] == artifact
+    assert set(shared["inputs"]) - set(call["inputs"]) == {"platform", "display-name"}
+    assert set(call["secrets"]) == set(shared["secrets"])
+    jobs = load(name)["jobs"]
+    assert list(jobs) == ["promote"]
+    job = jobs["promote"]
+    assert job["uses"] == "./.github/workflows/pipeline-desktop-release.yml"
+    assert job["with"]["platform"] == platform
+    assert job["with"]["display-name"] == display
+    for key in call["inputs"]:
+        assert job["with"][key] == "${{ inputs.%s }}" % key, key
+    for key in call["secrets"]:
+        assert job["secrets"][key] == "${{ secrets.%s }}" % key, key
+
+
+def test_steam_publish_resolves_before_it_downloads():
+    """Fail closed on configuration before anything is fetched; verify the
+    bytes before anything uploads."""
+    names = [s.get("name") for s in
+             yaml.safe_load(STEAM_PUBLISH.read_text(encoding="utf-8"))["runs"]["steps"]]
+    assert names == ["Resolve Steam configuration", "Verify release artifact",
+                     "Install SteamCMD", "Upload to Steam"]
+    text = STEAM_PUBLISH.read_text(encoding="utf-8")
+    assert "secrets." not in text and "vars." not in text, "a composite action reads neither"

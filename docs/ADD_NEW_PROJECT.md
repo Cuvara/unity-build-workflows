@@ -6,7 +6,7 @@
 > | Guide | Calls | Use when |
 > |---|---|---|
 > | **[CONSUMER\_SETUP.md](CONSUMER_SETUP.md)** | `unity-pipeline.yml` | **Default.** Branch-based CI on `develop`/`staging`/`release-*`, per-platform jobs, Repository Variables for configuration. No `BuildConfig/` needed. |
-> | **This file** | `unity-build.yml` | You want one explicit build per caller job with `target-platform` / `test-level` / `cache-mode` inputs, and you are supplying `BuildConfig/*.json` yourself. Also the reference for writing `PlayerBuilder` and for the iOS lane. |
+> | **This file** (deprecated) | `unity-build.yml` | Legacy — kept working for existing callers, planned for removal in the next major version. You want one explicit build per caller job with `target-platform` / `test-level` / `cache-mode` inputs, and you are supplying `BuildConfig/*.json` yourself. Also the reference for writing `PlayerBuilder` and for the iOS lane. |
 >
 > `BuildConfig/` is required for the flow described here. It is **not** read by
 > `unity-pipeline.yml` or `reusable-build-platform.yml` — verified: zero references

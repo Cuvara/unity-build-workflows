@@ -1,3 +1,7 @@
+# DEPRECATED — calls the legacy unity-build.yml. New projects copy the
+# templates/consumer-*.yml entry workflows (unity-pipeline.yml and
+# pipeline-*-release.yml); see docs/ARCHITECTURE.md § Legacy entry points.
+#
 # ──────────────────────────────────────────────────────────────────────────────
 # consumer-unity-build.yml — Thin caller template for unity-build-workflows
 #

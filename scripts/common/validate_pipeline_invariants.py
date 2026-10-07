@@ -167,6 +167,47 @@ def _action_verifies(action_path):
     verifies = any("release_manifest.py verify" in str(s.get("run", "")) for s in steps)
     return cross_run and verifies
 
+
+def verifying_actions(actions_dir):
+    """`uses:` suffixes of the actions that download from the source run and
+    verify: verify-release-artifact while it still does both, and any action
+    that calls one of those (steam-publish verifies before it uploads)."""
+    found = set()
+    base = actions_dir / "verify-release-artifact" / "action.yml"
+    if base.is_file() and _action_verifies(base):
+        found.add(VERIFY_ACTION)
+    grew = bool(found)
+    while grew:
+        grew = False
+        for action in sorted(actions_dir.glob("*/action.yml")):
+            marker = f"/.github/actions/{action.parent.name}"
+            if marker in found:
+                continue
+            try:
+                steps = (load_workflow(action).get("runs") or {}).get("steps") or []
+            except yaml.YAMLError:
+                continue
+            if any(str(s.get("uses", "")).endswith(m) for s in steps for m in found):
+                found.add(marker)
+                grew = True
+    return found
+
+
+def delegate_of(workflows_dir, workflow):
+    """The promotion workflow a thin wrapper hands its only job to, or None.
+
+    pipeline-windows-release.yml and pipeline-linux-release.yml keep their
+    interface and run pipeline-desktop-release.yml; the jobs are checked
+    there."""
+    jobs = list((workflow.get("jobs") or {}).values())
+    if len(jobs) != 1:
+        return None
+    uses = str(jobs[0].get("uses", ""))
+    if not uses.startswith("./.github/workflows/"):
+        return None
+    target = workflows_dir / uses.rsplit("/", 1)[1]
+    return target if target in promotion_workflows(workflows_dir) else None
+
 def check_promotion_pins_its_source(workflows_dir, report):
     for path in promotion_workflows(workflows_dir):
         workflow = load_workflow(path)
@@ -185,11 +226,17 @@ def check_promotion_pins_its_source(workflows_dir, report):
         else:
             report.ok("I-010", f"{path.name} pins an exact source run")
 
+        markers = verifying_actions(workflows_dir.parent / "actions")
         for job_id, job in (workflow.get("jobs") or {}).items():
+            if job.get("uses"):
+                # A wrapper: the run it pins is the one it passes on.
+                if "inputs.source-run-id" not in str((job.get("with") or {}).get("source-run-id", "")):
+                    report.fail("I-010", f"{path.name}:{job_id} does not pass its source-run-id on")
+                continue
             for step in job.get("steps") or []:
                 uses = str(step.get("uses", ""))
                 with_block = step.get("with") or {}
-                if uses.endswith(VERIFY_ACTION):
+                if any(uses.endswith(m) for m in markers):
                     # The action downloads from its source-run-id input.
                     name = str(with_block.get("artifact-name", ""))
                     run_id = str(with_block.get("source-run-id", ""))
@@ -216,8 +263,8 @@ def check_promotion_pins_its_source(workflows_dir, report):
 def check_promotion_verifies_identity(workflows_dir, report):
     """I-007: a filename is not an identity."""
     action = workflows_dir.parent / "actions" / "verify-release-artifact" / "action.yml"
-    action_verifies = action.is_file() and _action_verifies(action)
-    if action.is_file() and not action_verifies:
+    markers = verifying_actions(workflows_dir.parent / "actions")
+    if action.is_file() and VERIFY_ACTION not in markers:
         report.fail(
             "I-007",
             "actions/verify-release-artifact no longer downloads from the source "
@@ -226,8 +273,15 @@ def check_promotion_verifies_identity(workflows_dir, report):
         )
     for path in promotion_workflows(workflows_dir):
         body = path.read_text()
-        verified = "release_manifest.py verify" in body or (
-            action_verifies and VERIFY_ACTION in body)
+        try:
+            target = delegate_of(workflows_dir, load_workflow(path))
+        except yaml.YAMLError:
+            target = None
+        if target is not None:
+            # Checked as a promotion workflow of its own.
+            report.ok("I-007", f"{path.name} runs {target.name}, which is verified on its own")
+            continue
+        verified = "release_manifest.py verify" in body or any(m in body for m in markers)
         if not verified:
             report.fail(
                 "I-007",
@@ -310,6 +364,28 @@ def check_every_download_is_verified(workflows_dir, report):
     Every later phase downloads again — a separate fetch — and an approval on
     an earlier phase is not evidence about the bytes a later job is holding.
     """
+    actions_dir = workflows_dir.parent / "actions"
+    markers = verifying_actions(actions_dir)
+    # A shared action that fetches the artifact is held to the same rule as a
+    # job: it verifies what it fetched, or calls an action that does.
+    for action in sorted(actions_dir.glob("*/action.yml")):
+        try:
+            steps = (load_workflow(action).get("runs") or {}).get("steps") or []
+        except yaml.YAMLError:
+            continue
+        direct = [s for s in steps
+                  if str(s.get("uses", "")).startswith("actions/download-artifact")
+                  and "inputs.artifact-name" in json.dumps(s)]
+        if not direct:
+            continue
+        if any("release_manifest.py verify" in str(s.get("run", "")) for s in steps):
+            report.ok("I-017", f"actions/{action.parent.name} verifies what it downloaded")
+        else:
+            report.fail(
+                "I-017",
+                f"actions/{action.parent.name} downloads the artifact without "
+                "verifying the bytes it received",
+            )
     for path in promotion_workflows(workflows_dir):
         try:
             workflow = load_workflow(path)
@@ -317,17 +393,18 @@ def check_every_download_is_verified(workflows_dir, report):
             continue
         for job_id, job in (workflow.get("jobs") or {}).items():
             steps = json.dumps(job.get("steps") or [])
+            uses_verifier = any(m in steps for m in markers)
             # Only jobs that pull the platform artifact; a job that fetches
             # release notes or the manifest alone has nothing to verify.
             if "download-artifact" not in steps or "inputs.artifact-name" not in steps:
-                if VERIFY_ACTION not in steps:
+                if not uses_verifier:
                     continue
             # A direct download is covered only by a verify in the same job;
             # the action downloads and verifies in one step.
             direct = [s for s in job.get("steps") or []
                       if str(s.get("uses", "")).startswith("actions/download-artifact")
                       and "inputs.artifact-name" in json.dumps(s)]
-            if "release_manifest.py verify" in steps or (VERIFY_ACTION in steps and not direct):
+            if "release_manifest.py verify" in steps or (uses_verifier and not direct):
                 report.ok("I-017", f"{path.name}:{job_id} verifies what it downloaded")
             else:
                 report.fail(
