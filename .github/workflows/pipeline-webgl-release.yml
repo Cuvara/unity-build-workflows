@@ -149,33 +149,15 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      - name: Download artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Verify release artifact
+        uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
-          name: ${{ inputs.artifact-name }}
-          path: promoted/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Download release manifest
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: release-manifest
-          path: release-set/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify release identity and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/common/release_manifest.py verify \
-            --manifest             release-set/release-manifest.json \
-            --platform             WebGL \
-            --artifact-path        promoted \
-            --expect-run-id        "${{ inputs.source-run-id }}" \
-            --expect-artifact-name "${{ inputs.artifact-name }}" \
-            --expect-version       "${{ inputs.build-version }}"
+          platform:      WebGL
+          artifact-name: ${{ inputs.artifact-name }}
+          source-run-id: ${{ inputs.source-run-id }}
+          build-version: ${{ inputs.build-version }}
+          path:          promoted
+          github-token:  ${{ github.token }}
 
       # Where the run has got to, drawn into this job's summary.
       - name: Progress
@@ -206,37 +188,19 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      - name: Download build artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: build-artifact/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
       # Re-verified here, not just in stage 04. This job downloads the artifact
       # again — a separate fetch — and an approval on an earlier phase is not
       # evidence about the bytes this job is holding. Cheap, and it is the last
       # point at which publishing the wrong binary is still preventable.
-      - name: Download release manifest
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Verify release artifact
+        uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
-          name: release-manifest
-          path: release-set/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify release identity and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/common/release_manifest.py verify \
-            --manifest             release-set/release-manifest.json \
-            --platform             WebGL \
-            --artifact-path        build-artifact \
-            --expect-run-id        "${{ inputs.source-run-id }}" \
-            --expect-artifact-name "${{ inputs.artifact-name }}" \
-            --expect-version       "${{ inputs.build-version }}"
+          platform:      WebGL
+          artifact-name: ${{ inputs.artifact-name }}
+          source-run-id: ${{ inputs.source-run-id }}
+          build-version: ${{ inputs.build-version }}
+          path:          build-artifact
+          github-token:  ${{ github.token }}
 
       - name: Validate artifact
         shell: bash
@@ -315,37 +279,19 @@ jobs:
             exit 1
           fi
 
-      - name: Download validated artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: build-artifact/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
       # Re-verified here, not just in stage 04. This job downloads the artifact
       # again — a separate fetch — and an approval on an earlier phase is not
       # evidence about the bytes this job is holding. Cheap, and it is the last
       # point at which publishing the wrong binary is still preventable.
-      - name: Download release manifest
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Verify release artifact
+        uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
-          name: release-manifest
-          path: release-set/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify release identity and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/common/release_manifest.py verify \
-            --manifest             release-set/release-manifest.json \
-            --platform             WebGL \
-            --artifact-path        build-artifact \
-            --expect-run-id        "${{ inputs.source-run-id }}" \
-            --expect-artifact-name "${{ inputs.artifact-name }}" \
-            --expect-version       "${{ inputs.build-version }}"
+          platform:      WebGL
+          artifact-name: ${{ inputs.artifact-name }}
+          source-run-id: ${{ inputs.source-run-id }}
+          build-version: ${{ inputs.build-version }}
+          path:          build-artifact
+          github-token:  ${{ github.token }}
 
       - name: Deploy to Cloudflare Pages
         id: deploy
@@ -408,37 +354,19 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      - name: Download validated artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: build-artifact/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
       # Re-verified here, not just in stage 04. This job downloads the artifact
       # again — a separate fetch — and an approval on an earlier phase is not
       # evidence about the bytes this job is holding. Cheap, and it is the last
       # point at which publishing the wrong binary is still preventable.
-      - name: Download release manifest
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Verify release artifact
+        uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
-          name: release-manifest
-          path: release-set/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify release identity and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/common/release_manifest.py verify \
-            --manifest             release-set/release-manifest.json \
-            --platform             WebGL \
-            --artifact-path        build-artifact \
-            --expect-run-id        "${{ inputs.source-run-id }}" \
-            --expect-artifact-name "${{ inputs.artifact-name }}" \
-            --expect-version       "${{ inputs.build-version }}"
+          platform:      WebGL
+          artifact-name: ${{ inputs.artifact-name }}
+          source-run-id: ${{ inputs.source-run-id }}
+          build-version: ${{ inputs.build-version }}
+          path:          build-artifact
+          github-token:  ${{ github.token }}
 
       - name: Deploy to Cloudflare Pages
         id: deploy
@@ -503,6 +431,8 @@ jobs:
           dry-run: ${{ inputs.dry-run }}
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          discord-vars-json: ${{ toJSON(vars) }}
+          discord-config-file: ${{ vars.DISCORD_CONFIG_FILE || '.github/discord.json' }}
           phases: |
             04 Verify Release Identity=${{ needs.verify-artifact.result }}
             04 Validate=${{ needs.validate-webgl.result }}

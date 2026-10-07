@@ -55,10 +55,11 @@ def test_no_release_pipeline_hashes_the_whole_workspace():
 def test_ios_production_verifies_the_downloaded_ipa():
     steps = _jobs("pipeline-ios-release.yml")["production-release"]["steps"]
     names = [s.get("name") for s in steps]
-    download = names.index("Download IPA artifact")
-    verify = next(i for i, s in enumerate(steps) if "release_manifest.py verify" in str(s.get("run", "")))
-    assert download < verify
-    assert "--artifact-path        ipa-artifact" in steps[verify]["run"]
+    verify = next(i for i, s in enumerate(steps)
+                  if str(s.get("uses", "")).endswith("/verify-release-artifact"))
+    assert steps[verify]["with"]["path"] == "ipa-artifact"
+    assert steps[verify]["with"].get("identity-only", "false") != "true"
+    assert verify < names.index("Read IPA identity")
 
 
 def _ipa(tmp_path, plist):

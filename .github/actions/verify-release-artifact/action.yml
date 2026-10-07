@@ -1,0 +1,87 @@
+name: Verify release artifact
+description: >
+  Fetch a promotion's artifact from its Release Set run and prove it is the one
+  that run produced: same run, same artifact name, same version, same build
+  number, same SHA-256 (scripts/common/release_manifest.py verify). Fails
+  closed. Every job of a pipeline-*-release.yml that holds the artifact calls
+  this, not only stage 04: each job downloads again, and an approval on an
+  earlier phase is not evidence about the bytes a later job is holding.
+
+  With identity-only, the artifact is not downloaded and only the manifest
+  entry is checked — for a phase that promotes what a store already holds
+  (Google Play production promotes the internal-track release; it uploads
+  nothing).
+
+inputs:
+  platform:
+    description: Platform key in the release manifest (Android, iOS, WebGL, Windows64, Linux64).
+    required: true
+  artifact-name:
+    description: Artifact the promotion was started with.
+    required: true
+  source-run-id:
+    description: The Release Set run that produced the artifact and the manifest.
+    required: true
+  build-version:
+    description: Version the promotion expects the manifest to record.
+    required: true
+  path:
+    description: Directory to download the artifact into, relative to the workspace.
+    required: false
+    default: 'promoted'
+  identity-only:
+    description: "'true' checks the manifest entry without downloading the artifact."
+    required: false
+    default: 'false'
+  github-token:
+    description: Token for the cross-run download (github.token is enough within the repository).
+    required: true
+  toolkit-path:
+    description: Toolkit checkout holding scripts/common/release_manifest.py, relative to the workspace.
+    required: false
+    default: '.toolkit'
+
+outputs:
+  artifact-path:
+    description: Directory holding the verified artifact ('' with identity-only).
+    value: ${{ inputs.identity-only != 'true' && inputs.path || '' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Download artifact
+      if: ${{ inputs.identity-only != 'true' }}
+      uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.path }}/
+        run-id: ${{ inputs.source-run-id }}
+        github-token: ${{ inputs.github-token }}
+
+    - name: Download release manifest
+      uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      with:
+        name: release-manifest
+        path: release-set/
+        run-id: ${{ inputs.source-run-id }}
+        github-token: ${{ inputs.github-token }}
+
+    - name: Verify release identity and checksum
+      shell: bash
+      env:
+        PLATFORM:      ${{ inputs.platform }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+        BUILD_VERSION: ${{ inputs.build-version }}
+        ARTIFACT_DIR:  ${{ inputs.path }}
+        IDENTITY_ONLY: ${{ inputs.identity-only }}
+        TOOLKIT:       ${{ inputs.toolkit-path }}
+      run: |
+        set -Eeuo pipefail
+        ARGS=(--manifest release-set/release-manifest.json --platform "${PLATFORM}")
+        # Identity only: the manifest entry, not bytes this job does not hold.
+        [ "${IDENTITY_ONLY}" = "true" ] || ARGS+=(--artifact-path "${ARTIFACT_DIR}")
+        python3 "${TOOLKIT}"/scripts/common/release_manifest.py verify "${ARGS[@]}" \
+          --expect-run-id        "${SOURCE_RUN_ID}" \
+          --expect-artifact-name "${ARTIFACT_NAME}" \
+          --expect-version       "${BUILD_VERSION}"

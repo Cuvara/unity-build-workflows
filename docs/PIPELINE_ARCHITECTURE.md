@@ -364,6 +364,21 @@ The final report (`.github/actions/release-report`) renders the same ladder
 from the actual results, so what you watched during the run and what you read
 afterwards are the same picture.
 
+### Shared steps of the promotion pipelines
+
+Every `pipeline-*-release.yml` is built from the same composite actions, so a
+fix lands once:
+
+| Action | What it does | Used by |
+|---|---|---|
+| `verify-release-artifact` | downloads the artifact and `release-manifest` from `source-run-id`, runs `release_manifest.py verify` (run, name, version, build number, SHA-256); `identity-only: 'true'` skips the download | every job that holds the artifact — stage 04 and each later phase, because each downloads again |
+| `release-report` | stage 07 summary + Discord; resolves the platform's **production** thread from `.github/discord.json` / `DISCORD_THREAD_*` (pass `discord-vars-json: ${{ toJSON(vars) }}`) | the `report` job |
+| `pipeline-progress` | the stage ladder | every job |
+
+The invariant checker (`validate_pipeline_invariants.py`, I-007 / I-017)
+counts a `verify-release-artifact` step as a verification only while the
+action itself still downloads from the source run and runs the verify.
+
 **The arithmetic is the part worth knowing.** A phase skipped *on purpose* —
 a dry run, a later `start-phase`, a platform this project does not ship —
 counts as distance covered, because it is not a stall and drawing it as one
