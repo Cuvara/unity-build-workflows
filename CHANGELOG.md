@@ -8,6 +8,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **iOS archive failed in seconds: Pods below Xcode's minimum iOS version.**
+  Pods keep each pod's own deployment target (10.0, 12.0, 13.0), and current
+  Xcode rejects anything under its floor (15.0) as an error. A Podfile
+  `post_install` cannot help, because Unity's resolver runs `pod install`
+  before a project's later post-processors. `xcode_archive.sh` now passes
+  `IPHONEOS_DEPLOYMENT_TARGET` on the xcodebuild command line, which applies
+  to every target in the workspace: the Unity-iPhone project's own minimum,
+  or `IOS_DEPLOYMENT_TARGET` when set.
+
 ## [6.22.5] — 2026-10-07
 
 ### Fixed

@@ -10,6 +10,8 @@
 #   CONFIGURATION       — Xcode configuration (default: Release)
 #   ARCHIVE_PATH        — output .xcarchive path (default: Builds/iOS/Archive/Unity.xcarchive)
 #   LOG_PATH            — log file path (default: Logs/iOS/xcode-archive.log)
+#   IOS_DEPLOYMENT_TARGET — minimum iOS for every target, Pods included
+#                         (default: the Unity-iPhone project's own value)
 set -euo pipefail
 
 XCODE_PROJECT_PATH="${XCODE_PROJECT_PATH:?XCODE_PROJECT_PATH is required}"
@@ -48,6 +50,30 @@ else
   exit 1
 fi
 
+# ── Deployment target for every target, Pods included ─────────────────────────
+# Pods keep each pod's own minimum (10.0, 12.0, ...). Current Xcode rejects
+# anything below its supported floor as an error, and the Podfile's
+# post_install cannot fix it: Unity's resolver runs `pod install` before the
+# project's later post-processors. A command-line build setting applies to
+# every target in the workspace, so build them all at the app's own minimum,
+# which is what each pod has to support anyway.
+DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-}"
+if [[ -z "${DEPLOYMENT_TARGET}" ]]; then
+  PROJECT_ROOT=$(dirname "${PROJECT_ARGS[1]}")
+  PBXPROJ="${PROJECT_ROOT}/Unity-iPhone.xcodeproj/project.pbxproj"
+  if [[ -f "${PBXPROJ}" ]]; then
+    DEPLOYMENT_TARGET=$(sed -n 's/.*IPHONEOS_DEPLOYMENT_TARGET = "\{0,1\}\([0-9][0-9.]*\)"\{0,1\};.*/\1/p' "${PBXPROJ}" \
+      | sort -t. -k1,1n -k2,2n | tail -1)
+  fi
+fi
+BUILD_SETTINGS=()
+if [[ -n "${DEPLOYMENT_TARGET}" ]]; then
+  BUILD_SETTINGS+=("IPHONEOS_DEPLOYMENT_TARGET=${DEPLOYMENT_TARGET}")
+  echo "[xcode_archive] Deployment target (all targets, Pods included): ${DEPLOYMENT_TARGET}"
+else
+  echo "::warning::[xcode_archive] Could not read IPHONEOS_DEPLOYMENT_TARGET from the Unity-iPhone project; Pods keep their own minimums"
+fi
+
 echo "[xcode_archive] Scheme: ${SCHEME} | Config: ${CONFIGURATION}"
 echo "[xcode_archive] Archive: ${ARCHIVE_PATH}"
 echo "[xcode_archive] Log: ${LOG_PATH}"
@@ -59,6 +85,7 @@ xcodebuild \
   -configuration "${CONFIGURATION}" \
   -archivePath "${ARCHIVE_PATH}" \
   -destination "generic/platform=iOS" \
+  ${BUILD_SETTINGS[@]+"${BUILD_SETTINGS[@]}"} \
   CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM}" \
   OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
