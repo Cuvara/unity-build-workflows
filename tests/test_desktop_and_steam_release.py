@@ -386,7 +386,7 @@ def test_every_steam_phase_reverifies_the_artifact(name):
         if not job_id.startswith("steam-"):
             continue
         steps = json.dumps(job["steps"])
-        assert "release_manifest.py verify" in steps, f"{name}:{job_id}"
+        assert "/verify-release-artifact" in steps or "release_manifest.py verify" in steps,             f"{name}:{job_id}"
 
 
 @pytest.mark.parametrize("name", DESKTOP_PIPELINES)

@@ -135,33 +135,15 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      - name: Download artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Verify release artifact
+        uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
-          name: ${{ inputs.artifact-name }}
-          path: promoted/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Download release manifest
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: release-manifest
-          path: release-set/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify release identity and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/common/release_manifest.py verify \
-            --manifest             release-set/release-manifest.json \
-            --platform             iOS \
-            --artifact-path        promoted \
-            --expect-run-id        "${{ inputs.source-run-id }}" \
-            --expect-artifact-name "${{ inputs.artifact-name }}" \
-            --expect-version       "${{ inputs.build-version }}"
+          platform:      iOS
+          artifact-name: ${{ inputs.artifact-name }}
+          source-run-id: ${{ inputs.source-run-id }}
+          build-version: ${{ inputs.build-version }}
+          path:          promoted
+          github-token:  ${{ github.token }}
 
       # Where the run has got to, drawn into this job's summary.
       - name: Progress
@@ -195,33 +177,15 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      - name: Download artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Verify release artifact
+        uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
-          name: ${{ inputs.artifact-name }}
-          path: build-artifact/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Download release manifest
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: release-manifest
-          path: release-set/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify release identity and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/common/release_manifest.py verify \
-            --manifest             release-set/release-manifest.json \
-            --platform             iOS \
-            --artifact-path        build-artifact \
-            --expect-run-id        "${{ inputs.source-run-id }}" \
-            --expect-artifact-name "${{ inputs.artifact-name }}" \
-            --expect-version       "${{ inputs.build-version }}"
+          platform:      iOS
+          artifact-name: ${{ inputs.artifact-name }}
+          source-run-id: ${{ inputs.source-run-id }}
+          build-version: ${{ inputs.build-version }}
+          path:          build-artifact
+          github-token:  ${{ github.token }}
 
       # The IPA must be signed: an unsigned one cannot be distributed, and App
       # Store Connect discovers that after the upload rather than before it.
@@ -321,37 +285,19 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      - name: Download IPA artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: ipa-artifact/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
       # Re-verified here, not just in stage 04. This job downloads the artifact
       # again — a separate fetch — and an approval on an earlier phase is not
       # evidence about the bytes this job is holding. Cheap, and it is the last
       # point at which publishing the wrong binary is still preventable.
-      - name: Download release manifest
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Verify release artifact
+        uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
-          name: release-manifest
-          path: release-set/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify release identity and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/common/release_manifest.py verify \
-            --manifest             release-set/release-manifest.json \
-            --platform             iOS \
-            --artifact-path        ipa-artifact \
-            --expect-run-id        "${{ inputs.source-run-id }}" \
-            --expect-artifact-name "${{ inputs.artifact-name }}" \
-            --expect-version       "${{ inputs.build-version }}"
+          platform:      iOS
+          artifact-name: ${{ inputs.artifact-name }}
+          source-run-id: ${{ inputs.source-run-id }}
+          build-version: ${{ inputs.build-version }}
+          path:          ipa-artifact
+          github-token:  ${{ github.token }}
 
       - name: Find IPA
         id: find-ipa
@@ -471,37 +417,19 @@ jobs:
       # the bytes, and App Store submission needs the bundle id and build
       # number that are inside them. This job used to verify `.` -- an empty
       # workspace -- and to take a build id from an output that was never set.
-      - name: Download IPA artifact
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: ipa-artifact/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
       # Re-verified here, not just in stage 04. This job downloads the artifact
       # again — a separate fetch — and an approval on an earlier phase is not
       # evidence about the bytes this job is holding. Cheap, and it is the last
       # point at which publishing the wrong binary is still preventable.
-      - name: Download release manifest
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+      - name: Verify release artifact
+        uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
-          name: release-manifest
-          path: release-set/
-          run-id: ${{ inputs.source-run-id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify release identity and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 .toolkit/scripts/common/release_manifest.py verify \
-            --manifest             release-set/release-manifest.json \
-            --platform             iOS \
-            --artifact-path        ipa-artifact \
-            --expect-run-id        "${{ inputs.source-run-id }}" \
-            --expect-artifact-name "${{ inputs.artifact-name }}" \
-            --expect-version       "${{ inputs.build-version }}"
+          platform:      iOS
+          artifact-name: ${{ inputs.artifact-name }}
+          source-run-id: ${{ inputs.source-run-id }}
+          build-version: ${{ inputs.build-version }}
+          path:          ipa-artifact
+          github-token:  ${{ github.token }}
 
       - name: Read IPA identity
         id: ipa
@@ -558,35 +486,6 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      # The project's .github/discord.json routes notifications per
-      # environment and platform; a store release is the production
-      # environment. Same resolver as the build pipeline's resolve-config.
-      - name: Checkout Discord config
-        continue-on-error: true
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          path: .project
-          sparse-checkout: ${{ vars.DISCORD_CONFIG_FILE || '.github/discord.json' }}
-          sparse-checkout-cone-mode: false
-
-      - name: Resolve Discord thread
-        id: discord
-        continue-on-error: true
-        shell: bash
-        env:
-          VARS_JSON:   ${{ toJSON(vars) }}
-          CONFIG_FILE: .project/${{ vars.DISCORD_CONFIG_FILE || '.github/discord.json' }}
-          PLATFORM:    iOS
-        run: |
-          set -Eeuo pipefail
-          resolved="$(printf '%s' "${VARS_JSON}" \
-            | python3 .toolkit/scripts/common/resolve_discord_threads.py \
-                --environment production --config "${CONFIG_FILE}")"
-          thread="$(printf '%s\n' "${resolved}" | sed -n "s/^${PLATFORM}=//p" | head -1)"
-          [ -n "${thread}" ] || thread="$(printf '%s\n' "${resolved}" | sed -n 's/^thread-id=//p' | head -1)"
-          echo "Discord thread for ${PLATFORM} (production): ${thread:-<channel root>}"
-          echo "thread-id=${thread}" >> "$GITHUB_OUTPUT"
-
       - name: Report
         uses: ./.toolkit/.github/actions/release-report
         with:
@@ -598,7 +497,8 @@ jobs:
           dry-run: ${{ inputs.dry-run }}
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           discord-webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          discord-thread-id: ${{ steps.discord.outputs.thread-id }}
+          discord-vars-json: ${{ toJSON(vars) }}
+          discord-config-file: ${{ vars.DISCORD_CONFIG_FILE || '.github/discord.json' }}
           phases: |
             04 Verify Release Identity=${{ needs.verify-artifact.result }}
             04 Validate IPA=${{ needs.validate-ipa.result }}
