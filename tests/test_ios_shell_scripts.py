@@ -1017,7 +1017,7 @@ def test_archive_keeps_a_path_with_spaces_whole(tmp_path, kind):
 # xcode_archive.sh builds Pods at the app's deployment target
 # -----------------------------------------------------------------------
 
-def _run_archive(tmp_path, pbxproj_text=None, extra_env=None):
+def _run_archive(tmp_path, pbxproj_text=None, extra_env=None, show_settings=""):
     project_dir = tmp_path / "build" / "iOS" / "My Game"
     (project_dir / "Unity-iPhone.xcworkspace").mkdir(parents=True)
     (project_dir / "Unity-iPhone.xcodeproj").mkdir()
@@ -1028,7 +1028,11 @@ def _run_archive(tmp_path, pbxproj_text=None, extra_env=None):
     args_file = tmp_path / "args.txt"
     archive = tmp_path / "out" / "Unity.xcarchive"
     shim = bin_dir / "xcodebuild"
-    shim.write_text('#!/usr/bin/env bash\nprintf "%s\n" "$@" > "' + str(args_file) + '"\n'
+    settings_file = tmp_path / "settings.txt"
+    settings_file.write_text(show_settings)
+    shim.write_text('#!/usr/bin/env bash\n'
+                    'if [ "$1" = "-showBuildSettings" ]; then cat "' + str(settings_file) + '"; exit 0; fi\n'
+                    'printf "%s\\n" "$@" > "' + str(args_file) + '"\n'
                     'mkdir -p "' + str(archive) + '"\n')
     _make_executable(shim)
     env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
@@ -1069,7 +1073,29 @@ def test_archive_deployment_target_can_be_overridden(tmp_path):
     assert "IPHONEOS_DEPLOYMENT_TARGET=16.0" in args
 
 
+def test_archive_reads_unitys_tab_indented_project_file(tmp_path):
+    """The shape Unity writes: tabs, unquoted value, several configurations."""
+    pbx = ("\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 15.0;\n"
+           "\t\t\t\tINFOPLIST_FILE = Info.plist;\n"
+           "\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 15.0;\n")
+    args, out = _run_archive(tmp_path, pbx)
+    assert "IPHONEOS_DEPLOYMENT_TARGET=15.0" in args
+    assert "project.pbxproj" in out
+
+
+def test_archive_falls_back_to_xcodes_resolved_setting(tmp_path):
+    """Run 37576466999 got nothing out of the project file; Xcode's own
+    resolved build settings are the fallback."""
+    settings = ("Build settings for action build and target Unity-iPhone:\n"
+                "    INFOPLIST_FILE = Info.plist\n"
+                "    IPHONEOS_DEPLOYMENT_TARGET = 15.0\n")
+    args, out = _run_archive(tmp_path, "// no deployment target here\n", show_settings=settings)
+    assert "IPHONEOS_DEPLOYMENT_TARGET=15.0" in args
+    assert "xcodebuild -showBuildSettings" in out
+
+
 def test_archive_without_a_readable_target_warns_and_adds_nothing(tmp_path):
     args, out = _run_archive(tmp_path, None)
     assert not any(a.startswith("IPHONEOS_DEPLOYMENT_TARGET=") for a in args)
     assert "Could not read IPHONEOS_DEPLOYMENT_TARGET" in out
+    assert "exists: yes" in out
