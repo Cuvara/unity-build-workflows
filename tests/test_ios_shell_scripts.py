@@ -31,6 +31,7 @@ so they are skipped on Linux CI. Exit-code propagation and
 secret-redaction tests are platform-agnostic and always run.
 """
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -38,6 +39,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -939,3 +941,41 @@ class TestUnityFailureSimulations:
         assert result.returncode != 0, (
             "Archive script must fail when the Xcode project is absent or scheme invalid."
         )
+
+
+# -----------------------------------------------------------------------
+# create_keychain.sh must not hang generating its password
+# -----------------------------------------------------------------------
+
+def test_no_script_streams_dev_urandom_through_a_pipe():
+    """`tr < /dev/urandom | head -c N` stops only via SIGPIPE. A self-hosted
+    macOS runner started the step with SIGPIPE ignored and create_keychain.sh
+    hung for 90 minutes. Read a bounded number of bytes instead."""
+    import re
+    unbounded = re.compile(r"<\s*/dev/urandom|cat\s+/dev/urandom")
+    offenders = [f"{p.relative_to(REPO_ROOT)}:{n}"
+                 for p in sorted((REPO_ROOT / "scripts").rglob("*.sh"))
+                 for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+                 if unbounded.search(line) and not line.lstrip().startswith("#")]
+    assert offenders == []
+
+
+def test_keychain_password_is_generated_with_sigpipe_ignored(tmp_path):
+    src = CREATE_KEYCHAIN_SH.read_text(encoding="utf-8")
+    line = next(l for l in src.splitlines() if l.startswith("KEYCHAIN_PASSWORD=$("))
+    script = tmp_path / "pw.sh"
+    script.write_text("set -euo pipefail\ntrap '' PIPE\n" + line + '\nprintf %s "$KEYCHAIN_PASSWORD"\n')
+    r = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    assert re.fullmatch(r"[0-9a-f]{48}", r.stdout)
+
+
+@pytest.mark.parametrize("workflow, step", [
+    ("reusable-build-platform.yml", "iOS — Setup signing"),
+    ("unity-release-ios.yml", "Setup iOS signing"),
+])
+def test_setup_signing_has_a_timeout(workflow, step):
+    wf = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))
+    steps = [s for job in wf["jobs"].values() for s in job.get("steps", [])]
+    found = [s for s in steps if s.get("name") == step]
+    assert found and all(0 < s.get("timeout-minutes", 0) <= 15 for s in found)

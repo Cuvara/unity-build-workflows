@@ -1857,6 +1857,9 @@ jobs:
       - name: iOS — Setup signing
         id: ios-signing
         if: ${{ inputs.sign-ios && inputs.platform == 'iOS' && steps.ios-guard.outputs.blocked != 'true' }}
+        # Keychain + certificate + profile take seconds; a hang (a GUI
+        # keychain prompt, a stuck pipe) must not hold the Mac for hours.
+        timeout-minutes: 10
         uses: ./.toolkit/.github/actions/ios-setup-signing
         with:
           ios-distribution-certificate-base64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}

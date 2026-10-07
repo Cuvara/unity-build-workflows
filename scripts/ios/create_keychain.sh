@@ -9,10 +9,14 @@ KEYCHAIN_NAME="${KEYCHAIN_NAME:-build-signing-${GITHUB_RUN_NUMBER:-0}-$$}"
 KEYCHAIN_PATH="${RUNNER_TEMP:-/tmp}/${KEYCHAIN_NAME}.keychain-db"
 
 # Generate random password — never echoed
-KEYCHAIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9!@#%^&*' < /dev/urandom | head -c 32 || true)
-# head exits 141 (SIGPIPE) when enough chars are read — that's OK; re-read if empty
-if [[ -z "${KEYCHAIN_PASSWORD}" ]]; then
-  KEYCHAIN_PASSWORD=$(LC_ALL=C cat /dev/urandom | tr -dc 'A-Za-z0-9' | fold -w 32 | head -n 1)
+# Read a fixed number of bytes. `tr < /dev/urandom | head -c N` relies on
+# SIGPIPE to stop tr; a self-hosted runner can start the step with SIGPIPE
+# ignored, and macOS tr then keeps reading /dev/urandom forever (the step hung
+# for 90 minutes before printing anything).
+KEYCHAIN_PASSWORD=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
+if [[ ${#KEYCHAIN_PASSWORD} -ne 48 ]]; then
+  echo "::error::create_keychain: could not generate a keychain password" >&2
+  exit 1
 fi
 
 # Mask the password in GitHub Actions logs
