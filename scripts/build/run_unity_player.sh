@@ -22,7 +22,15 @@
 #   --addressables-only     build Addressables content, not a player
 #   --log-file F            Unity log (default: Editor.log)
 #   --host-os OS            darwin | windows | linux (default: detected)
+#   --tests MODE            run the Unity Test Framework instead of a build:
+#                           EditMode | PlayMode | All (both, in that order)
+#   --results-dir DIR       test results root (default: test-results); each
+#                           mode writes DIR/<mode>/results.xml and Editor.log
 #   --dry-run               print the command instead of running it
+#
+# Test runs always exit 0: a mode with no tests exits non-zero, so the job's
+# verdict comes from the parsed results.xml (reusable-unity-tests.yml), and
+# Unity's exit code is reported as a warning.
 #
 # Contract with PlayerBuilder (unity-package/.../Builders/PlayerBuilder.cs):
 #   BUILD_OUTPUT_DIR=build    the upload step takes the workspace build/
@@ -39,6 +47,7 @@ die() { echo "::error::$*"; exit 2; }
 
 PLATFORM="" PROJECT="" EDITOR="${UNITY_EDITOR:-}" BUILD_METHOD="" PLAYER_METHOD=""
 ADDR_METHOD="" EXPORT_TYPE="apk" ADDR_ONLY=0 LOG_FILE="Editor.log" HOST_OS="" DRY_RUN=0
+TEST_MODE="" RESULTS_DIR="test-results"
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)            PLATFORM="${2:-}"; shift 2 ;;
@@ -51,11 +60,14 @@ while [ $# -gt 0 ]; do
     --addressables-only)   ADDR_ONLY=1; shift ;;
     --log-file)            LOG_FILE="${2:-}"; shift 2 ;;
     --host-os)             HOST_OS="${2:-}"; shift 2 ;;
+    --tests)               TEST_MODE="${2:-}"; shift 2 ;;
+    --results-dir)         RESULTS_DIR="${2:-}"; shift 2 ;;
     --dry-run)             DRY_RUN=1; shift ;;
     *) die "run_unity_player.sh: unknown argument '$1'" ;;
   esac
 done
-[ -n "${PLATFORM}" ] || die "run_unity_player.sh: --platform is required"
+# Tests run against the project's active target; no platform is needed.
+[ -n "${PLATFORM}" ] || [ -n "${TEST_MODE}" ] || die "run_unity_player.sh: --platform is required"
 [ -n "${PROJECT}" ] || die "run_unity_player.sh: --project is required"
 
 if [ -z "${HOST_OS}" ]; then
@@ -75,6 +87,40 @@ if command -v cygpath >/dev/null 2>&1; then
 fi
 [ -f "${EDITOR}" ] || die "Unity preflight did not provide an editor executable (got '${EDITOR}')."
 echo "Unity binary: ${EDITOR}"
+
+# MSYS rewrites arguments that look like POSIX paths before a Windows program
+# sees them; Unity's arguments are its own, not paths to translate.
+export MSYS2_ARG_CONV_EXCL='*'
+
+if [ -n "${TEST_MODE}" ]; then
+  case "${TEST_MODE}" in
+    EditMode|PlayMode) MODES=("${TEST_MODE}") ;;
+    All)               MODES=(EditMode PlayMode) ;;
+    *) die "run_unity_player.sh: --tests takes EditMode, PlayMode or All (got '${TEST_MODE}')" ;;
+  esac
+  # Absolute: Unity resolves a relative -testResults against the project, not
+  # the workspace. On Windows the editor is a native program and argument
+  # conversion is off (above), so it gets a C:/ path, not /c/.
+  case "${RESULTS_DIR}" in /*|[A-Za-z]:*) ;; *) RESULTS_DIR="${PWD}/${RESULTS_DIR}" ;; esac
+  for MODE in "${MODES[@]}"; do
+    OUT="${RESULTS_DIR}/${MODE}"
+    OUT_ARG="${OUT}"
+    if command -v cygpath >/dev/null 2>&1; then OUT_ARG="$(cygpath -m "${OUT}")"; fi
+    # No -quit: -runTests exits by itself once the run is done.
+    TEST_ARGS=(-batchmode -nographics -projectPath "${PROJECT}" -runTests
+               -testPlatform "${MODE}" -testResults "${OUT_ARG}/results.xml" -logFile "${OUT_ARG}/Editor.log")
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      printf '%s' "${EDITOR}"; printf ' %q' "${TEST_ARGS[@]}"; printf '\n'
+      continue
+    fi
+    mkdir -p "${OUT}"
+    echo "Running Unity ${MODE} tests..."
+    RC=0
+    "${EDITOR}" "${TEST_ARGS[@]}" || RC=$?
+    [ "${RC}" -eq 0 ] || echo "::warning::${MODE} tests exited with code ${RC}"
+  done
+  exit 0
+fi
 
 ARGS=(-batchmode -nographics -quit -projectPath "${PROJECT}")
 
@@ -123,7 +169,4 @@ if [ "${DRY_RUN}" -eq 1 ]; then
   printf '%s' "${EDITOR}"; printf ' %q' "${ARGS[@]}"; printf '\n'
   exit 0
 fi
-# MSYS rewrites arguments that look like POSIX paths before a Windows program
-# sees them; Unity's arguments are its own, not paths to translate.
-export MSYS2_ARG_CONV_EXCL='*'
 exec "${EDITOR}" "${ARGS[@]}"

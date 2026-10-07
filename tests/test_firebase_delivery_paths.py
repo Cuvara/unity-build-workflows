@@ -46,9 +46,11 @@ def test_publish_step_outputs_tester_and_direct_links():
 
 
 def test_result_file_and_discord_carry_the_direct_link():
-    reusable = REUSABLE.read_text(encoding="utf-8")
-    assert '"directDownloadUrl":"%s"' in reusable
-    assert "${{ steps.publish.outputs.direct-url }}" in reusable
+    writer = next(s for s in yaml.safe_load(REUSABLE.read_text(encoding="utf-8"))["jobs"]["build"]["steps"]
+                  if s.get("id") == "set-outputs")
+    assert writer["env"]["DIRECT_URL"] == "${{ steps.publish.outputs.direct-url }}"
+    result_writer = (REUSABLE.parent.parent.parent / "scripts" / "build" / "write_build_result.py").read_text(encoding="utf-8")
+    assert '"directDownloadUrl": env("DIRECT_URL")' in result_writer
     # Notify Discord's diagnostics (scripts/common/pipeline_results.py) carry it
     # after a "|" in the platform's download field.
     results = (REUSABLE.parent.parent.parent / "scripts" / "common" / "pipeline_results.py").read_text(encoding="utf-8")

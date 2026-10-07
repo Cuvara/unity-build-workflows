@@ -298,7 +298,11 @@ Build step shell selection:
 `scripts/build/run_unity_player.sh` is the one Unity command line of every
 native lane (Windows, macOS, the Addressables pre-step, and the Windows docker
 container): target mapping, build method, `BUILD_OUTPUT_DIR`, the AAB flag.
-The job's first step puts Git Bash ahead of the WSL launcher on `PATH`.
+The tests job runs the same script with `--tests EditMode|PlayMode|All`, and
+the Windows docker lane's container runs
+`scripts/build/docker_windows_container.sh` (Unity serial activation, then
+the build). The job's first step puts Git Bash ahead of the WSL launcher on
+`PATH`.
 
 ---
 
