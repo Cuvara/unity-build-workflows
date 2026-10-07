@@ -78,10 +78,13 @@ def run_resolver(extra):
 
 
 def matrix_script():
+    """The script the matrix step runs (scripts/common/resolve_build_matrix.sh)."""
     workflow = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))
     for step in workflow["jobs"]["resolve-config"]["steps"]:
         if step.get("id") == "matrix":
-            return step["run"]
+            if "resolve_build_matrix.sh" not in step["run"]:
+                raise SystemExit("the matrix step no longer runs resolve_build_matrix.sh")
+            return str(REPO_ROOT / "scripts" / "common" / "resolve_build_matrix.sh")
     raise SystemExit("no matrix step")
 
 
@@ -100,7 +103,7 @@ def run_matrix(flow, platform_input, extra_env):
         path = fh.name
     env["GITHUB_OUTPUT"] = path
     try:
-        proc = subprocess.run(["bash", "-c", matrix_script()], env=env, capture_output=True,
+        proc = subprocess.run(["bash", matrix_script()], env=env, capture_output=True,
                               text=True, cwd=str(REPO_ROOT))
         if proc.returncode != 0:
             raise SystemExit(f"matrix failed: {proc.stderr}")
