@@ -8,8 +8,9 @@ description: >-
   run is still going — so "how far did this get?" is answerable without
   reading the graph and reconstructing the order by eye.
 
-  A composite action rather than a reusable workflow because the release
-  pipelines already spend 3 of GitHub's 4 workflow_call levels.
+  A composite action rather than a reusable workflow: composite actions do
+  not count toward GitHub's 4 workflow_call levels, which the build flow
+  already spends 3 of.
 
 inputs:
   title:

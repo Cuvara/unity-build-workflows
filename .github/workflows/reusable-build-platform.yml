@@ -1028,7 +1028,7 @@ jobs:
       # Uses game-ci/unity-builder to spin up the Unity container and call the build method.
       - name: Build Addressables pre-step (docker)
         id: addressables-pre-docker
-        if: ${{ inputs.build-addressables == true && inputs.platform != 'Addressables' && inputs.build-engine == 'docker' && steps.ios-guard.outputs.blocked != 'true' }}
+        if: ${{ inputs.build-addressables == true && inputs.platform != 'Addressables' && inputs.build-engine == 'docker' && runner.os != 'Windows' && steps.ios-guard.outputs.blocked != 'true' }}
         uses: game-ci/unity-builder@v5
         env:
           UNITY_LICENSE:  ${{ secrets.UNITY_LICENSE }}
@@ -1318,7 +1318,7 @@ jobs:
             'set -eo pipefail',
             'export HOME=/tmp/unity-home',
             'mkdir -p "$HOME"',
-            'ACTIVATE_LOG=/project/Editor-activate.log',
+            'ACTIVATE_LOG=/workspace/Editor-activate.log',
             'echo "[docker-windows] Extracting Unity serial from UNITY_LICENSE (game-ci getSerialFromLicenseFile equivalent)..."',
             'DEV_DATA_B64=$(printf %s "$UNITY_LICENSE" | tr -d "\r\n" | sed -n "s/.*<DeveloperData Value=\"\([^\"]*\)\".*/\1/p")',
             'if [ -z "$DEV_DATA_B64" ]; then',
@@ -1360,7 +1360,7 @@ jobs:
             'done',
             'echo "[docker-windows] Activation OK. Building..."',
             'export BUILD_OUTPUT_DIR=build',
-            'BUILD_ARGS=(-batchmode -nographics -quit -projectPath /project -buildTarget "$BUILD_TARGET" -executeMethod "$BUILD_METHOD" -logFile /project/Editor.log)',
+            'BUILD_ARGS=(-batchmode -nographics -quit -projectPath /project -buildTarget "$BUILD_TARGET" -executeMethod "$BUILD_METHOD" -logFile /workspace/Editor.log)',
             'if [ -n "$EXTRA_PARAMS" ]; then',
             '  BUILD_ARGS+=($EXTRA_PARAMS)',
             'fi',
@@ -1373,7 +1373,7 @@ jobs:
             # plausible Editor.log location + size directly to the job console
             # so a build failure is diagnosable from the step log alone.
             'echo "[docker-windows] Build exited $BUILD_RC. Log file candidates:"',
-            'for f in /project/Editor.log /project/Library/Editor.log "$HOME/.config/unity3d/Editor.log" "$HOME/.local/share/unity3d/Editor.log"; do',
+            'for f in /workspace/Editor.log /project/Library/Editor.log "$HOME/.config/unity3d/Editor.log" "$HOME/.local/share/unity3d/Editor.log"; do',
             '  if [ -f "$f" ]; then',
             '    echo "--- $f ($(wc -c < "$f") bytes) ---"',
             '    tail -c 6000 "$f"',
@@ -1387,9 +1387,16 @@ jobs:
           # LF line endings only - this runs inside a Linux container via bash.
           [System.IO.File]::WriteAllText($scriptPath, ($containerScriptLines -join "`n"))
 
+          # The workspace is mounted too, and named GITHUB_WORKSPACE inside:
+          # PlayerBuilder resolves `build` against it, so the player lands in
+          # the workspace's build/ (what the upload step takes) even when
+          # project-path is a subfolder. Logs go to the workspace root, where
+          # the redaction and log-upload steps look on every other lane.
           docker run --rm `
             -v "${hostProject}:/project" `
+            -v "${workspace}:/workspace" `
             -v "${scriptPath}:/tmp/build.sh" `
+            -e GITHUB_WORKSPACE=/workspace `
             -e UNITY_LICENSE -e UNITY_EMAIL -e UNITY_PASSWORD `
             -e "BUILD_TARGET=$buildTarget" -e "BUILD_METHOD=$buildMethod" -e "EXTRA_PARAMS=$extraParams" `
             -e "ANDROID_APP_BUNDLE=$androidAppBundle" `
@@ -2106,7 +2113,7 @@ jobs:
           working-directory: .toolkit
 
       - name: Fastlane — Upload to Google Play
-        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && inputs.platform == 'Android' && steps.ios-guard.outputs.blocked != 'true' }}
+        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && inputs.platform == 'Android' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
         continue-on-error: true
         env:
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
@@ -2133,7 +2140,7 @@ jobs:
           fi
 
       - name: Fastlane — Upload to TestFlight
-        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && inputs.platform == 'iOS' && inputs.sign-ios && steps.ios-guard.outputs.blocked != 'true' }}
+        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && inputs.platform == 'iOS' && inputs.sign-ios && steps.ios-guard.outputs.blocked != 'true' && steps.ios-archive.outputs.ipa-path != '' }}
         continue-on-error: true
         env:
           APP_STORE_CONNECT_KEY_ID:      ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
