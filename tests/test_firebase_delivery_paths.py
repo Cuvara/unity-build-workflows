@@ -49,7 +49,12 @@ def test_result_file_and_discord_carry_the_direct_link():
     reusable = REUSABLE.read_text(encoding="utf-8")
     assert '"directDownloadUrl":"%s"' in reusable
     assert "${{ steps.publish.outputs.direct-url }}" in reusable
-    assert 'd.get("directDownloadUrl"' in PIPELINE.read_text(encoding="utf-8")
+    # Notify Discord's diagnostics (scripts/common/pipeline_results.py) carry it
+    # after a "|" in the platform's download field.
+    results = (REUSABLE.parent.parent.parent / "scripts" / "common" / "pipeline_results.py").read_text(encoding="utf-8")
+    assert 'row.get("directDownloadUrl")' in results
+    assert 'download + ("|" + direct if direct else "")' in results
+    assert "pipeline_results.py diagnostics" in PIPELINE.read_text(encoding="utf-8")
     discord = DISCORD.read_text(encoding="utf-8")
     assert "[⬇️ testers](${BIN_URL}) · [⬇️ direct, 1 h](${DIRECT_URL})" in discord
 

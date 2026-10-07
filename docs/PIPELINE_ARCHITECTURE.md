@@ -628,7 +628,10 @@ The artifact is fetched from artifact storage, so re-publishing publishes the
 * **A matrix job's legs are not addressable from `needs:`.** `needs.build.result`
   is one aggregate for the whole matrix, so the report cannot ask "how did
   Android do?" directly. Each leg therefore uploads a small
-  `pipeline-result-<stage>-<platform>` artifact and stage 07 aggregates them.
+  `pipeline-result-<stage>-<platform>` artifact and stage 07 aggregates them
+  (`scripts/common/pipeline_results.py`, shared by Final Report and Notify
+  Discord; a leg whose artifact did not upload is filled from its
+  `result-json-<Platform>` job output).
   That is the one piece of indirection the matrix costs — and it buys a report
   that covers whichever platforms actually ran, with real per-platform artifact
   type, size and duration instead of a hardcoded table.

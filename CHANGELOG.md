@@ -8,6 +8,29 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [6.23.2] — 2026-10-07
+
+### Changed
+
+- **The report jobs share one script.** Final Report and Notify Discord held
+  about 400 lines of inline Python over the same build results, and the
+  "fill missing results from the build outputs" block was copied into both.
+  That logic is now `scripts/common/pipeline_results.py` (`fill-missing`,
+  `final-report`, `discord-status`, `attachable`, `diagnostics`), tested on its
+  own, and the jobs call it. `unity-pipeline.yml` drops from 2708 to about
+  2200 lines. The report and the Discord message are unchanged.
+
+### Fixed
+
+- **Discord lost its error and warning counts in v6.23.0.** The counts were
+  grepped from `Editor.log` in the downloaded log artifacts, and Notify
+  Discord stopped downloading those when it began downloading only what it
+  can attach. They now come from each build leg's own log summary (the result
+  file's `errorCount` / `warningCount`), with a new `logMeasured` field so a
+  lane that wrote no Editor log (Docker / game-ci) still shows no count,
+  instead of a zero nobody measured. `summarise_unity_log.py` gains a
+  `log-found` output.
+
 ## [6.23.1] — 2026-10-07
 
 ### Fixed

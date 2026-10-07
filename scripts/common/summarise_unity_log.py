@@ -285,6 +285,9 @@ def main(argv=None):
         with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
             fh.write(f"error-count={len(errors)}\n")
             fh.write(f"warning-count={len(warnings)}\n")
+            # Whether the counts above come from a Unity Editor log at all;
+            # with none, they are zero because nothing was read.
+            fh.write(f"log-found={'true' if saw_editor_log else 'false'}\n")
             first = errors[0]["message"].replace("\n", " ")[:200] if errors else ""
             fh.write(f"first-error={first}\n")
 
