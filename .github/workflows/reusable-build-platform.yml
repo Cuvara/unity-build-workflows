@@ -1280,7 +1280,7 @@ jobs:
 
           # Inside the container: activate Unity the way game-ci does for Unity
           # Personal, then build with run_unity_player.sh, like every native
-          # lane — scripts/build/docker_windows_container.sh, from the toolkit
+          # lane: scripts/build/docker_windows_container.sh, from the toolkit
           # checkout in the mounted workspace. Never echoes secret values.
 
           # The workspace is mounted too, and named GITHUB_WORKSPACE inside:
