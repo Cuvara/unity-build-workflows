@@ -1823,27 +1823,18 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days }}
           compression-level: 6
 
-      # ── Step 11a-pre: Setup Fastlane for Firebase delivery ──────────────────
-      - name: Setup Fastlane (delivery)
-        # Delivery never fails a build: a missing Ruby is a warning on the
-        # run, and the upload step below reports it again.
-        continue-on-error: true
-        if: ${{ inputs.build-delivery == 'firebase' && (inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios)) && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
-        uses: ./.toolkit/.github/actions/setup-fastlane
-        with:
-          working-directory: .toolkit
-
-      # ── Step 11a: Publish the build where a person can download it ─────────
-      # A GitHub artifact link 404s for anyone not signed in with repository
-      # access — on a public repo too — so the link in a Discord message is
-      # useless to exactly the people who need it. This copies the build to a
-      # host that serves it. Off by default; nothing changes until a project
-      # sets BUILD_DELIVERY.
-      - name: Publish the build for download
+      # ── Step 11a: Deliver the build — testers and, for Production, stores ──
+      # Firebase / R2 / local for testers (BUILD_DELIVERY), Google Play
+      # internal and TestFlight when ARTIFACT_STORAGE=firebase. In this job,
+      # not a job of its own: with firebase storage the binary exists only on
+      # this runner's disk. Delivery never fails the build. `id: publish`
+      # feeds download-url / direct-url to the result file below.
+      - name: Deliver the build
         id: publish
-        if: ${{ always() && inputs.platform != 'Addressables' && (inputs.build-delivery != 'firebase' || inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios)) && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
+        continue-on-error: true
+        if: ${{ always() && inputs.platform != 'Addressables' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
+        uses: ./.toolkit/.github/actions/deliver-build
         env:
-          BUILD_DELIVERY:         ${{ inputs.build-delivery }}
           # Public ids, safe to log.
           R2_ACCOUNT_ID:          ${{ vars.R2_ACCOUNT_ID }}
           CLOUDFLARE_ACCOUNT_ID:  ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -1851,172 +1842,29 @@ jobs:
           R2_PUBLIC_BASE_URL:     ${{ vars.R2_PUBLIC_BASE_URL }}
           BUILD_PUBLISH_DIR:      ${{ vars.BUILD_PUBLISH_DIR }}
           BUILD_PUBLISH_BASE_URL: ${{ vars.BUILD_PUBLISH_BASE_URL }}
-          # Credentials, never printed by the script.
-          R2_ACCESS_KEY_ID:       ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY:   ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          # Firebase App Distribution
-          FIREBASE_APP_ID:              ${{ inputs.platform == 'iOS' && vars.FIREBASE_APP_ID_IOS || vars.FIREBASE_APP_ID_ANDROID }}
-          FIREBASE_TESTER_GROUPS:       ${{ vars.FIREBASE_TESTER_GROUPS }}
-          FIREBASE_RELEASE_NOTES:       ${{ inputs.configuration }} ${{ inputs.platform }} build ${{ inputs.build-number }}
-          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          ARTIFACT="${{ steps.manifest.outputs.artifact-path }}"
-
-          # Firebase delivery uses Fastlane plugin (no CLI needed).
-          if [ "${BUILD_DELIVERY}" = "firebase" ]; then
-            if [ "${{ inputs.platform }}" = "iOS" ] && [ -n "${{ steps.ios-archive.outputs.ipa-path }}" ]; then
-              ARTIFACT="${{ steps.ios-archive.outputs.ipa-path }}"
-            fi
-            test -f "${ARTIFACT}" || { echo "::warning::No artifact to deliver"; exit 0; }
-
-            # Write service account to temp file for Fastlane plugin
-            SA_FILE=$(mktemp)
-            printf '%s' "${FIREBASE_SERVICE_ACCOUNT_JSON}" > "${SA_FILE}"
-            trap 'rm -f "${SA_FILE}"' EXIT
-            # On Windows mktemp gives a Git Bash path (/tmp/...); the Ruby
-            # that runs fastlane is a native Windows program and cannot open
-            # it ("Service credentials file does not exist").
-            SA_PATH="${SA_FILE}"
-            # The lane writes the uploaded release's links here (tester page,
-            # 1-hour direct download) for the result file and Discord.
-            RI_FILE=$(mktemp)
-            trap 'rm -f "${SA_FILE}" "${RI_FILE}"' EXIT
-            RI_PATH="${RI_FILE}"
-            if command -v cygpath >/dev/null 2>&1; then
-              SA_PATH="$(cygpath -w "${SA_FILE}")"
-              RI_PATH="$(cygpath -w "${RI_FILE}")"
-            fi
-
-            cd .toolkit
-            # Fastlane and its Firebase plugin come from the toolkit Gemfile.
-            # Nothing installed them, so on a self-hosted runner `bundle exec`
-            # died with "Could not find gem" and `|| true` hid it: a green
-            # build, nothing in Firebase. Install into a per-runner cache
-            # (no sudo), and say what went wrong instead of swallowing it.
-            # A delivery failure still never fails the build.
-            if ! command -v bundle >/dev/null 2>&1; then
-              echo "::warning title=Firebase delivery skipped::Ruby with Bundler is not installed on this runner (gem install bundler). The build was not uploaded to Firebase."
-              exit 0
-            fi
-            bundle config set --local path "${RUNNER_TOOL_CACHE:-${HOME}/.cache}/toolkit-gems" >/dev/null || true
-            if ! bundle install --quiet; then
-              echo "::warning title=Firebase delivery skipped::bundle install failed for the toolkit Gemfile (fastlane + firebase_app_distribution) — see the log above. The build was not uploaded to Firebase."
-              exit 0
-            fi
-            if [ "${{ inputs.platform }}" = "iOS" ]; then
-              LANE=(ios firebase_distribute ipa_path:"${GITHUB_WORKSPACE}/${ARTIFACT}")
-            else
-              LANE=(android firebase_distribute apk_path:"${GITHUB_WORKSPACE}/${ARTIFACT}")
-            fi
-            if ! bundle exec fastlane "${LANE[@]}" \
-                app_id:"${FIREBASE_APP_ID}" \
-                service_account_path:"${SA_PATH}" \
-                groups:"${FIREBASE_TESTER_GROUPS}" \
-                release_notes:"${FIREBASE_RELEASE_NOTES}" \
-                release_info:"${RI_PATH}"; then
-              echo "::warning title=Firebase upload failed::fastlane firebase_distribute failed — see its output above. Check FIREBASE_APP_ID_ANDROID / FIREBASE_APP_ID_IOS, FIREBASE_SERVICE_ACCOUNT_JSON (role: Firebase App Distribution Admin) and FIREBASE_TESTER_GROUPS (groups must exist)."
-              exit 0
-            fi
-            cd "${GITHUB_WORKSPACE}"
-
-            # Two links for the notification:
-            #   download-url  the release's tester page — does not expire; a
-            #                 tester signs in with the invited Google account
-            #   direct-url    the binary itself, signed by Firebase for about
-            #                 one hour — anyone holding it can download
-            # Without the lane's release info (older toolkit Fastfile, plugin
-            # change) fall back to the project's App Distribution console.
-            read_release() {
-              python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]) or "")' \
-                "${RI_FILE}" "$1" 2>/dev/null || true
-            }
-            TESTER_URL="$(read_release testingUri)"
-            DIRECT_URL="$(read_release binaryDownloadUri)"
-            if [ -z "${TESTER_URL}" ]; then
-              PROJECT_ID=$(printf '%s' "${FIREBASE_SERVICE_ACCOUNT_JSON}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("project_id",""))' 2>/dev/null) || PROJECT_ID=""
-              [ -n "${PROJECT_ID}" ] && TESTER_URL="https://console.firebase.google.com/project/${PROJECT_ID}/appdistribution"
-            fi
-            if [ -n "${TESTER_URL}" ]; then
-              echo "download-url=${TESTER_URL}" >> "${GITHUB_OUTPUT}"
-              echo "[publish] testers: ${TESTER_URL}"
-            fi
-            if [ -n "${DIRECT_URL}" ]; then
-              echo "direct-url=${DIRECT_URL}" >> "${GITHUB_OUTPUT}"
-              echo "[publish] direct download (expires in about 1 hour) recorded"
-            fi
-            exit 0
-          fi
-
-          # R2 / local delivery via publish_build.py
-          if [ ! -f ".toolkit/scripts/common/publish_build.py" ]; then
-            echo "::warning::toolkit checkout unavailable — skipping delivery"
-            exit 0
-          fi
-          KEY="${GITHUB_REF_NAME//\//-}/${GITHUB_RUN_NUMBER}/${GITHUB_SHA:0:7}/$(basename "${ARTIFACT}")"
-          python3 .toolkit/scripts/common/publish_build.py \
-            --file "${ARTIFACT}" \
-            --key  "${KEY}" \
-            --github-output
-
-      # ── Step 11a-fastlane: Direct-to-store release (firebase storage mode) ──
-      # When ARTIFACT_STORAGE=firebase and this is a release build, Fastlane
-      # uploads the binary directly to the store from the build runner. No
-      # GitHub artifact, no separate release pipeline — build once, ship once.
-      - name: Setup Fastlane (release)
-        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
-        uses: ./.toolkit/.github/actions/setup-fastlane
-        with:
-          working-directory: .toolkit
-
-      - name: Fastlane — Upload to Google Play
-        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && inputs.platform == 'Android' && steps.ios-guard.outputs.blocked != 'true' && steps.manifest.outputs.artifact-path != '' }}
-        continue-on-error: true
-        env:
+          # Credentials, never printed or put on a command line.
+          R2_ACCESS_KEY_ID:                 ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY:             ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          FIREBASE_SERVICE_ACCOUNT_JSON:    ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
-            echo "::warning::GOOGLE_PLAY_SERVICE_ACCOUNT_JSON not set — skipping Google Play upload"
-            exit 0
-          fi
-          ARTIFACT="${{ steps.manifest.outputs.artifact-path }}"
-          EXT="${ARTIFACT##*.}"
-          cd .toolkit
-          if [ "${EXT}" = "aab" ]; then
-            bundle exec fastlane android upload_internal \
-              package_name:"${{ vars.ANDROID_PACKAGE_NAME }}" \
-              aab_path:"${GITHUB_WORKSPACE}/${ARTIFACT}" \
-              version_name:"${{ inputs.app-version }}"
-          else
-            bundle exec fastlane android upload_internal \
-              package_name:"${{ vars.ANDROID_PACKAGE_NAME }}" \
-              apk_path:"${GITHUB_WORKSPACE}/${ARTIFACT}" \
-              version_name:"${{ inputs.app-version }}"
-          fi
-
-      - name: Fastlane — Upload to TestFlight
-        if: ${{ inputs.artifact-storage == 'firebase' && inputs.configuration == 'Production' && inputs.platform == 'iOS' && inputs.sign-ios && steps.ios-guard.outputs.blocked != 'true' && steps.ios-archive.outputs.ipa-path != '' }}
-        continue-on-error: true
-        env:
-          APP_STORE_CONNECT_KEY_ID:      ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID:   ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          if [ -z "${APP_STORE_CONNECT_KEY_ID:-}" ]; then
-            echo "::warning::APP_STORE_CONNECT_KEY_ID not set — skipping TestFlight upload"
-            exit 0
-          fi
-          IPA_PATH="${{ steps.ios-archive.outputs.ipa-path }}"
-          cd .toolkit
-          bundle exec fastlane ios upload_testflight \
-            ipa_path:"${GITHUB_WORKSPACE}/${IPA_PATH}" \
-            app_id:"${{ vars.IOS_APP_ID }}" \
-            wait_for_processing:true
+          APP_STORE_CONNECT_KEY_ID:         ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID:      ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY:    ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        with:
+          platform:               ${{ inputs.platform }}
+          artifact-path:          ${{ steps.manifest.outputs.artifact-path }}
+          ipa-path:               ${{ steps.ios-archive.outputs.ipa-path }}
+          build-delivery:         ${{ inputs.build-delivery }}
+          artifact-storage:       ${{ inputs.artifact-storage }}
+          configuration:          ${{ inputs.configuration }}
+          build-number:           ${{ inputs.build-number }}
+          app-version:            ${{ inputs.app-version }}
+          sign-ios:               ${{ inputs.sign-ios }}
+          job-status:             ${{ job.status }}
+          firebase-app-id:        ${{ inputs.platform == 'iOS' && vars.FIREBASE_APP_ID_IOS || vars.FIREBASE_APP_ID_ANDROID }}
+          firebase-tester-groups: ${{ vars.FIREBASE_TESTER_GROUPS }}
+          android-package-name:   ${{ vars.ANDROID_PACKAGE_NAME }}
+          ios-app-id:             ${{ vars.IOS_APP_ID }}
 
       # ── Step 11b: Surface what the log says ────────────────────────────────
       # A failed Unity build used to say "Process completed with exit code 1"

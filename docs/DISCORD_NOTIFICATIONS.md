@@ -257,6 +257,13 @@ When adding a platform's zip would push the cumulative total over the threshold,
 
 The threshold is configurable via the `attach-size-threshold-mb` action input (default `24`).
 
+`unity-pipeline.yml` downloads only the builds that can be attached: its
+Notify Discord job reads each platform's result file and downloads a binary
+artifact only when the build succeeded and its measured size is within the
+threshold the pipeline passes (8 MB). Everything else is linked, so a run with
+a 300 MB APK no longer pulls 300 MB onto the notification runner to attach
+nothing.
+
 ---
 
 ## Example Embed
