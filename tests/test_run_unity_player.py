@@ -104,3 +104,48 @@ def test_missing_editor_is_reported(tmp_path):
                        capture_output=True, text=True, env={**os.environ, "UNITY_EDITOR": ""})
     assert r.returncode == 2
     assert "Unity preflight did not provide an editor executable" in r.stdout
+
+
+# ── --tests: the native test lanes run the same script ─────────────────────
+
+@pytest.fixture
+def test_editor(tmp_path):
+    """A stand-in Unity that appends one argv line per run, and fails on PlayMode."""
+    calls = tmp_path / "calls"
+    fake = tmp_path / "UnityTests"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f'echo "$*" >> "{calls}"\n'
+        'case "$*" in *PlayMode*) exit 2 ;; esac\n'
+        "exit 0\n")
+    fake.chmod(0o755)
+    return fake, calls
+
+
+def test_all_runs_editmode_then_playmode_and_never_fails_the_step(test_editor, tmp_path):
+    fake, calls = test_editor
+    r = subprocess.run(["bash", str(SCRIPT), "--tests", "All", "--project", "proj",
+                        "--editor", str(fake), "--results-dir", str(tmp_path / "res")],
+                       capture_output=True, text=True, cwd=tmp_path)
+    # The verdict is the parsed results.xml; Unity's exit code is a warning.
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "::warning::PlayMode tests exited with code 2" in r.stdout
+    lines = calls.read_text().splitlines()
+    assert [l.split("-testPlatform ")[1].split()[0] for l in lines] == ["EditMode", "PlayMode"]
+    assert f"-testResults {tmp_path / 'res'}/EditMode/results.xml" in lines[0]
+    assert "-runTests" in lines[0] and "-quit" not in lines[0]
+    assert (tmp_path / "res" / "PlayMode").is_dir()
+
+
+def test_a_relative_results_dir_is_made_absolute(test_editor, tmp_path):
+    fake, calls = test_editor
+    subprocess.run(["bash", str(SCRIPT), "--tests", "EditMode", "--project", "p",
+                    "--editor", str(fake)], capture_output=True, text=True, cwd=tmp_path)
+    assert f"-testResults {tmp_path}/test-results/EditMode/results.xml" in calls.read_text()
+
+
+def test_an_unknown_test_mode_is_a_usage_error(test_editor, tmp_path):
+    fake, _ = test_editor
+    r = subprocess.run(["bash", str(SCRIPT), "--tests", "Everything", "--project", "p",
+                        "--editor", str(fake)], capture_output=True, text=True, cwd=tmp_path)
+    assert r.returncode == 2 and "--tests takes EditMode, PlayMode or All" in r.stdout

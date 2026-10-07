@@ -74,6 +74,10 @@ ALLOWED_PATHS = frozenset({
     # instead of each spelling the Unity command line in its own shell. It
     # is the same approved native invocation, moved to a single place.
     "scripts/build/run_unity_player.sh",
+    # The Windows-runner docker lane's in-container script: game-ci's serial
+    # activation, then run_unity_player.sh. It was an inline PowerShell array
+    # inside reusable-build-platform.yml (already allowed), moved verbatim.
+    "scripts/build/docker_windows_container.sh",
 })
 
 # ---------------------------------------------------------------------------

@@ -486,123 +486,24 @@ jobs:
           fi
           echo "Unity ${UNITY_VERSION} for tests: ${UNITY_EDITOR} (${UNITY_EDITOR_SOURCE})"
 
-      # ── 4c. Run tests — self-hosted-windows lane ──────────────────────────────
-      # Local Unity installation (no Docker, no license secrets).
-      # Runs EditMode and/or PlayMode sequentially; continues past EditMode failure for All.
-      - name: Run tests (Windows)
-        if: ${{ inputs.build-engine == 'local' && runner.os == 'Windows' }}
-        # Windows PowerShell (always present on Windows); do NOT require pwsh
-        # (PowerShell 7), which self-hosted Windows runners may not have.
-        shell: powershell
-        env:
-          TEST_MODE:     ${{ inputs.test-mode }}
-          PROJECT_PATH:  ${{ inputs.project-path }}
-          UNITY_VERSION: ${{ inputs.unity-version }}
-          UNITY_EDITOR:  ${{ steps.unity-preflight.outputs.unity_editor }}
-        run: |
-          # Editor found or installed by the preflight step above.
-          $unityExe = $env:UNITY_EDITOR
-          if (-not $unityExe) { $unityExe = "C:\Program Files\Unity\Hub\Editor\$env:UNITY_VERSION\Editor\Unity.exe" }
-          if (-not (Test-Path $unityExe)) {
-            Write-Error "Unity executable not found: $unityExe"
-            exit 1
-          }
-
-          $resultsDir = Join-Path $PWD "test-results"
-          $exitCode = 0
-
-          function Run-UnityTests {
-            param([string]$Mode)
-            $outDir = Join-Path $resultsDir $Mode
-            New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-            # NOTE: do NOT name this $args - that is a reserved automatic variable;
-            # reassigning it breaks @-splatting so Unity would receive no arguments.
-            $unityArgs = @(
-              "-batchmode", "-nographics",
-              "-projectPath", $env:PROJECT_PATH,
-              "-runTests",
-              "-testPlatform", $Mode,
-              "-testResults", (Join-Path $outDir "results.xml"),
-              "-logFile",     (Join-Path $outDir "Editor.log")
-            )
-            Write-Host "Running Unity $Mode tests ($unityExe)..."
-            # Unity.exe is a GUI-subsystem app - `& $exe` does NOT wait for it,
-            # so the step would return before results.xml is written. Start-Process
-            # -Wait blocks until Unity exits; -PassThru gives the real exit code.
-            $proc = Start-Process -FilePath $unityExe -ArgumentList $unityArgs -Wait -PassThru -NoNewWindow
-            return $proc.ExitCode
-          }
-
-          if ($env:TEST_MODE -eq "EditMode" -or $env:TEST_MODE -eq "All") {
-            $rc = Run-UnityTests "EditMode"
-            if ($rc -ne 0) {
-              Write-Warning "EditMode tests exited with code $rc"
-              $exitCode = $rc
-            }
-          }
-
-          if ($env:TEST_MODE -eq "PlayMode" -or $env:TEST_MODE -eq "All") {
-            $rc = Run-UnityTests "PlayMode"
-            if ($rc -ne 0) {
-              Write-Warning "PlayMode tests exited with code $rc"
-              $exitCode = $rc
-            }
-          }
-
-          # Do not fail here; job result is decided by parsed tests-failed below.
-          Write-Host "Runner aggregate exit code (informational): $exitCode"
-          exit 0
-
-      # ── 4d. Run tests — self-hosted-macOS lane ────────────────────────────────
-      # Local Unity installation on macOS (no Docker, no license secrets).
-      - name: Run tests (macOS)
-        if: ${{ inputs.build-engine == 'local' && runner.os == 'macOS' }}
+      # ── 4c. Run tests — self-hosted Windows / macOS lanes ─────────────────────
+      # The local editor the preflight step found or installed (no Docker, no
+      # license secrets). run_unity_player.sh --tests is the same script the
+      # build lanes use, so the editor path, Git Bash path conversion and
+      # results layout are spelled once. It runs EditMode then PlayMode for
+      # All and always exits 0: the verdict is the parsed results below (a
+      # mode with no tests exits non-zero). Git Bash waits for Unity.exe,
+      # which PowerShell's `&` did not (a GUI-subsystem program).
+      - name: Run tests (self-hosted)
+        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') }}
         shell: bash
         env:
           TEST_MODE:     ${{ inputs.test-mode }}
           PROJECT_PATH:  ${{ inputs.project-path }}
-          UNITY_VERSION: ${{ inputs.unity-version }}
           UNITY_EDITOR:  ${{ steps.unity-preflight.outputs.unity_editor }}
         run: |
-          set -euo pipefail
-
-          # Editor found or installed by the preflight step above.
-          UNITY_APP="${UNITY_EDITOR:-/Applications/Unity/Hub/Editor/${UNITY_VERSION}/Unity.app/Contents/MacOS/Unity}"
-          if [ ! -x "${UNITY_APP}" ]; then
-            echo "::error::Unity executable not found: ${UNITY_APP}"
-            exit 1
-          fi
-
-          RESULTS_DIR="${PWD}/test-results"
-          EXIT_CODE=0
-
-          run_unity_tests() {
-            local mode="$1"
-            local out_dir="${RESULTS_DIR}/${mode}"
-            mkdir -p "${out_dir}"
-            echo "Running Unity ${mode} tests..."
-            "${UNITY_APP}" \
-              -batchmode -nographics \
-              -projectPath "${PROJECT_PATH}" \
-              -runTests \
-              -testPlatform "${mode}" \
-              -testResults "${out_dir}/results.xml" \
-              -logFile "${out_dir}/Editor.log" \
-              || { echo "::warning::${mode} tests exited non-zero ($?)"; EXIT_CODE=$?; }
-          }
-
-          if [[ "${TEST_MODE}" == "EditMode" || "${TEST_MODE}" == "All" ]]; then
-            run_unity_tests "EditMode"
-          fi
-
-          if [[ "${TEST_MODE}" == "PlayMode" || "${TEST_MODE}" == "All" ]]; then
-            run_unity_tests "PlayMode"
-          fi
-
-          # Do not fail here on a non-zero runner exit (e.g. a mode with no
-          # tests). The job result is decided by parsed tests-failed below.
-          echo "Runner aggregate exit code (informational): ${EXIT_CODE}"
-          exit 0
+          bash .toolkit/scripts/build/run_unity_player.sh --tests "${TEST_MODE}" \
+            --project "${PROJECT_PATH}" --editor "${UNITY_EDITOR}" --results-dir test-results
 
       # ── 5. Parse NUnit XML results ────────────────────────────────────────────
       # Sums passed/failed counts across all result XML files produced above.

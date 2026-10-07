@@ -23,16 +23,18 @@ def _steps():
 def test_preflight_runs_before_the_native_test_steps():
     names = [s.get("name") for s in _steps()]
     pre = names.index("Unity preflight (provision editor)")
-    assert pre < names.index("Run tests (Windows)")
-    assert pre < names.index("Run tests (macOS)")
+    assert pre < names.index("Run tests (self-hosted)")
     assert "unity-preflight.sh" in _steps()[pre]["run"]
 
 
 def test_native_test_steps_use_the_preflight_editor():
-    for name in ("Run tests (Windows)", "Run tests (macOS)"):
-        step = next(s for s in _steps() if s.get("name") == name)
-        assert step["env"]["UNITY_EDITOR"] == "${{ steps.unity-preflight.outputs.unity_editor }}", name
-        assert "UNITY_EDITOR" in step["run"], name
+    step = next(s for s in _steps() if s.get("name") == "Run tests (self-hosted)")
+    assert step["env"]["UNITY_EDITOR"] == "${{ steps.unity-preflight.outputs.unity_editor }}"
+    assert '--editor "${UNITY_EDITOR}"' in step["run"]
+    # One step and one script for both native lanes, as for the build.
+    assert "run_unity_player.sh --tests" in step["run"]
+    assert step["shell"] == "bash"
+    assert "runner.os == 'Windows' || runner.os == 'macOS'" in step["if"]
 
 
 def test_pipeline_passes_the_toolkit_repo_to_the_tests():

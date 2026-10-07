@@ -8,6 +8,42 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **The build leg's result is written by a script.** "Set job outputs" in
+  `reusable-build-platform.yml` was ~100 lines of bash that built the result
+  JSON with `printf`. It is now `scripts/build/write_build_result.py`: same
+  file (`pipeline-results/build-<Platform>.json`), same fields in the same
+  order, same outputs (`result-json` still hex). A blocked iOS leg, which has
+  no toolkit checkout, still reports `blocked` through a short bash fallback.
+- **The Windows docker lane's container script is a file.** The ~90-line
+  PowerShell array of bash lines (Unity serial activation, then
+  `run_unity_player.sh`) is `scripts/build/docker_windows_container.sh`, run
+  from the mounted workspace. It now prints the Editor.log tails when the
+  build fails, which `set -e` had skipped.
+- **The native test lanes run `run_unity_player.sh --tests`.** The Windows
+  (PowerShell) and macOS (bash) "Run tests" steps of `reusable-unity-tests.yml`
+  are one bash step, `Run tests (self-hosted)`. `--tests EditMode|PlayMode|All`
+  with `--results-dir` writes `<dir>/<mode>/results.xml` and `Editor.log`, as
+  before, and always exits 0 (the verdict is the parsed results).
+
+### Fixed
+
+- **A Unity error message could run as shell.** The first error from the
+  Unity log was spliced into the "Set job outputs" script by `${{ }}`, so a
+  message containing `$(...)` or a backtick was executed by bash. Every value
+  now reaches the script through `env:` and is serialized by `json`.
+- **A full artifact storage quota failed an iOS build that had shipped.**
+  "iOS — Upload IPA artifact manifest" had no `continue-on-error`, unlike the
+  build's own manifest upload, so a run whose IPA was archived, exported and
+  delivered to Firebase went red. It is now `continue-on-error`, and "iOS —
+  Upload signed IPA" matches the build artifact upload (tolerated on
+  self-hosted runners).
+- **The macOS test lane reported the wrong exit code** (`$?` of the `echo` in
+  its warning); `--tests` reports Unity's.
+
 ## [6.23.2] — 2026-10-07
 
 ### Changed

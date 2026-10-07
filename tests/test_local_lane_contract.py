@@ -46,8 +46,20 @@ def test_every_lane_tells_the_builder_which_android_artifact_to_make():
         assert '--android-export-type "${{ inputs.android-export-type }}"' in step["run"], step_id
     docker = next(st for st in yaml.safe_load(TEXT)["jobs"]["build"]["steps"]
                   if st.get("id") == "build-docker-windows")["run"]
-    assert "run_unity_player.sh" in docker, "the Windows docker lane runs the same script in its container"
+    # The Windows docker lane runs the same script, inside its container.
+    assert "bash /workspace/.toolkit/scripts/build/docker_windows_container.sh" in docker
+    container = (REPO_ROOT / "scripts" / "build" / "docker_windows_container.sh").read_text(encoding="utf-8")
+    assert "/workspace/.toolkit/scripts/build/run_unity_player.sh" in container
+    assert '--android-export-type "$ANDROID_EXPORT_TYPE"' in container
     assert '-e "ANDROID_EXPORT_TYPE=${{ inputs.android-export-type }}"' in docker
+
+
+def test_the_windows_docker_container_prints_the_log_when_the_build_fails():
+    """Under `set -e` the old inline script exited at the failed build, so the
+    "Log file candidates" tail meant for exactly that case never printed."""
+    container = (REPO_ROOT / "scripts" / "build" / "docker_windows_container.sh").read_text(encoding="utf-8")
+    assert "|| BUILD_RC=$?" in container
+    assert container.rstrip().endswith("exit $BUILD_RC")
 
 
 @pytest.mark.parametrize("platform,target", [

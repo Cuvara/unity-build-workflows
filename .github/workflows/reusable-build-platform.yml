@@ -1278,94 +1278,10 @@ jobs:
             exit 1
           }
 
-          # In-container script: activate the SAME way game-ci/unity-builder's
-          # own entrypoint does for Unity Personal (root-caused and documented
-          # in docs/UNITY_PERSONAL_DOCKER_LICENSE.md, "Recommended fix", after
-          # a live-log comparison against a working GitHub-hosted run). The
-          # toolkit's activate-license.sh personal-combined path (writes the
-          # raw .ulf + `-username`/`-password` only) does NOT mirror game-ci
-          # and fails with "TimeStamp validation failed" in a fresh container.
-          # game-ci instead: (1) extracts the Unity SERIAL embedded in the
-          # .ulf's <DeveloperData Value="..."> node (base64-decode, drop the
-          # first 4 bytes), (2) randomizes /etc/machine-id when that serial
-          # starts with 'F' (Personal), (3) activates in SERIAL LICENSE MODE
-          # (`-serial ... -username ... -password ...`) against a scratch
-          # project, never pre-placing the raw .ulf. Replicated here; then
-          # build via PlayerBuilder.Build. Runs as a single `bash -c`
-          # invocation so activation persists in the same container
-          # filesystem for the build step. Never echoes secret values.
-          # Built from an array (not a here-string) so every line stays indented
-          # inside this YAML block scalar; joined with LF for the Linux container.
-          $containerScriptLines = @(
-            'set -eo pipefail',
-            'export HOME=/tmp/unity-home',
-            'mkdir -p "$HOME"',
-            'ACTIVATE_LOG=/workspace/Editor-activate.log',
-            'echo "[docker-windows] Extracting Unity serial from UNITY_LICENSE (game-ci getSerialFromLicenseFile equivalent)..."',
-            'DEV_DATA_B64=$(printf %s "$UNITY_LICENSE" | tr -d "\r\n" | sed -n "s/.*<DeveloperData Value=\"\([^\"]*\)\".*/\1/p")',
-            'if [ -z "$DEV_DATA_B64" ]; then',
-            '  echo "::error::Could not find <DeveloperData Value=\"...\"> in UNITY_LICENSE - cannot derive Unity serial for activation."',
-            '  exit 1',
-            'fi',
-            'SERIAL=$(printf %s "$DEV_DATA_B64" | base64 -d 2>/dev/null | tail -c +5)',
-            'if [ -z "$SERIAL" ]; then',
-            '  echo "::error::Failed to decode Unity serial from UNITY_LICENSE DeveloperData."',
-            '  exit 1',
-            'fi',
-            'echo "[docker-windows] Serial derived (masked): ${SERIAL:0:1}***${SERIAL: -4}"',
-            'if [ "${SERIAL:0:1}" = "F" ]; then',
-            '  echo "[docker-windows] Personal license serial (F-prefixed) - randomizing /etc/machine-id before activation."',
-            '  dbus-uuidgen > /etc/machine-id 2>/dev/null || cat /proc/sys/kernel/random/uuid | tr -d "-" > /etc/machine-id',
-            '  mkdir -p /var/lib/dbus',
-            '  ln -sf /etc/machine-id /var/lib/dbus/machine-id',
-            'fi',
-            'echo "[docker-windows] Activating Unity (serial license mode, game-ci-equivalent)..."',
-            'ATTEMPT=1',
-            'MAX_ATTEMPTS=5',
-            # Use the real mounted project (not a separate scratch project):
-            # a live dispatch showed activation itself succeeds
-            # ("Successfully activated the entitlement license") but Unity then
-            # fails with "Couldn't set project path to: /project/tmp/blank-project"
-            # against a bare mkdir -p scratch dir with no project scaffold -
-            # /project already opens fine (it's the real checked-out Unity
-            # project) and the following build step uses it anyway.
-            'until unity-editor -logFile "$ACTIVATE_LOG" -quit -serial "$SERIAL" -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -projectPath /project; do',
-            '  RC=$?',
-            '  if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then',
-            '    echo "::error::Unity license activation failed after $MAX_ATTEMPTS attempts. See uploaded logs artifact (Editor-activate.log) for details."',
-            '    tail -c 4000 "$ACTIVATE_LOG" 2>/dev/null || true',
-            '    exit $RC',
-            '  fi',
-            '  echo "[docker-windows] Activation attempt $ATTEMPT failed (exit $RC), retrying..."',
-            '  ATTEMPT=$((ATTEMPT+1))',
-            '  sleep $((ATTEMPT*5))',
-            'done',
-            'echo "[docker-windows] Activation OK. Building..."',
-            # Same script as the native lanes: target mapping, build method,
-            # BUILD_OUTPUT_DIR=build, ANDROID_APP_BUNDLE. The workspace (with
-            # .toolkit) is mounted at /workspace.
-            'bash /workspace/.toolkit/scripts/build/run_unity_player.sh --host-os linux --editor "$(command -v unity-editor)" --platform "$PLATFORM" --project /project --build-method "$BUILD_METHOD" --android-export-type "$ANDROID_EXPORT_TYPE" --log-file /workspace/Editor.log',
-            'BUILD_RC=$?',
-            # GH Actions artifact storage is currently exhausted (a separate,
-            # pre-existing repo issue - "Failed to CreateArtifact: Artifact
-            # storage quota has been hit"), so the logs-artifact upload step
-            # cannot be relied on to surface failures right now. Print every
-            # plausible Editor.log location + size directly to the job console
-            # so a build failure is diagnosable from the step log alone.
-            'echo "[docker-windows] Build exited $BUILD_RC. Log file candidates:"',
-            'for f in /workspace/Editor.log /project/Library/Editor.log "$HOME/.config/unity3d/Editor.log" "$HOME/.local/share/unity3d/Editor.log"; do',
-            '  if [ -f "$f" ]; then',
-            '    echo "--- $f ($(wc -c < "$f") bytes) ---"',
-            '    tail -c 6000 "$f"',
-            '  else',
-            '    echo "--- $f: not found ---"',
-            '  fi',
-            'done',
-            'exit $BUILD_RC'
-          )
-          $scriptPath = Join-Path $env:RUNNER_TEMP "docker-windows-build.sh"
-          # LF line endings only - this runs inside a Linux container via bash.
-          [System.IO.File]::WriteAllText($scriptPath, ($containerScriptLines -join "`n"))
+          # Inside the container: activate Unity the way game-ci does for Unity
+          # Personal, then build with run_unity_player.sh, like every native
+          # lane: scripts/build/docker_windows_container.sh, from the toolkit
+          # checkout in the mounted workspace. Never echoes secret values.
 
           # The workspace is mounted too, and named GITHUB_WORKSPACE inside:
           # PlayerBuilder resolves `build` against it, so the player lands in
@@ -1375,7 +1291,6 @@ jobs:
           docker run --rm `
             -v "${hostProject}:/project" `
             -v "${workspace}:/workspace" `
-            -v "${scriptPath}:/tmp/build.sh" `
             -e GITHUB_WORKSPACE=/workspace `
             -e UNITY_LICENSE -e UNITY_EMAIL -e UNITY_PASSWORD `
             -e "BUILD_METHOD=$buildMethod" `
@@ -1383,7 +1298,7 @@ jobs:
             -e ANDROID_KEYSTORE_PASS -e ANDROID_KEY_PASS -e BUILD_NUMBER -e APP_VERSION -e BUILD_PROFILE `
             -w /project `
             $image `
-            bash /tmp/build.sh
+            bash /workspace/.toolkit/scripts/build/docker_windows_container.sh
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::Docker build failed (exit $LASTEXITCODE). Platform=$platform Image=$image"
             exit $LASTEXITCODE
@@ -1786,6 +1701,10 @@ jobs:
 
       - name: iOS — Upload IPA artifact manifest
         if: ${{ inputs.sign-ios && inputs.platform == 'iOS' && steps.ios-guard.outputs.blocked != 'true' }}
+        # Like the build's own manifest upload: a full artifact storage quota
+        # failed a build whose IPA had already been archived, exported and
+        # delivered to Firebase.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.ipa-artifact-name }}-manifest
@@ -1795,6 +1714,8 @@ jobs:
 
       - name: iOS — Upload signed IPA
         if: ${{ inputs.sign-ios && inputs.platform == 'iOS' && steps.ios-guard.outputs.blocked != 'true' && !(inputs.artifact-storage == 'firebase' && inputs.build-delivery == 'firebase' && (inputs.platform == 'Android' || (inputs.platform == 'iOS' && inputs.sign-ios))) }}
+        # As the build artifact upload: self-hosted output persists locally.
+        continue-on-error: ${{ contains(inputs.runner-labels, 'self-hosted') }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.ipa-artifact-name }}
@@ -1974,105 +1895,49 @@ jobs:
         id: set-outputs
         if: ${{ always() }}
         shell: bash
+        # The leg's result from whichever build step ran, written to
+        # pipeline-results/build-<Platform>.json for stage 07 and set as the
+        # job's outputs (result-json hex-encoded) —
+        # scripts/build/write_build_result.py. Every value arrives through
+        # env, never spliced into the script: a Unity error message is data.
+        env:
+          PLATFORM:                    ${{ inputs.platform }}
+          CONFIGURATION:               ${{ inputs.configuration }}
+          ENVIRONMENT:                 ${{ inputs.environment }}
+          BLOCKED:                     ${{ steps.ios-guard.outputs.blocked }}
+          OUTCOME_DOCKER:              ${{ steps.build-docker.outcome }}
+          OUTCOME_ADDRESSABLES_DOCKER: ${{ steps.build-addressables-docker.outcome }}
+          OUTCOME_DOCKER_WINDOWS:      ${{ steps.build-docker-windows.outcome }}
+          OUTCOME_WINDOWS:             ${{ steps.build-windows.outcome }}
+          OUTCOME_MACOS:               ${{ steps.build-macos.outcome }}
+          ARTIFACT_TYPE:               ${{ steps.artifact-type.outputs.artifact-type }}
+          ARTIFACT_NAME:               ${{ steps.artifact-type.outputs.artifact-name }}
+          ARTIFACT_SIZE_BYTES:         ${{ steps.manifest.outputs.artifact-size-bytes }}
+          ARTIFACT_ID:                 ${{ steps.upload.outputs.artifact-id }}
+          UNITY_VERSION_USED:          ${{ steps.unity-preflight.outputs.unity_version || inputs.unity-version }}
+          ERROR_COUNT:                 ${{ steps.unity-log.outputs.error-count }}
+          WARNING_COUNT:               ${{ steps.unity-log.outputs.warning-count }}
+          FIRST_ERROR:                 ${{ steps.unity-log.outputs.first-error }}
+          LOG_FOUND:                   ${{ steps.unity-log.outputs.log-found }}
+          DOWNLOAD_URL:                ${{ steps.publish.outputs.download-url }}
+          DIRECT_URL:                  ${{ steps.publish.outputs.direct-url }}
+          # BUILD_DURATION comes from "Compute build duration" via GITHUB_ENV.
         run: |
-          BLOCKED="${{ steps.ios-guard.outputs.blocked }}"
-          DOCKER_OUT="${{ steps.build-docker.outcome }}"
-          ADDR_DOCKER_OUT="${{ steps.build-addressables-docker.outcome }}"
-          DOCKER_WIN_OUT="${{ steps.build-docker-windows.outcome }}"
-          WINDOWS_OUT="${{ steps.build-windows.outcome }}"
-          MACOS_OUT="${{ steps.build-macos.outcome }}"
-
-          if [ "$BLOCKED" = "true" ]; then
-            RESULT="blocked"
-            ARTIFACT_NAME=""
-          else
-            # Find the outcome of whichever build step actually ran (non-skipped).
-            BUILD_OUTCOME=""
-            for OUT in "$DOCKER_OUT" "$ADDR_DOCKER_OUT" "$DOCKER_WIN_OUT" "$WINDOWS_OUT" "$MACOS_OUT"; do
-              if [ -n "$OUT" ] && [ "$OUT" != "skipped" ]; then
-                BUILD_OUTCOME="$OUT"
-                break
-              fi
-            done
-
-            if [ "$BUILD_OUTCOME" = "success" ]; then
-              RESULT="success"
-              ARTIFACT_NAME="${{ steps.artifact-type.outputs.artifact-name }}"
-            elif [ -z "$BUILD_OUTCOME" ]; then
-              # No build step ran (e.g. all were skipped)
-              RESULT="skipped"
-              ARTIFACT_NAME=""
-            else
-              RESULT="$BUILD_OUTCOME"
-              ARTIFACT_NAME=""
-            fi
+          SCRIPT=.toolkit/scripts/build/write_build_result.py
+          if [ -f "${SCRIPT}" ]; then
+            python3 "${SCRIPT}" --results-dir pipeline-results
+            exit $?
           fi
-
-          # The manifest artifact exists whenever the build was not blocked —
-          # including on failure, where stage 07 uses it to say what was being
-          # built when it broke.
-          if [ "$BLOCKED" = "true" ]; then
-            MANIFEST_ARTIFACT_NAME=""
-          else
-            MANIFEST_ARTIFACT_NAME="${{ steps.artifact-type.outputs.artifact-name }}-manifest"
-          fi
-
-          CONFIGURATION="${{ inputs.configuration }}"
-          [ -z "${CONFIGURATION}" ] && CONFIGURATION="${{ inputs.environment }}"
-
-          echo "result=${RESULT}"                          >> "$GITHUB_OUTPUT"
-          echo "artifact-name=${ARTIFACT_NAME}"           >> "$GITHUB_OUTPUT"
-          echo "unity-version-used=${{ steps.unity-preflight.outputs.unity_version || inputs.unity-version }}" >> "$GITHUB_OUTPUT"
-          echo "build-duration-seconds=${BUILD_DURATION:-0}"    >> "$GITHUB_OUTPUT"
-          echo "manifest-artifact-name=${MANIFEST_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
-          echo "configuration=${CONFIGURATION}"            >> "$GITHUB_OUTPUT"
-
-          # When this workflow is called from a MATRIX job, the caller cannot
-          # read these outputs per leg — `needs.<job>.outputs` collapses to one
-          # arbitrary leg. Write the result to a file the report stage can
-          # collect instead, so stage 07 can still say which platform failed.
+          # No toolkit checkout: the iOS guard blocked the job before it (the
+          # checkout is skipped too), or the job died first. Stage 07 still
+          # needs a result, or it reads the leg as dead.
+          RESULT=failure
+          [ "${BLOCKED}" = "true" ] && RESULT=blocked
           mkdir -p pipeline-results
-          # Error and warning counts travel with the result so stage 07 can say
-          # "Android failed — CS0103 in Player.cs:42" instead of "Android
-          # failed", and so a build that succeeded with two hundred new
-          # warnings is visible without opening anything.
-          printf '{"platform":"%s","stage":"03","result":"%s","artifactType":"%s","artifactName":"%s","artifactSizeBytes":"%s","durationSeconds":"%s","configuration":"%s","errorCount":"%s","warningCount":"%s","firstError":"%s","artifactUrl":"%s","downloadUrl":"%s","directDownloadUrl":"%s","logMeasured":"%s"}\n' \
-            "${{ inputs.platform }}" \
-            "${RESULT}" \
-            "${{ steps.artifact-type.outputs.artifact-type }}" \
-            "${ARTIFACT_NAME}" \
-            "${{ steps.manifest.outputs.artifact-size-bytes }}" \
-            "${BUILD_DURATION:-0}" \
-            "${CONFIGURATION}" \
-            "${{ steps.unity-log.outputs.error-count || '0' }}" \
-            "${{ steps.unity-log.outputs.warning-count || '0' }}" \
-            "$(printf '%s' "${{ steps.unity-log.outputs.first-error }}" | tr -d '"\\' | cut -c1-160)" \
-            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${{ steps.upload.outputs.artifact-id }}" \
-            "${{ steps.publish.outputs.download-url }}" \
-            "${{ steps.publish.outputs.direct-url }}" \
-            "${{ steps.unity-log.outputs.log-found || 'false' }}" \
-            > "pipeline-results/build-${{ inputs.platform }}.json"
-          # The same result as a job output (result-json-<Platform> below).
-          # The report jobs read it when the artifact upload of this file
-          # fails -- a full artifact storage quota turned a green build into
-          # "unreported" and dropped its download links.
-          # Hex, not raw JSON: GitHub masks every line of a multi-line secret,
-          # so a service-account JSON registers "{" and "}" as secrets and any
-          # output containing a brace is dropped ("Skip output ... since it may
-          # contain secret"). Base64 is risky too (the runner also hides base64
-          # forms of secrets); hex digits are not.
-          echo "result-json=$(od -An -v -tx1 "pipeline-results/build-${{ inputs.platform }}.json" | tr -d ' \n\r')" >> "$GITHUB_OUTPUT"
-
-          # A link that starts the download, rather than one that opens a page
-          # and leaves you to find the file. actions/upload-artifact@v4 hands
-          # back the artifact id, and /artifacts/<id> is the endpoint the
-          # browser's own download button uses.
-          ARTIFACT_ID="${{ steps.upload.outputs.artifact-id }}"
-          if [ -n "${ARTIFACT_ID}" ]; then
-            ARTIFACT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${ARTIFACT_ID}"
-            echo "artifact-url=${ARTIFACT_URL}" >> "$GITHUB_OUTPUT"
-            echo "[artifact] ${ARTIFACT_URL}"
-          fi
+          printf '{"platform":"%s","stage":"03","result":"%s"}\n' "${PLATFORM}" "${RESULT}" \
+            > "pipeline-results/build-${PLATFORM}.json"
+          echo "result=${RESULT}" >> "${GITHUB_OUTPUT}"
+          echo "result-json=$(od -An -v -tx1 "pipeline-results/build-${PLATFORM}.json" | tr -d ' \n\r')" >> "${GITHUB_OUTPUT}"
 
       # ── Step 14: Upload this platform's result for the report stage ───────
       # MUST run after `Set job outputs` — that step writes the file. Placed
