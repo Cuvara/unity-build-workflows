@@ -5,10 +5,10 @@ description: >-
 
   Release pipelines ended at stage 06, so a release run produced no report at
   all: the only way to see how far a promotion got was to read the graph. This
-  is the shared implementation behind `07 / <Platform> / Report & Notify` in
-  pipeline-{android,ios,webgl}-release.yml. It is a composite action rather
-  than a reusable workflow because those already spend 3 of GitHub's 4
-  workflow_call levels.
+  is the shared implementation behind the `report` job of every
+  pipeline-*-release.yml. It is a composite action so the report stays a
+  step of the calling job (its `needs` and environment-free placement are
+  part of the pipeline contract), not another workflow_call level.
 
 inputs:
   platform:

@@ -21,11 +21,17 @@ Every user-visible node belongs to exactly one stage, and says so in its name.
 | 01 | PREPARE | Resolve configuration, validate the project and the licence |
 | 02 | QUALITY GATE | Unity Tests + the gate node that blocks everything expensive |
 | 03 | BUILD ARTIFACTS | One node per platform, fanned out, independent |
+| 03b | SIGN iOS | Steps inside the iOS build node (archive, sign, export the IPA), not a node of its own |
 | 04 | ARTIFACT VALIDATION | One node per artifact, independent |
-| 05 | PUBLISH | Upload a validated artifact to a store / host |
-| 06 | RELEASE | Promotion to production, behind an approval boundary |
+| 05 | RELEASE MANIFEST (build pipeline, release builds) / PUBLISH (release pipelines) | The Release Set a promotion verifies against / upload a validated artifact to a store or host |
+| 06 | RELEASE (release pipelines) | Promotion to production, behind an approval boundary |
 | 07 | REPORT | Final report |
 | 08 | NOTIFY | Discord notification |
+
+The build pipeline (`unity-pipeline.yml`) declares `01 · 02 · 03 · 03b · 04 ·
+05 Release Manifest · 07`; stages 05 Publish and 06 live in the release
+pipelines (`pipeline-*-release.yml`), which start at 04 with their own
+verification.
 
 Stages 03 and 04 are **matrix jobs**: the graph contains exactly the platforms
 that were selected. An Android-only run draws one build node and one validation
@@ -192,12 +198,18 @@ and it costs nothing structurally because the implementation is shared:
 10-build-development.yml──┼──→ unity-pipeline.yml ──→ reusable-build-platform.yml
 11-build-release.yml    ──┘        (stages 01–08)          (the one executor)
 
-20-release-android.yml  ──→ pipeline-android-release.yml ──→ unity-build-android.yml
-21-release-ios.yml      ──→ pipeline-ios-release.yml     ──→ unity-build-ios.yml
-22-release-webgl.yml    ──→ pipeline-webgl-release.yml   ──→ unity-build-webgl.yml
+20-release-android.yml  ──→ pipeline-android-release.yml   (promote a Build / Release artifact)
+21-release-ios.yml      ──→ pipeline-ios-release.yml
+22-release-webgl.yml    ──→ pipeline-webgl-release.yml
+23-release-windows.yml  ──→ pipeline-windows-release.yml
+24-release-linux.yml    ──→ pipeline-linux-release.yml
 ```
 
-Nesting: entry → pipeline → executor = **3 of GitHub's 4** levels.
+Nesting: the build flow is entry → pipeline → executor = **3 of GitHub's 4**
+levels, so it cannot take another `workflow_call` layer. The release
+pipelines build nothing — they download the artifact of a Build / Release run
+by `source-run-id` — and use **2 of 4**. Shared logic is factored into
+composite actions, which do not count toward the limit.
 
 ### Input groups
 

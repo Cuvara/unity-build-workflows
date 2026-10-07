@@ -12,6 +12,38 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ### Fixed
 
+- **Release / iOS could never reach the App Store.** Production read a
+  `build-id` output that `ios-testflight` never sets, and called
+  `ios-asc-submit-review` with inputs it does not declare (`app-id`,
+  `build-id`, `release-notes-file`) while omitting the required `bundle-id`
+  and `build-number`. Production now downloads the IPA, verifies it against
+  the Release Set, reads `CFBundleIdentifier` / `CFBundleVersion` from it
+  (`scripts/ios/ipa_identity.py`) and submits with those.
+- **Release / Android and iOS production always failed verification.** They
+  passed `--artifact-path .`, which hashes the whole workspace and can never
+  match the Release Set. iOS now verifies the downloaded IPA; Android, which
+  only promotes a release already on Google Play, verifies the Release Set's
+  identity without a checksum (the bytes were checksummed at the internal
+  upload).
+- Docker on a Windows runner: the container now gets the workspace as
+  `GITHUB_WORKSPACE`, so the player lands in the workspace's `build/` and the
+  logs at its root even when `project-path` is a subfolder (the upload and
+  redaction steps used to miss them).
+- The Addressables pre-step no longer tries a Linux container action on a
+  Windows docker runner.
+- Google Play / TestFlight uploads in the build job are skipped, not failed,
+  when the build produced no artifact / IPA.
+- iOS release report label `06 Release — App Store` matches its stage
+  (`06 Release — Production`); nesting-depth comments and
+  `docs/PIPELINE_ARCHITECTURE.md` now state the real depths (build 3/4,
+  release 2/4) and the stage map matches the pipeline.
+
+---
+
+## [Unreleased]
+
+### Fixed
+
 - **iOS archive failed in seconds: Pods below Xcode's minimum iOS version.**
   Pods keep each pod's own deployment target (10.0, 12.0, 13.0), and current
   Xcode rejects anything under its floor (15.0) as an error. A Podfile
