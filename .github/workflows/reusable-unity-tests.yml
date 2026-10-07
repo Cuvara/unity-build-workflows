@@ -237,6 +237,10 @@ jobs:
       # failed with "Windows Subsystem for Linux has no installed
       # distributions". Ask git where it is installed, run that Git Bash to be
       # sure, and put it first on PATH for the rest of the job.
+      # It runs before any checkout (it sets core.longpaths for the project
+      # checkout, which would clean away a toolkit checked out earlier), so
+      # it cannot come from the toolkit. reusable-build-platform.yml carries the same
+      # block; tests/test_shared_job_steps.py keeps the two identical.
       - name: Use Git Bash and long paths (Windows)
         if: ${{ runner.os == 'Windows' }}
         shell: powershell
@@ -292,64 +296,28 @@ jobs:
           lfs: true
           submodules: ${{ inputs.submodule-auth == 'ssh' && 'false' || 'recursive' }}
 
+      # The toolkit, right after the project checkout (which would clean it
+      # away if it came first), for the submodule fetch and the native
+      # lanes' Unity preflight and test runner.
+      - name: Checkout toolkit
+        if: ${{ inputs.submodule-auth == 'ssh' || (inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS')) }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+          clean: false
+
       - name: Fetch submodules over SSH
         if: ${{ inputs.submodule-auth == 'ssh' }}
         shell: bash
         env:
           SUBMODULE_SSH_KEY: ${{ secrets.SUBMODULE_SSH_KEY }}
-        run: |
-          set -Eeuo pipefail
-          # actions/checkout rewrites submodule URLs to HTTPS and injects
-          # GITHUB_TOKEN, which cannot see a private submodule in another
-          # organization — git reports it as "not found". Fetch them here instead,
-          # so the URLs in .gitmodules are used exactly as written.
-          _key_file=""
-          cleanup() { rm -f "${_key_file:-}" "${_known_hosts:-}" 2>/dev/null || true; }
-          trap cleanup EXIT
-
-          # The runner's own SSH credentials need a home directory: a Windows
-          # runner service has no HOME in Git Bash, so ssh looked in /.ssh
-          # (the Git install), found no key and could not write known_hosts.
-          if [[ -z "${HOME:-}" || "${HOME}" == "/" ]] && [[ -n "${USERPROFILE:-}" ]]; then
-            export HOME="$(cygpath -u "${USERPROFILE}" 2>/dev/null || printf '%s' "${USERPROFILE}")"
-          fi
-          _known_hosts="$(mktemp)"
-          _ssh_opts="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o UserKnownHostsFile=${_known_hosts}"
-          if [[ -n "${SUBMODULE_SSH_KEY:-}" ]]; then
-            _key_file="$(mktemp)"
-            printf '%s\n' "${SUBMODULE_SSH_KEY}" > "${_key_file}"
-            chmod 600 "${_key_file}"
-            _ssh_opts="-i ${_key_file} -o IdentitiesOnly=yes ${_ssh_opts}"
-            echo "Authenticating submodules with SUBMODULE_SSH_KEY."
-          elif [[ -n "${SUBMODULE_SSH_KEY_FILE:-}" ]]; then
-            # A key file on the runner machine, named in the runner's .env.
-            _machine_key="$(cygpath -u "${SUBMODULE_SSH_KEY_FILE}" 2>/dev/null || printf '%s' "${SUBMODULE_SSH_KEY_FILE}")"
-            if [[ ! -r "${_machine_key}" ]]; then
-              echo "::error::SUBMODULE_SSH_KEY_FILE=${SUBMODULE_SSH_KEY_FILE} is not readable by $(whoami)."
-              exit 1
-            fi
-            _ssh_opts="-i ${_machine_key} -o IdentitiesOnly=yes ${_ssh_opts}"
-            echo "Authenticating submodules with the runner's key file ${SUBMODULE_SSH_KEY_FILE}."
-          else
-            echo "Using the runner account's own SSH keys: $(whoami), ${HOME}/.ssh"
-            ls "${HOME}/.ssh" 2>/dev/null | grep -E '^id_' | sed 's/^/  /' \
-              || echo "::warning::No id_* key in ${HOME}/.ssh. Put a key with read access to the submodules there, or set SUBMODULE_SSH_KEY_FILE in the runner's .env, or the SUBMODULE_SSH_KEY secret."
-          fi
-
-          export GIT_SSH_COMMAND="ssh ${_ssh_opts}"
-          git submodule sync --recursive
-          # --force is not optional. actions/checkout runs `git clean -ffdx`, which
-          # empties a submodule's working tree while leaving its gitdir behind at the
-          # recorded commit. Without --force, `submodule update` sees the right SHA,
-          # concludes there is nothing to do, and leaves the directory empty — Unity
-          # then opens a project whose embedded packages have no package.json.
-          #
-          # core.longpaths matters on Windows: a runner workspace is already deep
-          # before the project path, and a Unity package that vendors a plugin tree
-          # goes past MAX_PATH. Git reports it per file as "unable to create file"
-          # and still exits non-zero, so the clone half-lands. -c propagates to the
-          # child git processes that clone each submodule; it is inert elsewhere.
-          git -c core.longpaths=true submodule update --init --recursive --force
+        # The URLs in .gitmodules, used exactly as written (actions/checkout
+        # rewrites them to HTTPS with a token that cannot see a private
+        # submodule in another organization):
+        # scripts/common/fetch_submodules_ssh.sh, shared with the other job.
+        run: bash .toolkit/scripts/common/fetch_submodules_ssh.sh
 
       # ── 3. Cache Library ──────────────────────────────────────────────────────
       - name: Cache Library
@@ -433,21 +401,6 @@ jobs:
           githubToken:   ${{ inputs.post-test-check-run && github.token || '' }}
 
       # ── 4b. Unity preflight — native lanes ────────────────────────────────────
-      # The test steps used to assume a Unity Hub default path
-      # (/Applications/Unity/Hub/Editor/<v>, C:\Program Files\Unity\Hub\Editor\<v>)
-      # and failed with "Unity executable not found" on a runner whose editors
-      # live elsewhere — while the build job, which runs preflight, found the
-      # same editor. Same discovery as the build job; tests need no platform
-      # module, only the editor ProjectVersion.txt names.
-      - name: Checkout toolkit (Unity preflight)
-        if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') }}
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.toolkit-repo }}
-          ref: ${{ inputs.toolkit-ref }}
-          path: .toolkit
-          clean: false
-
       # The preflight and later steps run Python 3.8+. A self-hosted runner may
       # have none (Windows: only the Microsoft Store placeholder). Find one by
       # running each candidate, install it per-user when missing, and put it —
@@ -457,6 +410,12 @@ jobs:
         shell: bash
         run: bash .toolkit/scripts/common/ensure_python.sh
 
+      # The test steps used to assume a Unity Hub default path
+      # (/Applications/Unity/Hub/Editor/<v>, C:\Program Files\Unity\Hub\Editor\<v>)
+      # and failed with "Unity executable not found" on a runner whose editors
+      # live elsewhere — while the build job, which runs preflight, found the
+      # same editor. Same discovery as the build job; tests need no platform
+      # module, only the editor ProjectVersion.txt names.
       - name: Unity preflight (provision editor)
         id: unity-preflight
         if: ${{ inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS') }}
