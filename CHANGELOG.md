@@ -8,6 +8,23 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **One SSH submodule fetch for the build and the tests job.** The 50-line
+  "Fetch submodules over SSH" step was copied verbatim into
+  `reusable-build-platform.yml` and `reusable-unity-tests.yml`. It is now
+  `scripts/common/fetch_submodules_ssh.sh`. To run it, both jobs check the
+  toolkit out right after the project checkout: earlier than before in the
+  build job, and in the tests job also when `submodule-auth` is `ssh`, not
+  only on the native lanes.
+- **The Windows Git Bash step stays a copy, held identical by a test.** It
+  runs before any checkout, because it sets `core.longpaths` for the project
+  checkout, which would clean away a toolkit checked out first. So it cannot
+  come from the toolkit. `tests/test_shared_job_steps.py` fails when the two
+  jobs' copies differ.
+
 ## [6.24.1] — 2026-10-07
 
 ### Changed
