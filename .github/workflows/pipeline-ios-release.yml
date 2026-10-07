@@ -1,14 +1,14 @@
 name: Pipeline iOS Release
 
-# Self-contained iOS release pipeline:
-#   Build Xcode → Archive/Export IPA → Validate IPA → TestFlight → External → App Store
+# iOS promotion pipeline. It builds nothing: it takes the signed IPA a
+# Build / Release run produced (source-run-id + artifact-name) and moves it
+#   Verify → Validate IPA → TestFlight internal → External → App Store
+# re-verifying it against the Release Set in every job that touches it.
 #
 # Each release phase is a separate job gated by GitHub Environments.
-# Build step calls unity-build-ios.yml for Xcode project generation.
-# Archive/Export runs on macOS with signing composite actions.
-# Store phases use ASC API (ubuntu-latest except TestFlight upload needs macOS).
+# Store phases use the ASC API (ubuntu-latest; the TestFlight upload needs macOS).
 #
-# Nesting depth: orchestrator → this → unity-build-ios = 3 levels (safe).
+# Nesting depth: project caller → this = 2 of GitHub's 4 levels.
 
 on:
   workflow_call:
@@ -312,7 +312,7 @@ jobs:
     runs-on: macos-latest
     environment: internal-testing
     outputs:
-      build-id: ${{ steps.upload.outputs.build-id }}
+      build-number: ${{ steps.ipa.outputs.build-number }}
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -364,6 +364,13 @@ jobs:
           fi
           echo "ipa-path=${IPA_PATH}" >> "${GITHUB_OUTPUT}"
 
+      - name: Read IPA identity
+        id: ipa
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/ios/ipa_identity.py --ipa "${{ steps.find-ipa.outputs.ipa-path }}" --github-output
+
       - name: Upload to TestFlight + wait for processing
         id: upload
         uses: ./.toolkit/.github/actions/ios-testflight
@@ -379,7 +386,7 @@ jobs:
         shell: bash
         run: |
           echo "### Phase 1: TestFlight Internal" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Build ID:** ${{ steps.upload.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build:** ${{ steps.ipa.outputs.build-number }} (${{ steps.ipa.outputs.bundle-id }})" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Processing:** Complete" >> "${GITHUB_STEP_SUMMARY}"
 
       # Where the run has got to, drawn into this job's summary.
@@ -407,8 +414,6 @@ jobs:
       )
     runs-on: ubuntu-latest
     environment: external-testing
-    outputs:
-      build-id: ${{ needs.internal-testing.outputs.build-id }}
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -419,8 +424,7 @@ jobs:
       - name: External testing gate
         shell: bash
         run: |
-          BUILD_ID="${{ needs.internal-testing.outputs.build-id }}"
-          echo "[ios-release] Build ID: ${BUILD_ID}"
+          echo "[ios-release] Build: ${{ needs.internal-testing.outputs.build-number || 'uploaded in an earlier run' }}"
           echo "[ios-release] External beta review: add build to external TestFlight groups in App Store Connect."
           echo "[ios-release] This environment gate ensures manual approval before external distribution."
 
@@ -428,7 +432,7 @@ jobs:
         shell: bash
         run: |
           echo "### Phase 2: TestFlight External" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Build ID:** ${{ needs.internal-testing.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build:** ${{ needs.internal-testing.outputs.build-number || 'uploaded in an earlier run' }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Approved for external TestFlight testing" >> "${GITHUB_STEP_SUMMARY}"
 
       # Where the run has got to, drawn into this job's summary.
@@ -463,23 +467,17 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
-      - name: Resolve build ID
-        id: resolve
-        shell: bash
-        run: |
-          BUILD_ID="${{ needs.internal-testing.outputs.build-id || needs.external-testing.outputs.build-id }}"
-          if [[ -z "${BUILD_ID}" ]]; then
-            echo "::error::No build-id available from prior phases"
-            exit 1
-          fi
-          echo "build-id=${BUILD_ID}" >> "${GITHUB_OUTPUT}"
-
-      - name: Download release notes
+      # The IPA itself, not just the manifest: the identity check below needs
+      # the bytes, and App Store submission needs the bundle id and build
+      # number that are inside them. This job used to verify `.` -- an empty
+      # workspace -- and to take a build id from an output that was never set.
+      - name: Download IPA artifact
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
-          name: ios-release-notes
-          path: ./
-        continue-on-error: true
+          name: ${{ inputs.artifact-name }}
+          path: ipa-artifact/
+          run-id: ${{ inputs.source-run-id }}
+          github-token: ${{ github.token }}
 
       # Re-verified here, not just in stage 04. This job downloads the artifact
       # again — a separate fetch — and an approval on an earlier phase is not
@@ -500,19 +498,25 @@ jobs:
           python3 .toolkit/scripts/common/release_manifest.py verify \
             --manifest             release-set/release-manifest.json \
             --platform             iOS \
-            --artifact-path        . \
+            --artifact-path        ipa-artifact \
             --expect-run-id        "${{ inputs.source-run-id }}" \
             --expect-artifact-name "${{ inputs.artifact-name }}" \
             --expect-version       "${{ inputs.build-version }}"
 
+      - name: Read IPA identity
+        id: ipa
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 .toolkit/scripts/ios/ipa_identity.py --ipa ipa-artifact --github-output
+
       - name: Submit for App Store review
         uses: ./.toolkit/.github/actions/ios-asc-submit-review
         with:
-          app-id: ${{ inputs.app-id }}
-          build-id: ${{ steps.resolve.outputs.build-id }}
+          bundle-id: ${{ steps.ipa.outputs.bundle-id }}
           version-string: ${{ inputs.version-string }}
+          build-number: ${{ steps.ipa.outputs.build-number }}
           phased-release: ${{ inputs.phased-release && 'true' || 'false' }}
-          release-notes-file: release-notes.txt
           asc-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           asc-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           asc-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
@@ -522,7 +526,7 @@ jobs:
         run: |
           echo "### Phase 3: App Store Submission" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Version:** ${{ inputs.version-string }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "- **Build ID:** ${{ steps.resolve.outputs.build-id }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build:** ${{ steps.ipa.outputs.build-number }} (${{ steps.ipa.outputs.bundle-id }})" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Phased Release:** ${{ inputs.phased-release }}" >> "${GITHUB_STEP_SUMMARY}"
 
       # Where the run has got to, drawn into this job's summary.
@@ -601,4 +605,4 @@ jobs:
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — TestFlight Internal=${{ needs.internal-testing.result }}
             06 Release — TestFlight External=${{ needs.external-testing.result }}
-            06 Release — App Store=${{ needs.production-release.result }}
+            06 Release — Production=${{ needs.production-release.result }}

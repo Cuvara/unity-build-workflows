@@ -19,7 +19,8 @@ name: Pipeline WebGL Release
 # The production node is gated by the `production` GitHub Environment, so a
 # green build never publishes to production on its own.
 #
-# Nesting depth: orchestrator → this → unity-build-webgl = 3 levels (safe).
+# Nesting depth: project caller → this = 2 of GitHub's 4 levels. It builds
+# nothing; it promotes the artifact of a Build / Release run.
 
 on:
   workflow_call:

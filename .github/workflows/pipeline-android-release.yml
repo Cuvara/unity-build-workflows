@@ -514,10 +514,11 @@ jobs:
           path: ./
         continue-on-error: true
 
-      # Re-verified here, not just in stage 04. This job downloads the artifact
-      # again — a separate fetch — and an approval on an earlier phase is not
-      # evidence about the bytes this job is holding. Cheap, and it is the last
-      # point at which publishing the wrong binary is still preventable.
+      # Promotion moves a release that is already on Google Play between
+      # tracks. This job holds no binary, so it checks the Release Set's
+      # identity only; the bytes were checksummed when internal-testing
+      # uploaded them. (It used to pass `--artifact-path .`, which hashes the
+      # whole workspace and can never match, so production always failed.)
       - name: Download release manifest
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         with:
@@ -526,14 +527,13 @@ jobs:
           run-id: ${{ inputs.source-run-id }}
           github-token: ${{ github.token }}
 
-      - name: Verify release identity and checksum
+      - name: Verify release identity
         shell: bash
         run: |
           set -Eeuo pipefail
           python3 .toolkit/scripts/common/release_manifest.py verify \
             --manifest             release-set/release-manifest.json \
             --platform             Android \
-            --artifact-path        . \
             --expect-run-id        "${{ inputs.source-run-id }}" \
             --expect-artifact-name "${{ inputs.artifact-name }}" \
             --expect-version       "${{ inputs.build-version }}"
