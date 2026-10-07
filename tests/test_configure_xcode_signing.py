@@ -189,7 +189,8 @@ def test_development_build_exports_with_the_profile_method():
 
 def test_sign_matrix_includes_opted_in_development_builds():
     text = (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text(encoding="utf-8")
-    assert '[ "${IOS_SIGN_DEV:-false}" = "true" ]' in text
+    matrix = (REPO_ROOT / "scripts" / "common" / "resolve_build_matrix.sh").read_text(encoding="utf-8")
+    assert '[ "${IOS_SIGN_DEV:-false}" = "true" ]' in matrix
     assert "NEW_BUILD_IOS_SIGN_DEVELOPMENT: ${{ vars.BUILD_IOS_SIGN_DEVELOPMENT }}" in text
 
 

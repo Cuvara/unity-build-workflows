@@ -63,7 +63,9 @@ class TestPipelineWiring:
         assert "RUNNER_LABELS_BY_PLATFORM" not in env
 
     def test_rows_carry_engine_activation_and_selected_target(self):
-        run = step_by_id(PIPELINE, "resolve-config", "matrix")["run"]
+        assert "resolve_build_matrix.sh" in step_by_id(PIPELINE, "resolve-config", "matrix")["run"]
+        run = (Path(__file__).resolve().parent.parent / "scripts" / "common"
+               / "resolve_build_matrix.sh").read_text(encoding="utf-8")
         for field in ('\\"build-engine\\":', '\\"activation-strategy\\":', '\\"runner-selected\\":'):
             assert field in run
 
