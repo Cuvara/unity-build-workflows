@@ -38,12 +38,6 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   `docs/PIPELINE_ARCHITECTURE.md` now state the real depths (build 3/4,
   release 2/4) and the stage map matches the pipeline.
 
----
-
-## [Unreleased]
-
-### Fixed
-
 - **iOS archive failed in seconds: Pods below Xcode's minimum iOS version.**
   Pods keep each pod's own deployment target (10.0, 12.0, 13.0), and current
   Xcode rejects anything under its floor (15.0) as an error. A Podfile
