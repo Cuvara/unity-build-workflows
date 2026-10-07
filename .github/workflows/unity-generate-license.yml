@@ -165,77 +165,45 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
-      - name: Auto-set UNITY_LICENSE secret via bot
+      # The bot sets the secret when the toolkit's GitHub App is configured;
+      # without it, the license is still in the artifact and the run says how
+      # to set it by hand. Secrets cannot appear in `if:`, hence this step.
+      - name: Check bot credentials
+        id: app
         if: steps.find-ulf.outputs.ulf-found == 'true'
         env:
           APP_ID: ${{ secrets.APP_ID }}
           APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "${APP_ID}" ] && [ -n "${APP_PRIVATE_KEY}" ]; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::warning::APP_ID or APP_PRIVATE_KEY not set — cannot auto-set secret."
+            echo "Manual step required:"
+            echo "  gh secret set UNITY_LICENSE < license-output/Unity_lic.ulf"
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Generate bot token
+        id: bot
+        if: steps.app.outputs.present == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          # The whole installation on the owner: an org secret needs it.
+          owner: ${{ github.repository_owner }}
+
+      - name: Auto-set UNITY_LICENSE secret via bot
+        if: steps.app.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
           UNITY_VERSION: ${{ inputs.unity-version }}
           SECRET_SCOPE: ${{ inputs.secret-scope }}
         run: |
           set -euo pipefail
 
           ULF_FILE="license-output/Unity_lic.ulf"
-
-          if [ -z "${APP_ID}" ] || [ -z "${APP_PRIVATE_KEY}" ]; then
-            echo "::warning::APP_ID or APP_PRIVATE_KEY not set — cannot auto-set secret."
-            echo "Manual step required:"
-            echo "  gh secret set UNITY_LICENSE < ${ULF_FILE}"
-            exit 0
-          fi
-
-          # Generate GitHub App installation token
-          BOT_TOKEN=$(node -e "
-          const crypto = require('crypto');
-          const https = require('https');
-
-          const APP_ID = process.env.APP_ID;
-          const PEM = process.env.APP_PRIVATE_KEY;
-          const ORG = process.env.GITHUB_REPOSITORY.split('/')[0];
-
-          const now = Math.floor(Date.now() / 1000);
-          const header = Buffer.from(JSON.stringify({alg:'RS256',typ:'JWT'})).toString('base64url');
-          const payload = Buffer.from(JSON.stringify({iat: now-60, exp: now+600, iss: APP_ID})).toString('base64url');
-          const signature = crypto.sign('SHA256', Buffer.from(header+'.'+payload), PEM).toString('base64url');
-          const jwt = header+'.'+payload+'.'+signature;
-
-          function api(path, token, method, body) {
-            return new Promise((resolve, reject) => {
-              const opts = {
-                hostname: 'api.github.com', path, method: method||'GET',
-                headers: {
-                  'Authorization': 'Bearer '+token,
-                  'Accept': 'application/vnd.github+json',
-                  'User-Agent': 'cuvara-bot',
-                  'X-GitHub-Api-Version': '2022-11-28'
-                }
-              };
-              const req = https.request(opts, res => {
-                let d=''; res.on('data', c => d+=c);
-                res.on('end', () => resolve({status: res.statusCode, data: JSON.parse(d||'{}')}));
-              });
-              req.on('error', reject);
-              if (body) req.write(JSON.stringify(body));
-              req.end();
-            });
-          }
-
-          (async () => {
-            const instRes = await api('/app/installations', jwt);
-            const inst = instRes.data.find(i => i.account.login === ORG);
-            if (!inst) { console.error('App not installed on '+ORG); process.exit(1); }
-            const tokenRes = await api('/app/installations/'+inst.id+'/access_tokens', jwt, 'POST', {});
-            if (tokenRes.status !== 201) { console.error('Token error:', JSON.stringify(tokenRes.data)); process.exit(1); }
-            console.log(tokenRes.data.token);
-          })();
-          ")
-
-          if [ -z "${BOT_TOKEN}" ]; then
-            echo "::error::Failed to generate bot token"
-            exit 1
-          fi
-
-          export GH_TOKEN="${BOT_TOKEN}"
           REPO="${GITHUB_REPOSITORY}"
           ORG=$(echo "${REPO}" | cut -d/ -f1)
 
