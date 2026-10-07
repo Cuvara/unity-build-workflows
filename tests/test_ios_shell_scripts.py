@@ -1011,3 +1011,65 @@ def test_archive_keeps_a_path_with_spaces_whole(tmp_path, kind):
     flag = "-workspace" if kind == "xcworkspace" else "-project"
     assert args[args.index(flag) + 1] == str(project_dir / f"Unity-iPhone.{kind}")
     assert args[-1] == "archive"
+
+
+# -----------------------------------------------------------------------
+# xcode_archive.sh builds Pods at the app's deployment target
+# -----------------------------------------------------------------------
+
+def _run_archive(tmp_path, pbxproj_text=None, extra_env=None):
+    project_dir = tmp_path / "build" / "iOS" / "My Game"
+    (project_dir / "Unity-iPhone.xcworkspace").mkdir(parents=True)
+    (project_dir / "Unity-iPhone.xcodeproj").mkdir()
+    if pbxproj_text is not None:
+        (project_dir / "Unity-iPhone.xcodeproj" / "project.pbxproj").write_text(pbxproj_text)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    args_file = tmp_path / "args.txt"
+    archive = tmp_path / "out" / "Unity.xcarchive"
+    shim = bin_dir / "xcodebuild"
+    shim.write_text('#!/usr/bin/env bash\nprintf "%s\n" "$@" > "' + str(args_file) + '"\n'
+                    'mkdir -p "' + str(archive) + '"\n')
+    _make_executable(shim)
+    env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+           "XCODE_PROJECT_PATH": str(project_dir), "DEVELOPMENT_TEAM": "TEAMID1234",
+           "KEYCHAIN_PATH": str(tmp_path / "k.keychain-db"), "ARCHIVE_PATH": str(archive),
+           "LOG_PATH": str(tmp_path / "logs" / "archive.log")}
+    env.update(extra_env or {})
+    r = subprocess.run(["bash", str(ARCHIVE_IOS_SH)], capture_output=True, text=True,
+                       env=env, timeout=30)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return args_file.read_text().splitlines(), r.stdout
+
+
+PBXPROJ = """
+		buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+		};
+		buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = "15.4";
+		};
+		buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 9.0;
+		};
+"""
+
+
+def test_archive_builds_pods_at_the_apps_deployment_target(tmp_path):
+    """Pods carry 10.0/12.0/13.0; Xcode with a 15.0 floor rejected them all
+    ("ARCHIVE FAILED" in 7 s). The app's own highest minimum goes on the
+    command line, which covers the Pods targets too."""
+    args, _ = _run_archive(tmp_path, PBXPROJ)
+    assert "IPHONEOS_DEPLOYMENT_TARGET=15.4" in args
+    assert args[-1] == "archive"
+
+
+def test_archive_deployment_target_can_be_overridden(tmp_path):
+    args, _ = _run_archive(tmp_path, PBXPROJ, {"IOS_DEPLOYMENT_TARGET": "16.0"})
+    assert "IPHONEOS_DEPLOYMENT_TARGET=16.0" in args
+
+
+def test_archive_without_a_readable_target_warns_and_adds_nothing(tmp_path):
+    args, out = _run_archive(tmp_path, None)
+    assert not any(a.startswith("IPHONEOS_DEPLOYMENT_TARGET=") for a in args)
+    assert "Could not read IPHONEOS_DEPLOYMENT_TARGET" in out
