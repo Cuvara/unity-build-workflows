@@ -10,7 +10,9 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 ACTION = REPO_ROOT / ".github" / "actions" / "release-report" / "action.yml"
 
 
-PROMOTIONS = sorted(p.name for p in WORKFLOWS.glob("pipeline-*-release.yml"))
+# Thin wrappers (Windows, Linux) report through pipeline-desktop-release.yml.
+PROMOTIONS = sorted(p.name for p in WORKFLOWS.glob("pipeline-*-release.yml")
+                    if "report" in yaml.safe_load(p.read_text(encoding="utf-8"))["jobs"])
 
 
 @pytest.mark.parametrize("name", PROMOTIONS)
