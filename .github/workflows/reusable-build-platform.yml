@@ -1063,21 +1063,11 @@ jobs:
           # The editor Unity preflight resolved for this job (Step 4b).
           UNITY_EDITOR: ${{ steps.unity-preflight.outputs.unity_editor }}
         run: |
-          set -euo pipefail
-          PROJECT="${{ inputs.project-path }}"
-
-          UNITY_BIN="${UNITY_EDITOR:-}"
-          if [ -z "$UNITY_BIN" ] || [ ! -f "$UNITY_BIN" ]; then
-            echo "::error::Unity preflight did not provide an editor executable (got '${UNITY_BIN}') on ${{ runner.os }}."
-            exit 1
-          fi
-
-          echo "Addressables pre-step: ${UNITY_BIN}"
-          "$UNITY_BIN" \
-            -batchmode -nographics -quit \
-            -projectPath "${PROJECT}" \
-            -executeMethod "${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}" \
-            -logFile "Editor-addressables-pre.log"
+          bash .toolkit/scripts/build/run_unity_player.sh --addressables-only \
+            --platform            "${{ inputs.platform }}" \
+            --project             "${{ inputs.project-path }}" \
+            --addressables-method "${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}" \
+            --log-file            Editor-addressables-pre.log
 
       # ── Step 8: Record build start time ───────────────────────────────────
       - name: Record build start time
@@ -1274,18 +1264,10 @@ jobs:
           $hostProject = (Resolve-Path $hostProject).Path
           Write-Host "Host project dir: $hostProject"
 
-          $buildTarget = switch ($platform) {
-            "Android"     { "Android" }
-            "WebGL"       { "WebGL" }
-            "Linux64"     { "StandaloneLinux64" }
-            "LinuxServer" { "StandaloneLinux64" }
-          }
-          $extraParams = if ($platform -eq "LinuxServer") { "-standaloneBuildSubtarget Server" } else { "" }
-
+          # Target mapping, the LinuxServer subtarget and the AAB flag are
+          # run_unity_player.sh's, inside the container.
           $buildMethod = "${{ inputs.build-method }}"
           if ([string]::IsNullOrEmpty($buildMethod)) { $buildMethod = "${{ steps.build-package.outputs.player-method || 'PlayerBuilder.Build' }}" }
-
-          $androidAppBundle = if ("${{ inputs.android-export-type }}" -eq "aab") { "1" } else { "0" }
 
           $haveLicense  = -not [string]::IsNullOrEmpty($env:UNITY_LICENSE)
           $haveEmail    = -not [string]::IsNullOrEmpty($env:UNITY_EMAIL)
@@ -1359,12 +1341,10 @@ jobs:
             '  sleep $((ATTEMPT*5))',
             'done',
             'echo "[docker-windows] Activation OK. Building..."',
-            'export BUILD_OUTPUT_DIR=build',
-            'BUILD_ARGS=(-batchmode -nographics -quit -projectPath /project -buildTarget "$BUILD_TARGET" -executeMethod "$BUILD_METHOD" -logFile /workspace/Editor.log)',
-            'if [ -n "$EXTRA_PARAMS" ]; then',
-            '  BUILD_ARGS+=($EXTRA_PARAMS)',
-            'fi',
-            'unity-editor "${BUILD_ARGS[@]}"',
+            # Same script as the native lanes: target mapping, build method,
+            # BUILD_OUTPUT_DIR=build, ANDROID_APP_BUNDLE. The workspace (with
+            # .toolkit) is mounted at /workspace.
+            'bash /workspace/.toolkit/scripts/build/run_unity_player.sh --host-os linux --editor "$(command -v unity-editor)" --platform "$PLATFORM" --project /project --build-method "$BUILD_METHOD" --android-export-type "$ANDROID_EXPORT_TYPE" --log-file /workspace/Editor.log',
             'BUILD_RC=$?',
             # GH Actions artifact storage is currently exhausted (a separate,
             # pre-existing repo issue - "Failed to CreateArtifact: Artifact
@@ -1398,8 +1378,8 @@ jobs:
             -v "${scriptPath}:/tmp/build.sh" `
             -e GITHUB_WORKSPACE=/workspace `
             -e UNITY_LICENSE -e UNITY_EMAIL -e UNITY_PASSWORD `
-            -e "BUILD_TARGET=$buildTarget" -e "BUILD_METHOD=$buildMethod" -e "EXTRA_PARAMS=$extraParams" `
-            -e "ANDROID_APP_BUNDLE=$androidAppBundle" `
+            -e "BUILD_METHOD=$buildMethod" `
+            -e "PLATFORM=$platform" -e "ANDROID_EXPORT_TYPE=${{ inputs.android-export-type }}" `
             -e ANDROID_KEYSTORE_PASS -e ANDROID_KEY_PASS -e BUILD_NUMBER -e APP_VERSION -e BUILD_PROFILE `
             -w /project `
             $image `
@@ -1417,7 +1397,7 @@ jobs:
       - name: Build with local Unity (Windows)
         id: build-windows
         if: ${{ inputs.build-engine == 'local' && runner.os == 'Windows' && steps.ios-guard.outputs.blocked != 'true' }}
-        shell: cmd
+        shell: bash
         env:
           UNITY_EDITOR: ${{ steps.unity-preflight.outputs.unity_editor }}
           # Read by PlayerBuilder for a project with a custom Android keystore.
@@ -1431,82 +1411,15 @@ jobs:
           # (empty = Player Settings).
           BUILD_PROFILE: ${{ inputs.build-profile }}
         run: |
-          @echo off
-          setlocal EnableDelayedExpansion
-
-          set "PROJECT=${{ inputs.project-path }}"
-
-          :: The editor Unity preflight provisioned for this project's exact version.
-          set "UNITY_EXE=%UNITY_EDITOR%"
-          if "!UNITY_EXE!"=="" (
-            echo ::error::Unity preflight did not provide an editor executable.
-            exit /b 1
-          )
-          if not exist "!UNITY_EXE!" (
-            echo ::error::Unity preflight reported !UNITY_EXE!, which does not exist.
-            exit /b 1
-          )
-          echo Unity executable: !UNITY_EXE!
-
-          :: Addressables-only: execute build method and exit
-          if "${{ inputs.platform }}"=="Addressables" (
-            "!UNITY_EXE!" ^
-              -batchmode -nographics -quit ^
-              -projectPath "!PROJECT!" ^
-              -executeMethod ${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }} ^
-              -logFile "Editor.log"
-            exit /b !ERRORLEVEL!
-          )
-
-          :: iOS cannot be built on Windows
-          if "${{ inputs.platform }}"=="iOS" (
-            echo ::error::iOS builds require build-engine=local on a macOS runner.
-            exit /b 1
-          )
-
-          :: Map platform to -buildTarget
-          set "BUILD_TARGET="
-          set "EXTRA_PARAMS="
-          if "${{ inputs.platform }}"=="Android"     set "BUILD_TARGET=Android"
-          if "${{ inputs.platform }}"=="WebGL"       set "BUILD_TARGET=WebGL"
-          if "${{ inputs.platform }}"=="Linux64"     set "BUILD_TARGET=StandaloneLinux64"
-          if "${{ inputs.platform }}"=="Windows64"   set "BUILD_TARGET=StandaloneWindows64"
-          if "${{ inputs.platform }}"=="LinuxServer" (
-            set "BUILD_TARGET=StandaloneLinux64"
-            set "EXTRA_PARAMS=-standaloneBuildSubtarget Server"
-          )
-
-          if "!BUILD_TARGET!"=="" (
-            echo ::error::Unsupported platform for Windows lane: ${{ inputs.platform }}
-            exit /b 1
-          )
-
-          :: Player build method. -buildTarget only SWITCHES the active target;
-          :: an -executeMethod that calls BuildPipeline.BuildPlayer is required to
-          :: actually produce a build. Default to the toolkit package's
-          :: PlayerBuilder (or the project's own, see "Install toolkit build
-          :: package"); allow override via the build-method input.
-          set "BUILD_METHOD=${{ inputs.build-method }}"
-          if "!BUILD_METHOD!"=="" set "BUILD_METHOD=${{ steps.build-package.outputs.player-method || 'PlayerBuilder.Build' }}"
-
-          :: Output dir consumed by PlayerBuilder; matches the upload path (build/).
-          set "BUILD_OUTPUT_DIR=build"
-
-          :: APK or AAB. Only the docker lane used to export this, so a release
-          :: build on a self-hosted runner produced an APK while the artifact was
-          :: named `release-android-aab` -- the wrong thing wearing the right
-          :: label. PlayerBuilder defaults to APK when the variable is absent,
-          :: which is why nothing said so.
-          if "${{ inputs.android-export-type }}"=="aab" set "ANDROID_APP_BUNDLE=1"
-
-          "!UNITY_EXE!" ^
-            -batchmode -nographics -quit ^
-            -projectPath "!PROJECT!" ^
-            -buildTarget "!BUILD_TARGET!" ^
-            -executeMethod !BUILD_METHOD! ^
-            -logFile "Editor.log" ^
-            !EXTRA_PARAMS!
-          exit /b !ERRORLEVEL!
+          # One script for every native lane: target mapping, build method,
+          # BUILD_OUTPUT_DIR / ANDROID_APP_BUNDLE, Addressables-only.
+          bash .toolkit/scripts/build/run_unity_player.sh \
+            --platform            "${{ inputs.platform }}" \
+            --project             "${{ inputs.project-path }}" \
+            --build-method        "${{ inputs.build-method }}" \
+            --player-method       "${{ steps.build-package.outputs.player-method || 'PlayerBuilder.Build' }}" \
+            --addressables-method "${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}" \
+            --android-export-type "${{ inputs.android-export-type }}"
 
       # ── Step 9d: Build with local Unity (self-hosted-macos lane) ──────────
       # Primary lane for iOS. Also handles Android/WebGL/Addressables on macOS.
@@ -1529,70 +1442,15 @@ jobs:
           # (empty = Player Settings).
           BUILD_PROFILE: ${{ inputs.build-profile }}
         run: |
-          set -euo pipefail
-          PROJECT="${{ inputs.project-path }}"
-
-          UNITY_BIN="${UNITY_EDITOR:-}"
-          if [ -z "$UNITY_BIN" ] || [ ! -f "$UNITY_BIN" ]; then
-            echo "::error::Unity preflight did not provide an editor executable (got '${UNITY_BIN}')."
-            exit 1
-          fi
-          echo "Unity binary: ${UNITY_BIN}"
-
-          # Addressables-only: execute build method and exit
-          if [ "${{ inputs.platform }}" = "Addressables" ]; then
-            "$UNITY_BIN" \
-              -batchmode -nographics -quit \
-              -projectPath "${PROJECT}" \
-              -executeMethod "${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}" \
-              -logFile "Editor.log"
-            exit 0
-          fi
-
-          # Map platform to -buildTarget
-          # A Mac with the right modules installed builds the standalone
-          # targets as well; only this mapping said otherwise, and a project
-          # whose RELEASE_BUILD_PLATFORMS contains Windows64 hit a hard error
-          # the moment its runner became a Mac. Same target names as the docker
-          # lane resolver, so the two cannot drift.
-          case "${{ inputs.platform }}" in
-            iOS)         BUILD_TARGET="iOS";                EXTRA_PARAMS="" ;;
-            Android)     BUILD_TARGET="Android";            EXTRA_PARAMS="" ;;
-            WebGL)       BUILD_TARGET="WebGL";              EXTRA_PARAMS="" ;;
-            Windows64)   BUILD_TARGET="StandaloneWindows64"; EXTRA_PARAMS="" ;;
-            Linux64)     BUILD_TARGET="StandaloneLinux64";   EXTRA_PARAMS="" ;;
-            LinuxServer) BUILD_TARGET="StandaloneLinux64"
-                         EXTRA_PARAMS="-standaloneBuildSubtarget Server" ;;
-            *)       echo "::error::Unsupported platform for macOS lane: ${{ inputs.platform }}"; exit 1 ;;
-          esac
-
-          # -buildTarget only SWITCHES the active target; an -executeMethod that
-          # calls BuildPipeline.BuildPlayer is required to actually produce a
-          # build. Default to the toolkit package's PlayerBuilder (or the
-          # project's own, see "Install toolkit build package"); allow override
-          # via the build-method input.
-          BUILD_METHOD="${{ inputs.build-method }}"
-          [ -z "$BUILD_METHOD" ] && BUILD_METHOD="${{ steps.build-package.outputs.player-method || 'PlayerBuilder.Build' }}"
-
-          # Output dir consumed by PlayerBuilder; matches the upload path (build/).
-          export BUILD_OUTPUT_DIR="build"
-
-          # APK or AAB. Only the docker lane used to export this, so a release
-          # build on a self-hosted runner produced an APK while the artifact was
-          # named `release-android-aab` -- the wrong thing wearing the right
-          # label. PlayerBuilder defaults to APK when the variable is absent,
-          # which is why it was silent.
-          if [ "${{ inputs.android-export-type }}" = "aab" ]; then
-            export ANDROID_APP_BUNDLE=1
-          fi
-
-          "$UNITY_BIN" \
-            -batchmode -nographics -quit \
-            -projectPath "${PROJECT}" \
-            -buildTarget "${BUILD_TARGET}" \
-            -executeMethod "${BUILD_METHOD}" \
-            -logFile "Editor.log" \
-            ${EXTRA_PARAMS:+${EXTRA_PARAMS}}
+          # One script for every native lane: target mapping, build method,
+          # BUILD_OUTPUT_DIR / ANDROID_APP_BUNDLE, Addressables-only.
+          bash .toolkit/scripts/build/run_unity_player.sh \
+            --platform            "${{ inputs.platform }}" \
+            --project             "${{ inputs.project-path }}" \
+            --build-method        "${{ inputs.build-method }}" \
+            --player-method       "${{ steps.build-package.outputs.player-method || 'PlayerBuilder.Build' }}" \
+            --addressables-method "${{ steps.build-package.outputs.addressables-method || 'AddressableBuilder.Build' }}" \
+            --android-export-type "${{ inputs.android-export-type }}"
 
       # ── Step 10: Compute build duration ──────────────────────────────────
       - name: Compute build duration

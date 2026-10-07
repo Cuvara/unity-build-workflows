@@ -18,10 +18,16 @@ import yaml
 REPO_ROOT = Path(__file__).parent.parent
 REUSABLE = REPO_ROOT / ".github" / "workflows" / "reusable-build-platform.yml"
 TEXT = REUSABLE.read_text(encoding="utf-8")
+LANE = (REPO_ROOT / "scripts" / "build" / "run_unity_player.sh").read_text(encoding="utf-8")
 
 
 def test_the_reusable_workflow_parses():
     assert yaml.safe_load(TEXT)
+
+
+def _native_steps():
+    steps = yaml.safe_load(TEXT)["jobs"]["build"]["steps"]
+    return {s.get("id"): s for s in steps if s.get("id") in ("build-windows", "build-macos")}
 
 
 def test_every_lane_tells_the_builder_which_android_artifact_to_make():
@@ -31,14 +37,17 @@ def test_every_lane_tells_the_builder_which_android_artifact_to_make():
     release build therefore produced an APK while the artifact was named
     `release-android-aab` — the wrong thing wearing the right label, and silent,
     because PlayerBuilder defaults to APK when the variable is absent.
+    The native lanes now share run_unity_player.sh, which owns the rule.
     """
-    assert TEXT.count("ANDROID_APP_BUNDLE") >= 3, (
-        "expected the docker lane plus both local lanes to export it; "
-        f"found {TEXT.count('ANDROID_APP_BUNDLE')} occurrences"
-    )
-    # The bash lane and the batch lane each have their own syntax for it.
-    assert "export ANDROID_APP_BUNDLE=1" in TEXT, "the macOS/Linux lane must export it"
-    assert 'set "ANDROID_APP_BUNDLE=1"' in TEXT, "the Windows lane must set it"
+    assert "export ANDROID_APP_BUNDLE=1" in LANE
+    assert 'if [ "${EXPORT_TYPE}" = "aab" ]' in LANE
+    for step_id, step in _native_steps().items():
+        assert "run_unity_player.sh" in step["run"], step_id
+        assert '--android-export-type "${{ inputs.android-export-type }}"' in step["run"], step_id
+    docker = next(st for st in yaml.safe_load(TEXT)["jobs"]["build"]["steps"]
+                  if st.get("id") == "build-docker-windows")["run"]
+    assert "run_unity_player.sh" in docker, "the Windows docker lane runs the same script in its container"
+    assert '-e "ANDROID_EXPORT_TYPE=${{ inputs.android-export-type }}"' in docker
 
 
 @pytest.mark.parametrize("platform,target", [
@@ -49,33 +58,29 @@ def test_every_lane_tells_the_builder_which_android_artifact_to_make():
     ("Linux64", "StandaloneLinux64"),
     ("LinuxServer", "StandaloneLinux64"),
 ])
-def test_the_macos_lane_maps_every_platform_the_pipeline_can_select(platform, target):
+def test_the_native_lanes_map_every_platform_the_pipeline_can_select(platform, target):
     """A Mac with the modules installed builds the standalone targets too.
 
     The lane used to map iOS, Android and WebGL and hard-error on anything else,
     so a project with `Windows64` in `RELEASE_BUILD_PLATFORMS` broke the moment
-    its runner became a Mac.
+    its runner became a Mac. One table now serves every native lane.
     """
-    macos_lane = TEXT[TEXT.index("Unsupported platform for macOS lane") - 2000:
-                      TEXT.index("Unsupported platform for macOS lane")]
-    assert re.search(rf"^\s*{re.escape(platform)}\)\s*BUILD_TARGET=\"{re.escape(target)}\"",
-                     macos_lane, re.M), f"{platform} is not mapped on the macOS lane"
+    assert re.search(rf"^\s*{re.escape(platform)}\)(?:(?!;;).)*?TARGET={re.escape(target)}(?![A-Za-z0-9])", LANE, re.M | re.S), (
+        f"{platform} is not mapped in run_unity_player.sh")
 
 
-def test_the_linux_server_subtarget_survives_on_the_macos_lane():
+def test_the_linux_server_subtarget_survives_on_every_lane():
     """`LinuxServer` is StandaloneLinux64 plus a subtarget flag; dropping the flag
     builds a desktop player under a server artifact's name."""
-    assert "-standaloneBuildSubtarget Server" in TEXT
-    assert TEXT.count("-standaloneBuildSubtarget Server") >= 2, (
-        "the docker resolver and the macOS lane must both carry it"
-    )
+    assert "-standaloneBuildSubtarget Server" in TEXT, "the docker resolver"
+    assert "EXTRA=(-standaloneBuildSubtarget Server)" in LANE, "the native lanes"
 
 
 def test_the_output_directory_is_the_one_the_upload_takes():
     """PlayerBuilder writes under BUILD_OUTPUT_DIR; the artifact upload takes
     `build/`. They have to be the same word."""
-    for marker in ('export BUILD_OUTPUT_DIR="build"', 'set "BUILD_OUTPUT_DIR=build"'):
-        assert marker in TEXT, marker
+    assert "export BUILD_OUTPUT_DIR=build" in LANE, "native lanes"
+    assert "path: build/" in TEXT, "the upload"
 
 
 # ── Custom Android keystore on the native lanes ─────────────────────────────

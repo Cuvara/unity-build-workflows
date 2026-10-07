@@ -69,6 +69,11 @@ ALLOWED_PATHS = frozenset({
     # editor in batchmode by design.
     ".github/workflows/reusable-build-platform.yml",
     ".github/workflows/reusable-unity-tests.yml",
+    # The native build lanes of reusable-build-platform.yml (self-hosted
+    # macOS / Windows, the Addressables pre-step) all call this one script
+    # instead of each spelling the Unity command line in its own shell. It
+    # is the same approved native invocation, moved to a single place.
+    "scripts/build/run_unity_player.sh",
 })
 
 # ---------------------------------------------------------------------------
