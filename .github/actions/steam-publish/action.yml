@@ -1,0 +1,128 @@
+name: Steam publish
+description: >
+  One Steam phase of a desktop promotion: resolve the Steam configuration
+  (failing closed before anything is downloaded), verify the Release Set
+  artifact this job holds (verify-release-artifact), install SteamCMD, and
+  upload the verified bytes to the phase's branch (scripts/steam/deploy_steam.sh,
+  which stages a copy and fingerprints it against the original). A dry run
+  resolves, verifies and stages, needs no Steam credentials, and uploads
+  nothing.
+
+  STEAM_USERNAME and STEAM_CONFIG_VDF come in through the calling step's env.
+  The Steam ids (STEAM_APP_ID, STEAM_DEPOTS, STEAM_DEPOT_<PLATFORM>,
+  STEAM_BRANCH_<PHASE>) are read from vars-json, because a composite action
+  cannot read vars itself.
+
+inputs:
+  platform:
+    description: Windows64 | Linux64 | LinuxServer.
+    required: true
+  phase:
+    description: internal | external | production.
+    required: true
+  display-name:
+    description: Platform name for the default Steamworks build description, e.g. Windows.
+    required: true
+  artifact-name:
+    description: Artifact the promotion was started with.
+    required: true
+  source-run-id:
+    description: The Release Set run that produced the artifact.
+    required: true
+  build-version:
+    description: Version being released.
+    required: true
+  build-description:
+    description: Text shown against the build in Steamworks ('' = "<display-name> <version> (<run>)").
+    required: false
+    default: ''
+  dry-run:
+    description: "'true' stages and validates without uploading."
+    required: false
+    default: 'false'
+  vars-json:
+    description: The calling workflow's toJSON(vars); only STEAM_* ids are read from it.
+    required: true
+  github-token:
+    description: Token for the cross-run artifact download.
+    required: true
+  toolkit-path:
+    description: Toolkit checkout, relative to the workspace. The verify step below is referenced at .toolkit, so this must stay .toolkit.
+    required: false
+    default: '.toolkit'
+
+outputs:
+  branch:
+    description: The Steam branch this phase published to.
+    value: ${{ steps.steam.outputs.branch }}
+
+runs:
+  using: composite
+  steps:
+    # Fail closed on configuration BEFORE downloading anything: missing Steam
+    # setup is a clear error, never a silent skip.
+    - name: Resolve Steam configuration
+      id: steam
+      shell: bash
+      env:
+        VARS_JSON: ${{ inputs.vars-json }}
+        PLATFORM:  ${{ inputs.platform }}
+        PHASE:     ${{ inputs.phase }}
+        DRY_RUN:   ${{ inputs.dry-run }}
+        TOOLKIT:   ${{ inputs.toolkit-path }}
+      run: |
+        set -Eeuo pipefail
+        python3 - <<'PY'
+        import json, os, subprocess, sys
+        env = dict(os.environ)
+        # The project's Steam ids, exactly as the resolver reads them; the
+        # credentials stay in the env the calling step set.
+        for key, value in (json.loads(os.environ.get("VARS_JSON") or "{}") or {}).items():
+            if key.startswith("STEAM_") and key not in ("STEAM_USERNAME", "STEAM_CONFIG_VDF"):
+                env[key] = str(value)
+        args = [sys.executable, os.path.join(os.environ["TOOLKIT"], "scripts/steam/resolve_steam_config.py"),
+                "--platform", os.environ["PLATFORM"], "--phase", os.environ["PHASE"]]
+        # A dry run stages and validates configuration without publishing, so
+        # it needs the ids but not an account to log in with.
+        if os.environ.get("DRY_RUN") != "true":
+            args.append("--require-credentials")
+        sys.exit(subprocess.call(args, env=env))
+        PY
+
+    # Re-verified in every phase. Each phase downloads the artifact again, so
+    # each phase proves for itself that what it holds is the Release Set's
+    # artifact — an approval on the internal branch is not evidence about the
+    # bytes a later job fetched.
+    - name: Verify release artifact
+      uses: ./.toolkit/.github/actions/verify-release-artifact
+      with:
+        platform:      ${{ inputs.platform }}
+        artifact-name: ${{ inputs.artifact-name }}
+        source-run-id: ${{ inputs.source-run-id }}
+        build-version: ${{ inputs.build-version }}
+        path:          promoted
+        github-token:  ${{ inputs.github-token }}
+        toolkit-path:  ${{ inputs.toolkit-path }}
+
+    # Nothing uploads on a dry run, so there is nothing to install.
+    - name: Install SteamCMD
+      if: ${{ inputs.dry-run != 'true' }}
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq steamcmd
+        echo "/usr/games" >> "${GITHUB_PATH}"
+
+    - name: Upload to Steam
+      shell: bash
+      env:
+        ARTIFACT_DIR:      promoted
+        STEAM_APP_ID:      ${{ steps.steam.outputs.app-id }}
+        STEAM_DEPOT_ID:    ${{ steps.steam.outputs.depot-id }}
+        STEAM_BRANCH:      ${{ steps.steam.outputs.branch }}
+        DRY_RUN:           ${{ inputs.dry-run }}
+        BUILD_DESCRIPTION: ${{ inputs.build-description != '' && inputs.build-description || format('{0} {1} ({2})', inputs.display-name, inputs.build-version, inputs.source-run-id) }}
+        TOOLKIT:           ${{ inputs.toolkit-path }}
+        # STEAM_USERNAME / STEAM_CONFIG_VDF come from the calling step's env.
+      run: bash "${TOOLKIT}/scripts/steam/deploy_steam.sh"

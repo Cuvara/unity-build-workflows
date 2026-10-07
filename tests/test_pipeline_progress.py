@@ -32,8 +32,8 @@ PROMOTION_PIPELINES = [
     "pipeline-android-release.yml",
     "pipeline-ios-release.yml",
     "pipeline-webgl-release.yml",
-    "pipeline-windows-release.yml",
-    "pipeline-linux-release.yml",
+    # Windows and Linux are wrappers around this one; their jobs live here.
+    "pipeline-desktop-release.yml",
 ]
 
 

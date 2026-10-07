@@ -21,7 +21,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ACTION = REPO_ROOT / ".github" / "actions" / "verify-release-artifact" / "action.yml"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 CHECKER = REPO_ROOT / "scripts" / "common" / "validate_pipeline_invariants.py"
-PROMOTIONS = sorted(WORKFLOWS.glob("pipeline-*-release.yml"))
+# Thin wrappers (Windows, Linux) run pipeline-desktop-release.yml and hold
+# no steps of their own.
+PROMOTIONS = sorted(p for p in WORKFLOWS.glob("pipeline-*-release.yml")
+                    if not all("uses" in j for j in yaml.safe_load(p.read_text(encoding="utf-8"))["jobs"].values()))
+VERIFIERS = ("/verify-release-artifact", "/steam-publish")
 
 
 def _action():
@@ -49,7 +53,7 @@ def test_every_promotion_job_uses_the_action(path):
     users = 0
     for job_id, job in jobs.items():
         for s in job.get("steps") or []:
-            if str(s.get("uses", "")).endswith("/verify-release-artifact"):
+            if str(s.get("uses", "")).endswith(VERIFIERS):
                 users += 1
                 w = s["with"]
                 assert w["source-run-id"] == "${{ inputs.source-run-id }}", job_id
@@ -61,6 +65,28 @@ def test_every_promotion_job_uses_the_action(path):
                 assert s["with"].get("name") != "${{ inputs.artifact-name }}", (path.name, job_id)
         assert "release_manifest.py verify" not in json.dumps(job.get("steps") or []), (path.name, job_id)
     assert users >= 4, path.name
+
+
+def test_steam_publish_verifies_through_the_shared_action():
+    steps = yaml.safe_load((REPO_ROOT / ".github" / "actions" / "steam-publish" / "action.yml")
+                           .read_text(encoding="utf-8"))["runs"]["steps"]
+    verify = next(s for s in steps if str(s.get("uses", "")).endswith("/verify-release-artifact"))
+    assert verify["with"]["source-run-id"] == "${{ inputs.source-run-id }}"
+    assert verify["with"]["path"] == "promoted", "deploy_steam.sh stages ARTIFACT_DIR=promoted"
+
+
+def test_the_checker_fails_when_steam_publish_stops_verifying(tmp_path):
+    """steam-publish counts as a verification only through the action it
+    calls; swap that call for a bare download and the Steam phases hold
+    unverified bytes."""
+    def drop(root):
+        p = root / ".github" / "actions" / "steam-publish" / "action.yml"
+        p.write_text(p.read_text(encoding="utf-8").replace(
+            "uses: ./.toolkit/.github/actions/verify-release-artifact",
+            "uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16"), encoding="utf-8")
+    r = _check(tmp_path, drop)
+    assert r.returncode != 0
+    assert "I-017" in r.stdout and "actions/steam-publish downloads the artifact" in r.stdout
 
 
 def test_only_android_production_skips_the_download():
