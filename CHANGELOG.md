@@ -24,6 +24,17 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   checkout, which would clean away a toolkit checked out first. So it cannot
   come from the toolkit. `tests/test_shared_job_steps.py` fails when the two
   jobs' copies differ.
+- **One way to get the bot token.** Seven workflows carried the same ~55
+  lines of Node.js that signed a GitHub App JWT and exchanged it for an
+  installation token: `auto-merge`, `auto-release`, `version-bump`,
+  `build-pr-comment`, `license-rotation`, `sync-org-variables` and
+  `unity-generate-license`. They now use `actions/create-github-app-token`,
+  pinned to v3.2.0 by SHA, with the same scope (the whole installation on
+  the repository owner). It needs no checkout (most of them mint the token
+  before checking out), masks the token, and revokes it when the job ends.
+  `unity-generate-license` still skips with a "set it by hand" warning when
+  `APP_ID` / `APP_PRIVATE_KEY` are absent. The action prefers `client-id`
+  over the deprecated `app-id`; switching needs an `APP_CLIENT_ID` secret.
 
 ## [6.24.1] — 2026-10-07
 
