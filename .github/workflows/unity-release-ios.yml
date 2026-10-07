@@ -427,6 +427,8 @@ jobs:
       # ── iOS code signing ─────────────────────────────────────────────────────
       - name: Setup iOS signing
         id: signing
+        # Seconds normally; a hang must not hold the Mac for hours.
+        timeout-minutes: 10
         uses: ./.github/actions/ios-setup-signing
         with:
           ios-distribution-certificate-base64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}

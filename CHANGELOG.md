@@ -8,6 +8,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **iOS "Setup signing" hung for hours on a self-hosted Mac.**
+  `create_keychain.sh` generated its password with
+  `tr -dc … < /dev/urandom | head -c 32`, which stops only when SIGPIPE kills
+  `tr`. A self-hosted runner started the step with SIGPIPE ignored, so macOS
+  `tr` kept reading `/dev/urandom` forever (90 minutes, nothing printed). The
+  password now comes from a fixed 24 bytes (`od -N24`). "iOS — Setup signing"
+  and "Setup iOS signing" also get `timeout-minutes: 10`, so a future hang
+  fails within minutes instead of holding the Mac.
+
 ## [6.22.3] — 2026-10-07
 
 ### Fixed
