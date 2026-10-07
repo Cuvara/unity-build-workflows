@@ -1685,6 +1685,8 @@ jobs:
         id: ios-find-project
         if: ${{ inputs.sign-ios && inputs.platform == 'iOS' && steps.ios-guard.outputs.blocked != 'true' }}
         shell: bash
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
         run: |
           set -Eeuo pipefail
           # Once CocoaPods has run, Pods/Pods.xcodeproj sits next to Unity's
@@ -1701,6 +1703,13 @@ jobs:
             exit 1
           fi
           echo "project-dir=$(dirname "${XCODEPROJ}")" >> "${GITHUB_OUTPUT}"
+          # The project's minimum iOS (Player Settings > Target minimum iOS
+          # Version): xcode_archive.sh builds every target at it, Pods included.
+          SETTINGS="${PROJECT_PATH:-.}/ProjectSettings/ProjectSettings.asset"
+          if [[ -f "${SETTINGS}" ]]; then
+            TARGET=$( { grep -m1 'iOSTargetOSVersionString:' "${SETTINGS}" || true; } | awk '{ print $2 }' | tr -d '\r')
+            echo "deployment-target=${TARGET}" >> "${GITHUB_OUTPUT}"
+          fi
 
       # The player was built with the project's own PlayerSettings, which may
       # carry no team and automatic signing. Team, bundle ID and profile come
@@ -1743,6 +1752,7 @@ jobs:
           xcode-project-path: ${{ steps.ios-find-project.outputs.project-dir }}
           export-options-path: ${{ steps.ios-signing.outputs.export-options-path }}
           development-team: ${{ steps.ios-xcode-signing.outputs.development-team }}
+          deployment-target: ${{ steps.ios-find-project.outputs.deployment-target }}
           archive-path: build-output/${{ inputs.ios-app-name }}.xcarchive
           export-path: build-output/ipa
 
