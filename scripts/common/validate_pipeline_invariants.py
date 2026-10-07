@@ -150,6 +150,23 @@ def check_signing_before_boundary(workflows_dir, report):
 # I-010 / I-017 / I-007 — promotion consumes an exact, verified artifact
 # ---------------------------------------------------------------------------
 
+# The shared download + verify step of the promotion pipelines. Counts as a
+# verification only while the action itself still does both.
+VERIFY_ACTION = "/.github/actions/verify-release-artifact"
+
+
+def _action_verifies(action_path):
+    try:
+        steps = (load_workflow(action_path).get("runs") or {}).get("steps") or []
+    except yaml.YAMLError:
+        return False
+    downloads = [s for s in steps if str(s.get("uses", "")).startswith("actions/download-artifact")]
+    cross_run = bool(downloads) and all(
+        "inputs.source-run-id" in str((s.get("with") or {}).get("run-id", "")) and
+        (s.get("with") or {}).get("github-token") for s in downloads)
+    verifies = any("release_manifest.py verify" in str(s.get("run", "")) for s in steps)
+    return cross_run and verifies
+
 def check_promotion_pins_its_source(workflows_dir, report):
     for path in promotion_workflows(workflows_dir):
         workflow = load_workflow(path)
@@ -170,13 +187,20 @@ def check_promotion_pins_its_source(workflows_dir, report):
 
         for job_id, job in (workflow.get("jobs") or {}).items():
             for step in job.get("steps") or []:
-                if not str(step.get("uses", "")).startswith("actions/download-artifact"):
-                    continue
+                uses = str(step.get("uses", ""))
                 with_block = step.get("with") or {}
-                name = str(with_block.get("name", ""))
+                if uses.endswith(VERIFY_ACTION):
+                    # The action downloads from its source-run-id input.
+                    name = str(with_block.get("artifact-name", ""))
+                    run_id = str(with_block.get("source-run-id", ""))
+                elif uses.startswith("actions/download-artifact"):
+                    name = str(with_block.get("name", ""))
+                    run_id = str(with_block.get("run-id", ""))
+                else:
+                    continue
                 if "release-notes" in name:
                     continue  # produced inside the promotion run
-                if "source-run-id" not in str(with_block.get("run-id", "")):
+                if "source-run-id" not in run_id:
                     report.fail(
                         "I-017",
                         f"{path.name}:{job_id} downloads {name or '<unnamed>'} from the "
@@ -191,9 +215,20 @@ def check_promotion_pins_its_source(workflows_dir, report):
 
 def check_promotion_verifies_identity(workflows_dir, report):
     """I-007: a filename is not an identity."""
+    action = workflows_dir.parent / "actions" / "verify-release-artifact" / "action.yml"
+    action_verifies = action.is_file() and _action_verifies(action)
+    if action.is_file() and not action_verifies:
+        report.fail(
+            "I-007",
+            "actions/verify-release-artifact no longer downloads from the source "
+            "run and runs release_manifest.py verify — every promotion relying "
+            "on it is unverified",
+        )
     for path in promotion_workflows(workflows_dir):
         body = path.read_text()
-        if "release_manifest.py verify" not in body:
+        verified = "release_manifest.py verify" in body or (
+            action_verifies and VERIFY_ACTION in body)
+        if not verified:
             report.fail(
                 "I-007",
                 f"{path.name} never verifies the artifact against the release "
@@ -285,8 +320,14 @@ def check_every_download_is_verified(workflows_dir, report):
             # Only jobs that pull the platform artifact; a job that fetches
             # release notes or the manifest alone has nothing to verify.
             if "download-artifact" not in steps or "inputs.artifact-name" not in steps:
-                continue
-            if "release_manifest.py verify" in steps:
+                if VERIFY_ACTION not in steps:
+                    continue
+            # A direct download is covered only by a verify in the same job;
+            # the action downloads and verifies in one step.
+            direct = [s for s in job.get("steps") or []
+                      if str(s.get("uses", "")).startswith("actions/download-artifact")
+                      and "inputs.artifact-name" in json.dumps(s)]
+            if "release_manifest.py verify" in steps or (VERIFY_ACTION in steps and not direct):
                 report.ok("I-017", f"{path.name}:{job_id} verifies what it downloaded")
             else:
                 report.fail(

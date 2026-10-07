@@ -728,9 +728,13 @@ def test_every_job_that_downloads_the_artifact_verifies_it(platform):
          / f"pipeline-{platform}-release.yml").read_text())
     for job_id, job in workflow["jobs"].items():
         steps = _json.dumps(job.get("steps") or [])
-        if "download-artifact" not in steps or "inputs.artifact-name" not in steps:
-            continue
-        assert "release_manifest.py verify" in steps, f"{platform}:{job_id}"
+        direct = [s for s in job.get("steps") or []
+                  if str(s.get("uses", "")).startswith("actions/download-artifact")
+                  and "inputs.artifact-name" in _json.dumps(s)]
+        if direct:
+            # A direct download needs a verify of its own in the job; the
+            # verify-release-artifact action downloads and verifies in one.
+            assert "release_manifest.py verify" in steps, f"{platform}:{job_id}"
 
 
 @pytest.mark.parametrize("platform", PROMOTIONS)

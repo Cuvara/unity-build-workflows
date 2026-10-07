@@ -46,9 +46,24 @@ inputs:
     required: false
     default: ''
   discord-thread-id:
-    description: Discord thread (or forum post) to post into. Empty = the webhook's channel.
+    description: >-
+      Discord thread (or forum post) to post into. Empty = resolve it from the
+      project's Discord config (below), else the webhook's channel.
     required: false
     default: ''
+  discord-vars-json:
+    description: >-
+      The calling workflow's toJSON(vars), for the Discord thread variables
+      (DISCORD_THREAD_*). A composite action cannot read vars itself. Empty
+      skips the resolution.
+    required: false
+    default: ''
+  discord-config-file:
+    description: >-
+      The project's Discord routing file (vars.DISCORD_CONFIG_FILE); a store
+      release posts to its platform's production thread, like Build / Release.
+    required: false
+    default: '.github/discord.json'
   toolkit-path:
     description: Where the toolkit is checked out, for the shared progress renderer.
     required: false
@@ -168,13 +183,46 @@ runs:
             fh.write(f"phase-line={line}\n")
         PY
 
+    # The project's .github/discord.json routes notifications per environment
+    # and platform; a store release is the production environment. Same
+    # resolver as the build pipeline's resolve-config. A notification setting
+    # never fails a release.
+    - name: Checkout Discord config
+      if: ${{ inputs.discord-webhook != '' && inputs.discord-thread-id == '' && inputs.discord-vars-json != '' }}
+      continue-on-error: true
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      with:
+        path: .project
+        sparse-checkout: ${{ inputs.discord-config-file || '.github/discord.json' }}
+        sparse-checkout-cone-mode: false
+
+    - name: Resolve Discord thread
+      id: discord
+      if: ${{ inputs.discord-webhook != '' && inputs.discord-thread-id == '' && inputs.discord-vars-json != '' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        VARS_JSON:    ${{ inputs.discord-vars-json }}
+        CONFIG_FILE:  .project/${{ inputs.discord-config-file || '.github/discord.json' }}
+        PLATFORM:     ${{ inputs.platform }}
+        TOOLKIT_PATH: ${{ inputs.toolkit-path }}
+      run: |
+        set -Eeuo pipefail
+        resolved="$(printf '%s' "${VARS_JSON}" \
+          | python3 "${TOOLKIT_PATH}"/scripts/common/resolve_discord_threads.py \
+              --environment production --config "${CONFIG_FILE}")"
+        thread="$(printf '%s\n' "${resolved}" | sed -n "s/^${PLATFORM}=//p" | head -1)"
+        [ -n "${thread}" ] || thread="$(printf '%s\n' "${resolved}" | sed -n 's/^thread-id=//p' | head -1)"
+        echo "Discord thread for ${PLATFORM} (production): ${thread:-<channel root>}"
+        echo "thread-id=${thread}" >> "$GITHUB_OUTPUT"
+
     - name: Notify Discord
       if: ${{ inputs.discord-webhook != '' }}
       continue-on-error: true
       shell: bash
       env:
         WEBHOOK: ${{ inputs.discord-webhook }}
-        THREAD_ID: ${{ inputs.discord-thread-id }}
+        THREAD_ID: ${{ inputs.discord-thread-id || steps.discord.outputs.thread-id }}
         PLATFORM: ${{ inputs.platform }}
         DESTINATION: ${{ inputs.destination }}
         BUILD_VERSION: ${{ inputs.build-version }}

@@ -35,6 +35,20 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
   artifact of the build type — binaries of hundreds of MB — to attach files up
   to 8 MB. It now reads the platform results and downloads only successful
   builds whose measured size is within the attachment threshold.
+- **One verify step for every promotion job.** The 22 jobs of the five
+  `pipeline-*-release.yml` that hold the artifact each spelled the same three
+  steps: download it from the Release Set run, download `release-manifest`,
+  run `release_manifest.py verify`. They now call
+  `.github/actions/verify-release-artifact` (`identity-only: 'true'` for
+  Google Play production, which uploads nothing). Job ids, conditions,
+  environments and download paths are unchanged. The invariant checker
+  (I-007 / I-017) accepts the action as a verification only while the action
+  itself still downloads from `source-run-id` and runs the verify.
+- **Every store release posts to its platform's Discord thread.** The thread
+  resolution that Release / Android and Release / iOS each copied into their
+  report job is now part of `release-report` (`discord-vars-json`,
+  `discord-config-file`), so Release / WebGL, Windows and Linux use their
+  production threads too.
 
 ## [6.22.6] — 2026-10-07
 
