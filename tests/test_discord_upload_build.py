@@ -423,7 +423,10 @@ def test_the_old_naming_survives_as_a_fallback():
 def test_the_pipeline_supplies_the_artifact_name():
     """Both halves, or the parse finds an empty field and falls back forever."""
     body = (REPO_ROOT / ".github" / "workflows" / "unity-pipeline.yml").read_text()
-    assert '${logsid},${binid},${ART}' in body
+    assert "pipeline_results.py diagnostics" in body
+    # Notify Discord's diagnostics: errors,warnings,logsId,binId,artifactName,link
+    script = (REPO_ROOT / "scripts" / "common" / "pipeline_results.py").read_text()
+    assert 'ids.get(name + "-logs", ""),\n' in script and 'ids.get(name, ""), name, link' in script
 
 
 # ---------------------------------------------------------------------------

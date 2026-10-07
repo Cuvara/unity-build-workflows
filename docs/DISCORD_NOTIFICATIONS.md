@@ -242,7 +242,7 @@ Each row format:
 | Size + download link | `result == success` and a binary artifact ID is available |
 | `(attached)` | File was attached to the Discord message (under size threshold) |
 | `([linked])` | File exceeded threshold — links to the Actions run instead |
-| ⚠️ / ❌ counts | Platform diagnostic data is present |
+| ⚠️ / ❌ counts | The build leg read a Unity Editor log (`logMeasured` in its result file; the counts are its log summary's). Omitted for a lane that wrote none — Docker / game-ci — rather than shown as 0 |
 | 📄 logs link | Logs artifact ID is available |
 
 ---

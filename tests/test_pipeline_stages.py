@@ -457,9 +457,7 @@ def test_final_report_names_the_failing_stage(pipeline_jobs):
     the stage and the platform."""
     # Read the raw step scripts: yaml.dump re-wraps long lines, which breaks a
     # literal substring search.
-    body = "\n".join(
-        str(step.get("run", "")) for step in pipeline_jobs["final-report"]["steps"]
-    )
+    body = _report_script(pipeline_jobs)
     for token in (
         "01 PREPARE / Validate Unity Project",
         "02 QUALITY GATE / Unity Tests",
@@ -510,9 +508,7 @@ def test_build_result_is_uploaded_after_it_is_written(repo_root):
 
 def test_report_tolerates_a_missing_leg_result(pipeline_jobs):
     """A reporting gap must not fail a green build, but a dead leg still must."""
-    body = "\n".join(
-        str(step.get("run", "")) for step in pipeline_jobs["final-report"]["steps"]
-    )
+    body = _report_script(pipeline_jobs)
     assert "unreported" in body, (
         "the report has no state for 'the matrix succeeded but this leg did not "
         "report', so a reporting gap fails an otherwise green run"
@@ -571,7 +567,12 @@ def test_stage_04_jobs_do_not_add_a_nesting_level(pipeline_jobs):
 # ---------------------------------------------------------------------------
 
 def _report_script(pipeline_jobs):
-    return "\n".join(str(s.get("run", "")) for s in pipeline_jobs["final-report"]["steps"])
+    """The final report's logic: its steps, plus the shared script they run
+    (scripts/common/pipeline_results.py)."""
+    runs = "\n".join(str(s.get("run", "")) for s in pipeline_jobs["final-report"]["steps"])
+    assert "pipeline_results.py final-report" in runs, "stage 07 no longer runs the shared report"
+    script = REPO_ROOT / "scripts" / "common" / "pipeline_results.py"
+    return runs + "\n" + script.read_text(encoding="utf-8")
 
 
 def test_report_draws_stage_progress(pipeline_jobs):
@@ -781,7 +782,7 @@ def test_release_pipeline_downloads_across_runs(key, spec):
 def test_build_release_report_emits_a_runnable_promotion(pipeline_jobs):
     """A promotion needs the artifact name AND the run that produced it. The
     report is where the operator gets both."""
-    body = "\n".join(str(s.get("run", "")) for s in pipeline_jobs["final-report"]["steps"])
+    body = _report_script(pipeline_jobs)
     assert "source-run-id=" in body, (
         "the hand-off omits the run id, so the command it prints cannot work"
     )
