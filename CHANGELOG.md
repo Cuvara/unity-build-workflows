@@ -8,6 +8,18 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Stage 01's matrix is a script.** The ~300-line inline bash of
+  `unity-pipeline.yml`'s "Resolve build matrix" step is
+  `scripts/common/resolve_build_matrix.sh`, unchanged except that it finds
+  its `matrix_runner_labels.py` helper beside itself instead of probing five
+  candidate paths. The step's env is its whole input, as before. The test
+  harness runs the file rather than a `bash -c` of the extracted step text.
+  `unity-pipeline.yml` is down to about 1900 lines.
+
 ## [6.24.0] — 2026-10-07
 
 ### Changed

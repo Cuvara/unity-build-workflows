@@ -134,14 +134,19 @@ PLATFORM_ENV = {
 }
 
 
+MATRIX_SCRIPT = REPO_ROOT / "scripts" / "common" / "resolve_build_matrix.sh"
+
+
 def _matrix_step_script():
+    """The script the `matrix` step runs; the step must still run it."""
     import yaml
-    with (WORKFLOWS_DIR / "unity-pipeline.yml").open() as fh:
+    with (WORKFLOWS_DIR / "unity-pipeline.yml").open(encoding="utf-8") as fh:
         workflow = yaml.safe_load(fh)
     steps = workflow["jobs"]["resolve-config"]["steps"]
     for step in steps:
         if step.get("id") == "matrix":
-            return step["run"]
+            assert step["run"].strip() == "bash .toolkit/scripts/common/resolve_build_matrix.sh"
+            return MATRIX_SCRIPT
     raise AssertionError("unity-pipeline.yml has no `matrix` step in resolve-config")
 
 
@@ -199,7 +204,7 @@ def resolve_matrix():
         env["GITHUB_OUTPUT"] = output_path
         try:
             proc = subprocess.run(
-                ["bash", "-c", script], env=env, capture_output=True, text=True
+                ["bash", str(script)], env=env, capture_output=True, text=True
             )
             assert proc.returncode == 0, (
                 f"matrix step failed ({proc.returncode}):\n{proc.stderr}"
