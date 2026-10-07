@@ -136,7 +136,7 @@ class TestEditorPropagation:
         assert "continue-on-error" not in step("unity-preflight")
 
     def test_reported_version_prefers_the_preflight_version(self):
-        outputs = step("set-outputs")["run"]
+        outputs = step("set-outputs")["env"]["UNITY_VERSION_USED"]
         assert "steps.unity-preflight.outputs.unity_version || inputs.unity-version" in outputs
 
 

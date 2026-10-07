@@ -151,8 +151,11 @@ def test_artifact_ids_come_from_the_run_artifact_map(tmp_path):
 
 
 def test_the_build_leg_records_whether_it_read_a_log():
-    rbp = (REPO_ROOT / ".github" / "workflows" / "reusable-build-platform.yml").read_text(encoding="utf-8")
-    assert '"logMeasured":"%s"' in rbp
-    assert "steps.unity-log.outputs.log-found" in rbp
+    rbp = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "reusable-build-platform.yml")
+                         .read_text(encoding="utf-8"))
+    writer = next(s for s in rbp["jobs"]["build"]["steps"] if s.get("id") == "set-outputs")
+    assert writer["env"]["LOG_FOUND"] == "${{ steps.unity-log.outputs.log-found }}"
+    script = (REPO_ROOT / "scripts" / "build" / "write_build_result.py").read_text(encoding="utf-8")
+    assert '"logMeasured": "true" if env("LOG_FOUND") == "true" else "false"' in script
     summariser = (REPO_ROOT / "scripts" / "common" / "summarise_unity_log.py").read_text(encoding="utf-8")
     assert "log-found=" in summariser
