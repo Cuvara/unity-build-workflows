@@ -149,3 +149,58 @@ def test_an_unknown_test_mode_is_a_usage_error(test_editor, tmp_path):
     r = subprocess.run(["bash", str(SCRIPT), "--tests", "Everything", "--project", "p",
                         "--editor", str(fake)], capture_output=True, text=True, cwd=tmp_path)
     assert r.returncode == 2 and "--tests takes EditMode, PlayMode or All" in r.stdout
+
+
+# ── The Unity log reaches the step output while Unity runs ─────────────────
+
+@pytest.fixture
+def logging_editor(tmp_path):
+    """A stand-in Unity that writes to its -logFile over a moment, as the
+    real editor does (nothing on stdout)."""
+    fake = tmp_path / "UnityLogs"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'log=""; prev=""\n'
+        'for a in "$@"; do [ "$prev" = "-logFile" ] && log="$a"; prev="$a"; done\n'
+        'echo "[unity] starting build" >> "$log"; sleep 1\n'
+        'echo "[PlayerBuilder] result=Succeeded" >> "$log"\n'
+        'exit "${FAKE_EXIT:-0}"\n')
+    fake.chmod(0o755)
+    return fake
+
+
+def _run_logged(fake, tmp_path, **env):
+    full = dict(os.environ, UNITY_EDITOR=str(fake), **env)
+    return subprocess.run(["bash", str(SCRIPT), "--platform", "Android", "--project", "p",
+                           "--log-file", "Editor.log"],
+                          capture_output=True, text=True, env=full, cwd=tmp_path, timeout=60)
+
+
+def test_the_unity_log_is_streamed_into_the_step_output(logging_editor, tmp_path):
+    """The step showed only "Unity binary: ..." for a 15-minute build."""
+    r = _run_logged(logging_editor, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "[unity] starting build" in r.stdout
+    assert "[PlayerBuilder] result=Succeeded" in r.stdout
+    # The file is still written for the parse / upload steps.
+    assert "result=Succeeded" in (tmp_path / "Editor.log").read_text()
+
+
+def test_a_log_from_an_earlier_run_is_not_replayed(logging_editor, tmp_path):
+    (tmp_path / "Editor.log").write_text("[old] previous build\n")
+    r = _run_logged(logging_editor, tmp_path)
+    assert "[old] previous build" not in r.stdout
+    assert "[old] previous build" not in (tmp_path / "Editor.log").read_text()
+
+
+def test_streaming_keeps_unitys_exit_code(logging_editor, tmp_path):
+    r = _run_logged(logging_editor, tmp_path, FAKE_EXIT="1")
+    assert r.returncode == 1
+    assert "[PlayerBuilder] result=Succeeded" in r.stdout
+
+
+def test_streaming_can_be_turned_off(logging_editor, tmp_path):
+    r = _run_logged(logging_editor, tmp_path, UNITY_LOG_STREAM="0")
+    assert r.returncode == 0
+    assert "[unity] starting build" not in r.stdout
+    assert "starting build" in (tmp_path / "Editor.log").read_text()
