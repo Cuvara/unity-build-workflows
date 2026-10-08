@@ -25,7 +25,7 @@ bundle exec fastlane android upload_internal package_name:com.studio.game aab_pa
 
 | Lane | Purpose | Credentials |
 |---|---|---|
-| `upload_internal` | Upload AAB/APK to Google Play internal track | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` |
+| `upload_internal` | Upload AAB/APK to Google Play internal track. Release notes go up only when `GOOGLE_PLAY_RELEASE_NOTES_LOCALE` (or `release_notes_locale:`) names a Play listing language, e.g. `en-US`; they are written to `<locale>/changelogs/default.txt`, where supply reads them | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` |
 | `promote_track` | Promote from one track to another | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` |
 | `update_rollout` | Update staged rollout % or halt | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` |
 | `firebase_distribute` | Upload to Firebase App Distribution | `FIREBASE_SERVICE_ACCOUNT_JSON` (file) |

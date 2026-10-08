@@ -392,6 +392,7 @@ CACHE_NUGET_ENABLED=true
 | `FIREBASE_APP_ID_IOS` | — | Firebase App ID for iOS builds. Required when `BUILD_DELIVERY=firebase` and building iOS |
 | `FIREBASE_TESTER_GROUPS` | — | Comma-separated Firebase tester group names (e.g. `internal-testers,qa`). Optional — omit to skip group assignment |
 | `ANDROID_PACKAGE_NAME` | — | Android package name (e.g. `com.studio.game`). Required for Fastlane Google Play upload when `ARTIFACT_STORAGE=firebase` |
+| `GOOGLE_PLAY_RELEASE_NOTES_LOCALE` | — (no notes) | A language of the app's Play listing (e.g. `en-US`, `vi`). With it, the Google Play upload of a firebase-storage Production build carries release notes from the recent commits; without it, the release goes up without notes |
 | `IOS_APP_ID` | — | Apple App ID (numeric). Required for Fastlane TestFlight upload when `ARTIFACT_STORAGE=firebase` |
 | `ARTIFACT_COMPRESSION` | `zip` | See [Known limitations](#known-limitations) — only `zip` is supported today. |
 

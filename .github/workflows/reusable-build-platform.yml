@@ -1732,6 +1732,9 @@ jobs:
           R2_PUBLIC_BASE_URL:     ${{ vars.R2_PUBLIC_BASE_URL }}
           BUILD_PUBLISH_DIR:      ${{ vars.BUILD_PUBLISH_DIR }}
           BUILD_PUBLISH_BASE_URL: ${{ vars.BUILD_PUBLISH_BASE_URL }}
+          # A Play listing language (e.g. en-US); without one, Google Play
+          # uploads go up without release notes (fastlane/Fastfile).
+          GOOGLE_PLAY_RELEASE_NOTES_LOCALE: ${{ vars.GOOGLE_PLAY_RELEASE_NOTES_LOCALE }}
           # Credentials, never printed or put on a command line.
           R2_ACCESS_KEY_ID:                 ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY:             ${{ secrets.R2_SECRET_ACCESS_KEY }}
