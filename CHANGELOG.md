@@ -8,6 +8,38 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Removed — BREAKING
+
+- **The `unity-build.yml` family of reusable workflows** (deprecated since
+  6.23.0): `unity-build.yml`, `unity-build-android.yml`,
+  `unity-build-webgl.yml`, `unity-build-linux.yml`, `unity-build-ios.yml`,
+  `unity-build-gameci.yml`, `unity-validate.yml`, `unity-test.yml`,
+  `unity-test-ios.yml`, `unity-nightly.yml`, `unity-release.yml` and
+  `unity-release-ios.yml`. Nothing in the current flow or the numbered
+  consumer templates called them.
+- The templates `project-workflow.yml` and `consumer-unity-build.yml`, and
+  `examples/sample-unity-project-integration/`.
+- The ten composite actions that only those workflows used:
+  `activate-unity`, `build-ios`, `build-unity`, `collect-container-output`,
+  `discord-notify`, `resolve-unity-image`, `restore-docker-cache`,
+  `run-unity-container`, `upload-build-report` and `validate-unity-project`.
+- `docs/ADD_NEW_PROJECT.md` (onboarding for the removed flow), replaced by
+  `docs/CONSUMER_SETUP.md`.
+
+**Migration:** [docs/MIGRATION_V7.md](docs/MIGRATION_V7.md). A project that
+calls only `unity-pipeline.yml` and `pipeline-*-release.yml` moves from `@v6`
+to `@v7` with no other change. `@v6` stays at the last 6.x release for projects that have
+not moved. The consumer templates now pin `@v7`.
+
+### Changed
+
+- With the native iOS route gone, every lane's build entry point can be
+  overridden by `build-method` / `UNITY_BUILD_METHOD`. The "two iOS routes,
+  two entry points" inconsistency documented in `docs/ARCHITECTURE.md` and
+  `CLAUDE.md` no longer exists.
+
 ## [6.25.0] — 2026-10-08
 
 ### Changed

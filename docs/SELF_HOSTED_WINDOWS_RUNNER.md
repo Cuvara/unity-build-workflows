@@ -223,33 +223,28 @@ strategy`) is skipped entirely for the `self-hosted-windows` lane.
 
 ---
 
-## 5 — Selecting `runner-mode: self-hosted-windows` in the Consumer Workflow
+## 5 — Selecting the Self-Hosted Windows Lane in the Consumer Workflow
 
 ### Workflow Dispatch (manual trigger)
 
-In the GitHub Actions UI, trigger the `unity-build.yml` workflow with:
-
-| Input | Value |
-|---|---|
-| `runner-mode` | `self-hosted-windows` |
-| `activation-strategy` | *(any value — ignored for this lane)* |
-
-All `build-*` jobs (Android, WebGL, Linux64, LinuxServer, Addressables) will
-route to `runs-on: [self-hosted, Windows, unity]`.
-
-> **iOS is not supported on this lane.** `build-ios` hardcodes
-> `runner-mode: self-hosted-macos` regardless of the dispatch input — see
-> Section 3.3 of [EXPLICIT\_PLATFORM\_FLOW\_SPEC.md](EXPLICIT_PLATFORM_FLOW_SPEC.md).
-
-### Programmatic / API trigger
+Repository variables make it the default (`RUNNER_TYPE=self-hosted`,
+`BUILD_ENGINE=local`, `RUNNER_WINDOWS_LABEL`). For one run, the consumer's
+**Build / Development** form (`templates/consumer-10-build-development.yml`) takes
+`runner-type`, `build-engine` and `runner-labels` (or a runner picked by name in the
+`runner` dropdown, when `templates/consumer-30-sync-runners.yml` maintains one):
 
 ```bash
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --field runner-mode=self-hosted-windows \
-  --field platform=All \
-  --field environment=production
+gh workflow run "Build / Development" \
+  --repo <ORG>/<CONSUMER_REPO> \
+  --ref develop \
+  -f platform=Windows \
+  -f runner-type=self-hosted \
+  -f build-engine=local \
+  -f runner-labels=self-hosted,windows
 ```
+
+> **iOS is not supported on this lane.** The iOS job runs only on a macOS
+> runner with `build-engine: local`; anywhere else it reports `blocked`.
 
 ### How the reusable workflow uses the input
 
@@ -349,22 +344,23 @@ with labels `self-hosted`, `Windows`, `unity`.
 ### 7.2 Trigger a smoke build
 
 ```bash
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --field runner-mode=self-hosted-windows \
-  --field platform=Android \
-  --field environment=development \
-  --field clean-build=false
+gh workflow run "Build / Development" \
+  --repo <ORG>/<CONSUMER_REPO> \
+  --ref develop \
+  -f platform=Android \
+  -f runner-type=self-hosted \
+  -f build-engine=local \
+  -f run-tests=false
 ```
 
 Watch the run:
 
 ```bash
-gh run watch --repo Cuvara/NDCUnityTemplate
+gh run watch --repo <ORG>/<CONSUMER_REPO>
 ```
 
-Expected: `build-android` job picks up on your runner, builds successfully,
-uploads artifact `unity-build-Android`.
+Expected: the Android build job picks up on your runner, builds successfully,
+and uploads the APK artifact (`…_development_android_apk`).
 
 ### 7.3 Confirm Unity path
 

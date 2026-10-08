@@ -6,8 +6,8 @@ Validates the `if:` selection logic in the Unity pipeline workflow
 
 The pipeline workflow is the reusable toolkit-local orchestration file that
 contains the full job graph (resolve-config → validate → tests → builds →
-final-report → notify-discord).  The thin consumer (unity-build.yml) just
-calls it via workflow_call.
+final-report → notify-discord).  The consumer entry workflows
+(templates/consumer-*.yml) call it via workflow_call.
 
 Strategy
 --------
@@ -621,11 +621,7 @@ def test_r10_unity_license_optional_in_reusable_tests(reusable_tests_wf):
 
 
 def test_r10_no_unity_license_required_true_in_new_reusables():
-    """R10: the two NEW reusable workflow files do not mark UNITY_LICENSE required: true.
-
-    Note: legacy workflows (unity-build-gameci.yml, etc.) are intentionally excluded —
-    they predate the Personal/free decision and are kept as fallback per the spec.
-    """
+    """R10: the two reusable workflow files do not mark UNITY_LICENSE required: true."""
     new_reusables = [REUSABLE_BUILD, REUSABLE_TESTS]
     violators = []
     for wf_file in new_reusables:

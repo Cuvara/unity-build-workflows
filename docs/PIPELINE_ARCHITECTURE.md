@@ -240,9 +240,9 @@ A knob the engine ignores is a lie in the form.
 
 - **`android-export` on Build / Development.** Development always ships an APK;
   offering the choice would invite an AAB labelled `development-`.
-- **WebGL compression.** `compress_webgl.sh` runs in `unity-build-webgl.yml`,
-  the deployment lane, not the lane these entry points drive. Stage 04 still
-  validates that whatever Unity emitted is *consistent*.
+- **WebGL compression.** Unity's Player Settings decide it. The separate
+  `compress_webgl.sh` post-step ran only in `unity-build-webgl.yml`, removed in
+  7.0.0. Stage 04 still validates that whatever Unity emitted is *consistent*.
 - **iOS signing/export.** Certificates live in the release pipeline. Stage 03
   emits the Xcode project; the IPA comes from `pipeline-ios-release.yml`.
 - **A platform picker on Release / \*.** The platform *is* the workflow.

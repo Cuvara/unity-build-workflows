@@ -142,7 +142,6 @@ gh variable set BUILD_NUMBER_OFFSET_DEVELOPMENT --repo OWNER/REPO --body 100000
 |---|---|
 | Docker / game-ci | `game-ci/unity-builder` inputs: `version`, `androidVersionCode` (Android), `BUILD_NUMBER` env |
 | **Native** (`BUILD_ENGINE=local`, self-hosted macOS / Windows) and Docker on Windows | The toolkit package's `PlayerBuilder`, from the environment the build step sets: `BUILD_NUMBER` and `APP_VERSION` |
-| iOS native (`unity-build-ios.yml`) | `Company.BuildPipeline.Editor.BuildCommand` (`IOSBuilder`) |
 
 On these lanes `Company.BuildPipeline.Editor.PlayerBuilder` applies them
 ([TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md)):

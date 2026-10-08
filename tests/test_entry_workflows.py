@@ -105,21 +105,11 @@ def test_entry_workflow_exists(key, path):
 
 
 def test_every_entry_point_is_manual_only(entry):
-    """Automatic builds stay in unity-build.yml; these are the manual forms."""
+    """These are the manual forms; push/PR builds belong to consumer-01-ci.yml."""
     key, workflow = entry
     assert sorted(triggers(workflow)) == ["workflow_dispatch"], (
-        f"{key}: entry points must be dispatch-only — push/PR belongs to unity-build.yml"
+        f"{key}: entry points must be dispatch-only — push/PR belongs to consumer-01-ci.yml"
     )
-
-
-def test_unity_build_template_has_no_dispatch_form():
-    """The 14-field multi-platform form is what the split replaces."""
-    workflow = load(TEMPLATES / "consumer-unity-build.yml")
-    assert "workflow_dispatch" not in triggers(workflow), (
-        "consumer-unity-build.yml still carries a dispatch form; manual builds "
-        "belong to the per-platform entry points"
-    )
-    assert sorted(triggers(workflow)) == ["pull_request", "push"]
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +270,13 @@ def _current_major():
     changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     match = re.search(r"^## \[(\d+)\.\d+\.\d+\]", changelog, re.M)
     assert match, "no released version heading in CHANGELOG.md"
-    return f"v{match.group(1)}"
+    major = int(match.group(1))
+    # A BREAKING entry under [Unreleased] means the next release is a major,
+    # and the templates of the PR that makes the break already pin it.
+    unreleased = re.search(r"^## \[Unreleased\]\s*$(.*?)^## \[", changelog, re.M | re.S)
+    if unreleased and "BREAKING" in unreleased.group(1):
+        major += 1
+    return f"v{major}"
 
 
 def test_all_entry_points_agree_on_the_engine_ref():
@@ -289,11 +285,6 @@ def test_all_entry_points_agree_on_the_engine_ref():
         for key, path in ENTRY_POINTS.items()
     }
     assert len(set(refs.values())) == 1, f"entry points disagree on the engine ref: {refs}"
-
-
-# consumer-unity-build.yml is the legacy single-caller shape and pins @v2
-# deliberately: v2 is the last release that had it.
-LEGACY_TEMPLATES = {"consumer-unity-build.yml"}
 
 
 def test_every_template_pins_the_current_major():
@@ -308,8 +299,6 @@ def test_every_template_pins_the_current_major():
     expected = _current_major()
     stale = {}
     for path in sorted(TEMPLATES.glob("consumer-*.yml")):
-        if path.name in LEGACY_TEMPLATES:
-            continue
         text = path.read_text(encoding="utf-8")
         # Only refs that point at THIS repository. A bare `@v\d+` also matches
         # `actions/checkout@v4`, which is an action's version and has nothing to

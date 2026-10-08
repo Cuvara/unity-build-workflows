@@ -346,12 +346,11 @@ def main() -> None:
                         ))
     parser.add_argument("--image-variant",
                         help="Force a specific image variant (base/android/webgl/linux)")
-    # --variant is a short alias used by resolve-unity-image action
+    # --variant / --digest: short aliases (the former resolve-unity-image action used them)
     parser.add_argument("--variant", dest="image_variant",
                         help="Alias for --image-variant")
     parser.add_argument("--image-digest",
                         help="Expected sha256 digest for pinning (e.g. sha256:abc123…)")
-    # --digest is a short alias used by resolve-unity-image action
     parser.add_argument("--digest", dest="image_digest",
                         help="Alias for --image-digest")
     parser.add_argument("--manifest-path",

@@ -84,7 +84,7 @@ Details, setup commands and migration: [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VA
 
 > **To change the Unity editor version:** edit `ProjectSettings/ProjectVersion.txt` (the SSOT). Keep `UNITY_VERSION` in sync (or unset) — it only *confirms* the version, it cannot change it.
 >
-> **Not a repository variable:** **project path** is set once by the calling workflow (`unity-build.yml`, `project-path: '.'`), not per-run configuration. There is no `UNITY_PROJECT_PATH` variable.
+> **Not a repository variable:** **project path** is set once by the calling entry workflow (`project-path` input of `unity-pipeline.yml`, default `'.'`), not per-run configuration. There is no `UNITY_PROJECT_PATH` variable.
 
 Define-symbols variables are **additive** — the listed symbols are merged
 into every platform group at build time; existing project symbols (e.g.

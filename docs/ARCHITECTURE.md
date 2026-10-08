@@ -13,53 +13,49 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  Consumer Repository (.github/workflows/build.yml)               │
-│  • calls reusable workflows via uses: <WORKFLOW_OWNER>/unity-build-  │
-│    workflows/.github/workflows/<workflow>.yml@<ref>              │
-│  • provides BuildConfig JSON + GitHub secrets                    │
+│  Consumer Repository (.github/workflows/, from templates/)        │
+│  • 01-ci / 10-build-development / 11-build-release               │
+│      uses: …/unity-pipeline.yml@v7                               │
+│  • 20…24-release-<platform>                                      │
+│      uses: …/pipeline-<platform>-release.yml@v7                  │
+│  • configuration in Repository Variables; secrets               │
 └───────────────────────────┬──────────────────────────────────────┘
                             │ workflow_call
 ┌───────────────────────────▼──────────────────────────────────────┐
 │  Workflow Layer  (.github/workflows/)                             │
-│  • unity-build.yml (main orchestrator)                           │
-│  • unity-build-android.yml, unity-build-webgl.yml,               │
-│    unity-build-linux.yml                                         │
-│  • unity-build-ios.yml  ← NEW (macOS runner, Xcode)             │
-│  • unity-test.yml, unity-validate.yml                            │
-│  • unity-release.yml, unity-nightly.yml                          │
-│  • build-unity-image.yml, scan-unity-image.yml                   │
+│  • unity-pipeline.yml — stages 01–08: resolve, validate, tests,  │
+│    build matrix, artifact validation, report, Discord            │
+│  • reusable-build-platform.yml — the one executor (per platform) │
+│  • reusable-unity-tests.yml — EditMode / PlayMode                │
+│  • pipeline-<platform>-release.yml — promote a Build / Release   │
+│    artifact (Windows / Linux share pipeline-desktop-release.yml) │
+│  • build-unity-image.yml, scan-unity-image.yml, license, CI      │
 └───────────────────────────┬──────────────────────────────────────┘
-                            │ uses: ./.github/actions/<name>
+                            │ uses: ./.toolkit/.github/actions/<name>
 ┌───────────────────────────▼──────────────────────────────────────┐
 │  Composite Action Layer  (.github/actions/)                      │
-│  • resolve-unity-image/  — target → image resolution            │
-│  • run-unity-container/  — Docker container execution            │
-│  • restore-docker-cache/ — Library cache volumes                 │
-│  • collect-container-output/ — logs, reports, artifacts          │
-│  • upload-build-report/  — build report upload                  │
-│  • discord-notify/       — Discord build-completion notification │
+│  • deliver-build — Firebase / R2 / stores from the build runner  │
+│  • verify-release-artifact, steam-publish, release-report        │
+│  • ios-setup-signing, ios-archive-export, ios-testflight, …      │
+│  • discord-upload-build, pipeline-progress, setup-fastlane       │
 └───────────────────────────┬──────────────────────────────────────┘
-                            │ executes
+                            │ runs
 ┌───────────────────────────▼──────────────────────────────────────┐
-│  Docker Layer                                                     │
-│  • scripts/docker/run_unity_container.py  — Docker wrapper       │
-│  • scripts/docker/resolve_image_reference.py — image resolution  │
-│  • docker/unity/entrypoint.sh  — container entrypoint            │
-│  • docker/unity/activate-license.sh — license activation         │
+│  Script Layer  (scripts/)                                         │
+│  • resolvers: resolve_build_flow.sh, resolve_build_matrix.sh,    │
+│    runner_scheduler.py, resolve_platform_executor.py, …          │
+│  • build: run_unity_player.sh (every native lane, tests too),    │
+│    docker_windows_container.sh, write_build_result.py            │
+│  • reports: pipeline_results.py, release_manifest.py             │
 └───────────────────────────┬──────────────────────────────────────┘
                             │ invokes
 ┌───────────────────────────▼──────────────────────────────────────┐
-│  Unity Layer (inside container)                                   │
-│  • Unity Editor -batchmode -executeMethod                        │
-│    PlayerBuilder.Build  (consumer-provided; the default)          │
-│  • BuildConfigurationLoader → BuildValidator → PlatformBuilder   │
-│  • Reports and artifacts written to bind-mounted directories     │
-└───────────────────────────┬──────────────────────────────────────┘
-                            │ reads
-┌───────────────────────────▼──────────────────────────────────────┐
-│  Config Layer                                                     │
-│  • BuildConfig.*.json   — per-environment build configuration    │
-│  • schema validation    — JSON Schema v7 enforced at CI entry    │
+│  Unity Layer                                                      │
+│  • Docker lane: game-ci/unity-builder (its default builder, or   │
+│    build-method / UNITY_BUILD_METHOD)                            │
+│  • native lanes: Unity -batchmode -executeMethod                 │
+│    Company.BuildPipeline.Editor.PlayerBuilder.Build (toolkit     │
+│    package, copied in per build) or the project's PlayerBuilder  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,26 +64,28 @@
 ## Execution Flow
 
 ```
-CI Runner (ubuntu-latest)
+unity-pipeline.yml
   │
-  ├── 1. Checkout project
-  ├── 2. Resolve Unity image (resolve-unity-image action)
-  │       └── Maps target-platform → image variant → digest-pinned reference
-  ├── 3. Restore Docker cache volumes (restore-docker-cache action)
-  ├── 4. Run Unity in container (run-unity-container action)
-  │       └── docker run --rm --init --user $(id -u):$(id -g)
-  │             └── entrypoint.sh build --target-platform Android ...
-  │                   └── activate-license.sh
-  │                   └── Unity -batchmode -executeMethod PlayerBuilder.Build
-  │                   └── copy Editor.log to Logs/
-  │                   └── return-license.sh
-  │                   └── cleanup trap
-  ├── 5. Collect container output (collect-container-output action)
-  │       └── Gather logs, reports, test results from bind mounts
-  ├── 6. Upload artifacts and reports
-  ├── 7. Post-build steps (signing, deployment) on host
-  └── 8. Discord notification (discord-notify action — no-op if DISCORD_WEBHOOK_URL unset)
+  ├── 01 Prepare     resolve_build_flow.sh → runner_scheduler.py →
+  │                  resolve_build_matrix.sh (one row per platform job)
+  ├── 02 Quality     validate project / license, Unity tests → gate
+  ├── 03 Build       reusable-build-platform.yml, one job per matrix row:
+  │                    checkout, toolkit, (SSH submodules), preflight,
+  │                    build on the row's lane (Docker / Windows / macOS),
+  │                    manifest, upload, (iOS sign + export),
+  │                    deliver-build, log summary, write_build_result.py
+  ├── 04 Validate    artifact validation per platform
+  ├── 05 Release Set release manifest (Build / Release only)
+  └── 07 Report      pipeline_results.py → step summary + Discord
 ```
+
+Releases are a separate run: `pipeline-<platform>-release.yml` downloads the
+Build / Release artifact by `source-run-id`, verifies it against the release
+manifest in every job that holds it, and publishes it phase by phase. See
+[PIPELINE_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md).
+
+`scripts/docker/run_unity_container.py` + `docker/unity/entrypoint.sh` remain
+for local Docker builds (`README.md` § Local Build Commands).
 
 ---
 
@@ -165,56 +163,33 @@ See [PLATFORM_LIMITATIONS.md](PLATFORM_LIMITATIONS.md).
 
 ---
 
-## Build Entry Points — two lanes that do not agree
+## Build Entry Points
 
-Which C# method Unity executes depends on which lane runs, and the toolkit is not currently
-consistent across them:
+Which C# method Unity executes depends on the lane:
 
 | Lane | Entry point | Where it comes from |
 |---|---|---|
-| **Docker / game-ci** — the default for Android, WebGL, Linux, and the pipeline's `Build iOS` job | **game-ci's own default builder.** No consumer method is required | `reusable-build-platform.yml:146` — `build-method` defaults to `''`, and `:574` passes it straight through as `buildMethod`. Empty means game-ci decides. Set the `build-method` input or the `UNITY_BUILD_METHOD` repo variable to override |
-| **Self-hosted** (Windows and Linux/macOS local-engine lanes) and **Docker on a Windows runner** | `Company.BuildPipeline.Editor.PlayerBuilder.Build`, **from this package**, which the build job copies into the project's `Packages/` for the build | When `build-method` is empty the lanes use the "Install toolkit build package" step's `player-method` output. A project that still has its own global `PlayerBuilder` class gets `PlayerBuilder.Build` (its own) instead |
-| iOS native — `unity-build-ios.yml`, `unity-release-ios.yml` | `Company.BuildPipeline.Editor.BuildCommand.Execute`, from this package | `scripts/ios/run_unity_ios.sh:46`, `readonly`, **not overridable** |
+| **Docker / game-ci** — the default for Android, WebGL, Linux, and the pipeline's `Build iOS` job | **game-ci's own default builder.** No consumer method is required | `reusable-build-platform.yml` — `build-method` defaults to `''` and is passed straight through as `buildMethod`. Empty means game-ci decides. Set the `build-method` input or the `UNITY_BUILD_METHOD` repo variable to override |
+| **Self-hosted** (Windows and macOS local-engine lanes) and **Docker on a Windows runner** | `Company.BuildPipeline.Editor.PlayerBuilder.Build`, **from this package**, which the build job copies into the project's `Packages/` for the build | `scripts/build/run_unity_player.sh`: the `build-method` input, else the "Install toolkit build package" step's `player-method` output. A project that still has its own global `PlayerBuilder` class gets `PlayerBuilder.Build` (its own) instead |
 
-No lane needs a build script in the consumer project any more. The Addressables steps call the
-package's `AddressableBuilder` the same way. Details: [TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md).
+No lane needs a build script in the consumer project. The Addressables steps call the package's
+`AddressableBuilder` the same way. Details: [TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md).
 
-`reusable-build-platform.yml` never invokes `scripts/ios/run_unity_ios.sh`, so the two iOS routes do
-not share an entry point and `UNITY_BUILD_METHOD` has no effect on the native one. Resolving this
-means teaching `run_unity_ios.sh` to accept `build-method`; that is a code change and has not been
-made. Documented here so the disagreement is visible rather than discovered.
-
-See [ADD_NEW_PROJECT.md](ADD_NEW_PROJECT.md) Step 1b for what a consumer must provide.
+7.0.0 removed the native iOS workflows (`unity-build-ios.yml`, `unity-release-ios.yml`), whose
+`BuildCommand.Execute` entry point was the one lane that `UNITY_BUILD_METHOD` could not change —
+see [MIGRATION_V7.md](MIGRATION_V7.md).
 
 ---
-
-## Legacy entry points
-
-These workflows predate `unity-pipeline.yml` and the `pipeline-*-release.yml`
-promotions. Nothing in the current flow calls them, and none of the numbered
-`templates/consumer-NN-*.yml` entry workflows does. They are **deprecated**:
-each carries a `# DEPRECATED` header, they keep working for existing callers, and they are planned for removal in the
-next major version, with a migration guide.
-
-| Legacy workflow | Use instead |
-|---|---|
-| `unity-build.yml` and the per-platform `unity-build-{android,webgl,linux,ios}.yml` it calls | `unity-pipeline.yml` (templates `consumer-01/10/11`) |
-| `unity-build-gameci.yml` | `unity-pipeline.yml` — its Docker lane runs game-ci itself |
-| `unity-validate.yml`, `unity-test.yml`, `unity-test-ios.yml` | the validate and test stages of `unity-pipeline.yml` (`reusable-unity-tests.yml`) |
-| `unity-nightly.yml` | a scheduled caller of `unity-pipeline.yml` |
-| `unity-release.yml`, `unity-release-ios.yml` | Build / Release (`consumer-11`) + `pipeline-<platform>-release.yml` (`consumer-20…24`) |
-| `templates/project-workflow.yml`, `templates/consumer-unity-build.yml` | `templates/consumer-*.yml` |
-
-The native iOS route (`unity-build-ios.yml`, `unity-release-ios.yml`, the
-`BuildCommand.Execute` entry point in the table above) belongs to this family.
 
 ## Unity Package Layer
 
 The `unity-package/` directory contains a Unity Editor package (`com.company.build-pipeline`) providing:
 
-- **BuildCommand.Execute** — C# entry point invoked via `-executeMethod` by the **iOS-native**
-  workflows only. The Docker and self-hosted lanes default to `PlayerBuilder.Build`, which the
-  consuming project provides — see below
+- **PlayerBuilder / AddressableBuilder** — the `-executeMethod` targets of the native lanes
+  (above)
+- **BuildCommand.Execute** — the BuildConfig-driven entry point. No toolkit workflow invokes
+  it since 7.0.0 (it was the removed native iOS route's); a project may still call it from its
+  own editor tooling
 - **BuildConfigurationLoader** — Loads and merges BuildConfig JSON
 - **BuildValidator** — Runs validation rules before build
 - **PlatformBuilders** — Platform-specific build logic (Android, WebGL, Linux)

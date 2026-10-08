@@ -17,9 +17,8 @@ repository. After following these steps your project will have:
 >
 > **This is the default onboarding path** — it wires up `unity-pipeline.yml`
 > (branch-based CI, per-platform jobs, Repository Variables) and needs no
-> `BuildConfig/`. If you instead want one explicit build per caller job with
-> `target-platform` / `test-level` / `cache-mode` inputs and your own
-> `BuildConfig/*.json`, follow [ADD\_NEW\_PROJECT.md](ADD_NEW_PROJECT.md).
+> `BuildConfig/`. The explicit per-job `unity-build.yml` path was removed in
+> 7.0.0 — see [MIGRATION\_V7.md](MIGRATION_V7.md).
 
 Related docs:
 - [BRANCH\_FLOW\_CONTRACT.md](BRANCH_FLOW_CONTRACT.md) — branch → flow rules and Repository Variables reference
@@ -101,12 +100,9 @@ is why "retry the deploy" costs seconds rather than a rebuild.
 
 ### The older single-file caller
 
-`templates/consumer-unity-build.yml` and the `consumer-build-*.yml` set are the
-previous generation: one workflow covering push, pull_request and manual builds
-together. They still work and existing projects need not migrate, but new
-projects should use the numbered set above — the release layer, the immutable
-artifact boundary and the platform capability model are only reachable through
-it.
+`templates/consumer-unity-build.yml` and the `unity-build.yml` workflow it
+called were removed in 7.0.0. Use the numbered set above —
+[MIGRATION\_V7.md](MIGRATION_V7.md) maps the old inputs to it.
 
 **Version pinning (recommended):**
 

@@ -23,7 +23,7 @@ changing a resolver — several tests read the docs' values back.
 pip install -r tests/requirements.txt
 
 # Full suite — CI runs it from inside tests/ (conftest.py resolves REPO_ROOT itself,
-# so `pytest tests/` from the root works too). ~1070 tests, ~85s.
+# so `pytest tests/` from the root works too). ~2400 tests, ~4 min on CI.
 cd tests && python -m pytest -q
 
 # One file / class / test
@@ -59,7 +59,7 @@ auto-merge of `develop` → `main` on push.
 ```
 consumer repo workflow  → uses: Cuvara/unity-build-workflows/.github/workflows/unity-pipeline.yml@<ref>
 .github/workflows/      → orchestration (unity-pipeline.yml is the drop-in entry; 1300 lines)
-.github/actions/        → 15 composite actions (run-unity-container, resolve-unity-image, build-ios, discord-*, …)
+.github/actions/        → 14 composite actions (deliver-build, verify-release-artifact, steam-publish, ios-*, discord-upload-build, …)
 scripts/                → all real logic: resolvers (bash+python), docker wrapper, ios/android/webgl steps
 docker/unity/           → Dockerfile variants + entrypoint.sh + license scripts (runs inside the container)
 unity-package/          → UPM Editor package shipped to consumers (BuildCommand, validators, PlatformBuilders, hooks)
@@ -128,32 +128,29 @@ These are guard-rail tests, and they are the usual reason an unrelated-looking c
 
 - **`test_no_native_unity_invocation.py`** — no `Unity -batchmode`, `-executeMethod`,
   `game-ci/unity-builder`, or `game-ci/unity-test-runner` anywhere except a hardcoded
-  `ALLOWED_PATHS` set (the container entrypoint, the iOS macOS lane, `unity-build-gameci.yml`,
-  `reusable-build-platform.yml`, `reusable-unity-tests.yml`, image/license workflows). Adding a
+  `ALLOWED_PATHS` set (the container entrypoint, `scripts/build/run_unity_player.sh` and
+  `docker_windows_container.sh`, the iOS scripts, `reusable-build-platform.yml`,
+  `reusable-unity-tests.yml`, image/license workflows). Adding a
   Unity invocation means editing that allowlist deliberately — with a comment saying why.
 - **`test_static_identifier_scan.py`** — no game- or studio-specific identifiers in `scripts/`,
   `templates/`, `examples/`, `unity-package/`, `schemas/`, `docker/metadata/`, `tests/`. Owner,
   namespace, and project name are always inputs or placeholders. `docs/` is allowlisted.
 - **`test_secret_redaction.py`** — secret values must never appear in a docker command line, a
   Dockerfile `ENV`, or an artifact. Secrets go through `env:` blocks and runtime injection.
-- **`test_toolkit_path_validation.py`** — `project-path` / `toolkit-path` reject `../` and absolute
-  paths; the internal mount is always `.ci/unity-build-workflows`.
 - **`test_workflow_contract.py`** — every workflow YAML parses, required inputs keep their types
   and defaults, no `@main` in internal reusable-workflow calls, `if: always()` on log/report
   uploads. Note PyYAML parses bare `on:` as boolean `True`.
 
-## Known inconsistency — build entry point
-
-The two iOS routes do not share an entry point, and this is deliberate, documented, unfixed:
+## Build entry point
 
 | Lane | `-executeMethod` target | Overridable |
 |---|---|---|
 | Docker / game-ci — the default lane (Android, WebGL, Linux, pipeline's iOS job) | **game-ci's own default builder** — `build-method` defaults to `''` (`reusable-build-platform.yml:146`, passed through at `:574`); no consumer method needed | yes: `build-method` input / `UNITY_BUILD_METHOD` variable |
 | Self-hosted (Windows, macOS: `scripts/build/run_unity_player.sh`) and Docker on Windows | `Company.BuildPipeline.Editor.PlayerBuilder.Build` — from `unity-package/`, which `scripts/common/install_build_package.sh` copies into the project's `Packages/` per build; a project's own global `PlayerBuilder` still wins (`docs/TOOLKIT_BUILD_PACKAGE.md`) | yes, same two knobs |
-| iOS native (`unity-build-ios.yml`, `unity-release-ios.yml`) | `Company.BuildPipeline.Editor.BuildCommand.Execute` — from `unity-package/` | no: `readonly` in `scripts/ios/run_unity_ios.sh` |
 
-So `UNITY_BUILD_METHOD` has no effect on the native iOS route. See `docs/ARCHITECTURE.md`
-§Build Entry Points before "fixing" either side.
+7.0.0 removed the `unity-build.yml` family, including the native iOS route whose
+`BuildCommand.Execute` was the one entry point `UNITY_BUILD_METHOD` could not change
+(`docs/MIGRATION_V7.md`). `@v6` still carries it; do not reintroduce those workflows.
 
 ## Conventions
 
@@ -174,6 +171,7 @@ So `UNITY_BUILD_METHOD` has no effect on the native iOS route. See `docs/ARCHITE
 
 Docker lane uses the `personal-combined` strategy: `UNITY_LICENSE` (raw `.ulf` XML, **not**
 base64), `UNITY_EMAIL`, and `UNITY_PASSWORD` must all three be present. `.ulf` alone fails with
-`TimeStamp validation failed`; credentials alone give `0 entitlements`. This is why
-`unity-build-gameci.yml` is allowed to delegate to `game-ci/unity-builder` — it performs the online
-activation Unity 6 accepts. Details: `docs/UNITY_PERSONAL_DOCKER_LICENSE.md`.
+`TimeStamp validation failed`; credentials alone give `0 entitlements`. This is why the
+Docker lane of `reusable-build-platform.yml` delegates to `game-ci/unity-builder` — it performs the
+online activation Unity 6 accepts (the Windows-runner docker lane replicates it in
+`scripts/build/docker_windows_container.sh`). Details: `docs/UNITY_PERSONAL_DOCKER_LICENSE.md`.

@@ -1,7 +1,0 @@
-{
-  "_comment": "OPTION A — Git URL dependency (no submodule required). Replace <WORKFLOW_OWNER> and <VERSION>.",
-  "dependencies": {
-    "com.company.build-pipeline": "https://github.com/<WORKFLOW_OWNER>/unity-build-workflows.git?path=/unity-package/Packages/com.company.build-pipeline#<VERSION>",
-    "com.unity.nuget.newtonsoft-json": "3.2.1"
-  }
-}

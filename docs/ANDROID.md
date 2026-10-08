@@ -22,18 +22,19 @@ Includes: Unity Editor, Android SDK, Android NDK, JDK, Gradle
 
 ## Workflow Usage
 
-```yaml
-build-android:
-  uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build-android.yml@<ref>
-  with:
-    project-path: .
-    unity-version: '6000.0.26f1'
-    environment: development
-    build-config-path: BuildConfig
-    build-addressables: true
-    cache-mode: safe
-  secrets: inherit
+Android builds run in `unity-pipeline.yml`, called by the consumer's numbered entry
+workflows (`templates/consumer-10-build-development.yml`, `consumer-11-build-release.yml`).
+Put `Android` in the environment's `BUILD_PLATFORMS` repository variable, or pick it in
+the dispatch form:
+
+```bash
+gh workflow run "Build / Development" --ref develop -f platform=Android
 ```
+
+The build type decides the artifact: a development build is an APK, a release build
+(Build / Release) an App Bundle.
+
+Setup: [CONSUMER_SETUP.md](CONSUMER_SETUP.md). Variables: [REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md).
 
 ---
 
