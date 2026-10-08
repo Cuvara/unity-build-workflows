@@ -8,6 +8,27 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **The Unity log is shown live in the build step.** On the native lanes
+  (self-hosted macOS / Windows, the Addressables pre-step, Unity tests and the
+  Windows docker container) Unity writes only to its `-logFile`, so "Build
+  with local Unity" showed just `Unity binary: …` for the whole build.
+  `scripts/build/run_unity_player.sh` now follows the log file into the step
+  output while Unity runs (`tail -F`), keeping Unity's exit code; the file is
+  still written for the steps that parse and upload it. A log left by an
+  earlier run is removed first so it is not replayed. `UNITY_LOG_STREAM=0`
+  turns streaming off. GitHub masks registered secrets in the step output.
+
+### Tests
+
+- A failed artifact-manifest or IPA-manifest upload (a full Actions storage
+  quota) must not block the store uploads: both uploads keep
+  `continue-on-error`, run before "Deliver the build", and the delivery step
+  still receives `job.status`. Pinned in `test_firebase_delivery_paths.py`.
+
 ## [6.24.2] — 2026-10-07
 
 ### Changed
