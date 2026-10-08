@@ -479,8 +479,8 @@ Examples:
                             "Pre-resolved full image reference "
                             "(<registry>/<namespace>/<name>:<tag> or @sha256:...). "
                             "When provided, internal resolution is skipped and "
-                            "--image-namespace is not required. The CI flow resolves "
-                            "the reference once via resolve-unity-image and passes it here."
+                            "--image-namespace is not required (a caller that already "
+                            "resolved the reference, e.g. with resolve_image_reference.py)."
                         ))
     parser.add_argument("--image-registry", default=DEFAULT_REGISTRY_HOST,
                         help=(
@@ -543,8 +543,8 @@ Examples:
                         ))
 
     # ── Runtime controls ───────────────────────────────────────────────────
-    # --timeout is the canonical name used by run-unity-container/action.yml.
-    # --container-timeout is the legacy long form (kept for back-compat).
+    # --timeout is the canonical name (the former run-unity-container action
+    # passed it). --container-timeout is the legacy long form (kept for back-compat).
     # Both set the same dest; whichever is supplied last wins.
     parser.add_argument("--container-timeout", "--timeout",
                         dest="container_timeout", type=int, default=DEFAULT_TIMEOUT,
@@ -577,9 +577,9 @@ def main() -> None:
 
     # ── Namespace validation ───────────────────────────────────────────────
     # --image-namespace is required ONLY when the caller does not supply a
-    # pre-resolved --image reference. The CI flow resolves the reference once
-    # (resolve-unity-image) and passes --image, so namespace is not needed
-    # there; local/standalone invocations that let this script resolve the
+    # pre-resolved --image reference. A caller that resolved the reference
+    # already passes --image, so namespace is not needed there; local
+    # invocations that let this script resolve the
     # image internally must provide --image-namespace (no generic default).
     if not args.image and not args.image_namespace:
         raise ValueError(
@@ -615,8 +615,8 @@ def main() -> None:
 
     # ── Resolve image reference ────────────────────────────────────────────
     if args.image:
-        # Pre-resolved reference supplied by the caller (CI resolve-unity-image
-        # flow). Use it directly; do not re-resolve. In release mode a pinned
+        # Pre-resolved reference supplied by the caller. Use it directly;
+        # do not re-resolve. In release mode a pinned
         # digest is still required.
         image_ref = args.image
         if args.image_digest and "@sha256:" not in image_ref:

@@ -104,7 +104,7 @@ resolve_build_flow.sh
 `final-report` is the only job that creates a deployment:
 
 ```yaml
-# .github/workflows/unity-build.yml — final-report job
+# unity-pipeline.yml — final-report job
 final-report:
   if: always()
   environment: ${{ needs.resolve-config.outputs.gh-environment }}

@@ -71,7 +71,7 @@ drift apart quietly.
 | [DOCKER_BUILD.md](DOCKER_BUILD.md) · [IMAGE_LIFECYCLE.md](IMAGE_LIFECYCLE.md) | The Docker lane and its images |
 | [SELF_HOSTED_RUNNER.md](SELF_HOSTED_RUNNER.md) · [SELF_HOSTED_ORG_RUNNER.md](SELF_HOSTED_ORG_RUNNER.md) · [SELF_HOSTED_WINDOWS_RUNNER.md](SELF_HOSTED_WINDOWS_RUNNER.md) · [SELF_HOSTED_MACOS_RUNNER.md](SELF_HOSTED_MACOS_RUNNER.md) | Running builds on your own machines |
 | [SUBMODULE_INTEGRATION.md](SUBMODULE_INTEGRATION.md) | Consuming the toolkit as a git submodule |
-| [ADD_NEW_PROJECT.md](ADD_NEW_PROJECT.md) | Onboarding via the explicit-build path (`BuildConfig/*.json`) |
+| [MIGRATION_V7.md](MIGRATION_V7.md) | Moving off the `unity-build.yml` workflows removed in 7.0.0 |
 
 ## Decisions
 

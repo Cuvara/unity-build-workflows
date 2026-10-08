@@ -6,7 +6,7 @@ This document describes the optional Discord build-completion notification syste
 
 ## Overview
 
-The `.github/actions/discord-notify` composite action posts a Discord embed to a configured webhook URL at the end of each build run. It uses `curl` directly — no third-party GitHub Action is involved, eliminating supply-chain risk.
+The `.github/actions/discord-upload-build` composite action, run by the Notify Discord job of `unity-pipeline.yml`, posts a Discord embed to a configured webhook URL at the end of each build run; the store-release pipelines post through `.github/actions/release-report`. No third-party GitHub Action is involved, eliminating supply-chain risk.
 
 Notifications are **optional**: if `DISCORD_WEBHOOK_URL` is not set the action no-ops silently and the build succeeds normally. A webhook misconfiguration or Discord service outage will never fail your pipeline.
 
@@ -59,7 +59,7 @@ gh variable set DISCORD_THREAD_ID --repo YOUR_ORG/YOUR_REPO --body "123456789012
 | `DISCORD_WEBHOOK_URL` only | Webhook's configured channel (root) |
 | `DISCORD_WEBHOOK_URL` + `DISCORD_THREAD_ID` | Specified thread / forum post |
 
-When `DISCORD_THREAD_ID` is set, both `discord-notify` and `discord-upload-build` append `?thread_id=<id>` to the webhook URL. When unset, messages go to the channel root — existing behaviour is unchanged.
+When `DISCORD_THREAD_ID` is set, `discord-upload-build` appends `?thread_id=<id>` to the webhook URL. When unset, messages go to the channel root — existing behaviour is unchanged.
 
 #### Example
 
@@ -68,7 +68,7 @@ DISCORD_WEBHOOK_URL = <secret — set via gh secret set>
 DISCORD_THREAD_ID   = 1234567890123456789
 ```
 
-The `discord-notify` action reads `DISCORD_THREAD_ID` from the job environment (set via `vars.DISCORD_THREAD_ID` in the workflow env block). The `discord-upload-build` action receives it as the `thread-id` input.
+The `discord-upload-build` action receives it as the `thread-id` input (Notify Discord passes the resolved thread, falling back to `vars.DISCORD_THREAD_ID`).
 
 #### Validation
 
@@ -145,9 +145,7 @@ How the messages split:
   can only post into threads of its own channel.
 
 Routing is resolved by `scripts/common/resolve_discord_threads.py` and applied
-by the `platform-thread-ids` input of `discord-upload-build`. The standalone
-workflows (`unity-build.yml`, `unity-build-ios.yml`, `unity-release*.yml`) still
-read `DISCORD_THREAD_ID` only.
+by the `platform-thread-ids` input of `discord-upload-build`.
 
 ---
 
@@ -155,13 +153,10 @@ read `DISCORD_THREAD_ID` only.
 
 | Workflow | Job | Condition | Platform(s) |
 |---|---|---|---|
-| `unity-build.yml` | `report` | `if: always()` — fires on success, failure, and cancelled | Android, WebGL, Linux64, LinuxServer, iOS (via orchestrator) |
-| `unity-build-ios.yml` | `build` | `if: always()` — fires on success, failure, and cancelled | iOS (direct caller) |
-| `unity-release-ios.yml` | `release-build` | `if: always()` — fires on success, failure, and cancelled | iOS production release |
-| `unity-release.yml` | `notify` (dedicated job) | `if: always()` — fires on success, failure, and cancelled | Android, WebGL, Linux64 production release |
-| `pipeline-android-release.yml`, `pipeline-ios-release.yml` | `report` | `if: always()`; posts to the `production` thread of its platform from `.github/discord.json` (same lookup and variable overrides as builds). The caller passes `DISCORD_WEBHOOK_URL` | Store releases (Release / Android, Release / iOS) |
+| `unity-pipeline.yml` | `notify-discord` | `if: always()` — fires on success, failure, and cancelled | Every platform of the run, each to its own thread |
+| `pipeline-*-release.yml` | `report` | `if: always()`; posts to the `production` thread of its platform from `.github/discord.json` (same lookup and variable overrides as builds). The caller passes `DISCORD_WEBHOOK_URL` | Store releases (Release / Android, iOS, WebGL, Windows, Linux) |
 
-The `unity-build.yml` orchestrator report job also covers iOS when called via `unity-build.yml`. `unity-build-ios.yml` called directly (e.g. from your project workflow) sends its own notification.
+The `unity-build.yml` workflows that notified on their own were removed in 7.0.0 ([MIGRATION_V7.md](MIGRATION_V7.md)).
 
 ---
 

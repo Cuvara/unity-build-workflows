@@ -112,7 +112,7 @@ Production builds must use digest-pinned references:
 ghcr.io/<IMAGE_NAMESPACE>/unity-builder@sha256:abc123...
 ```
 
-The `resolve-unity-image` action enforces this when `release-mode: true`.
+`scripts/docker/resolve_image_reference.py --release-mode` enforces this.
 
 ---
 
@@ -297,7 +297,7 @@ This prevents supply chain attacks via compromised action tags.
 
 Discord webhook URLs grant anyone who holds them the ability to post messages to a channel. Leaking the URL is low-severity (no write access to code or infrastructure) but still enables spam and channel hijacking. It is stored as a GitHub secret as a matter of good practice.
 
-### Protection measures in the `discord-notify` action
+### Protection measures in the `discord-upload-build` action
 
 1. `set +x` — disables shell trace before the URL is referenced; the curl command (which contains the URL) is never echoed to the log.
 2. `::add-mask::${DISCORD_WEBHOOK_URL}` — registers the URL value with GitHub's log masker. If it appears anywhere in subsequent output (including third-party tool output) it is replaced with `***`.

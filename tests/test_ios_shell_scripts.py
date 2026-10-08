@@ -240,8 +240,9 @@ class TestIOSScriptFilesExist:
 
     def test_note_no_build_ios_sh(self):
         """
-        NOTE: There is no build_ios.sh — Unity is invoked directly in the
-        unity-build-ios.yml workflow YAML. This is by design.
+        NOTE: There is no build_ios.sh — the Unity player build runs through
+        scripts/build/run_unity_player.sh (reusable-build-platform.yml's macOS
+        lane). This is by design.
         This test documents that expectation so future engineers don't hunt for the file.
         """
         assert not BUILD_IOS_SH.exists(), (
@@ -860,8 +861,8 @@ class TestUnityFailureSimulations:
     """
     Unity build failure simulations.
 
-    NOTE: Unity build is invoked directly in unity-build-ios.yml (no separate
-    build_ios.sh script). These tests validate the contract behaviour by testing
+    NOTE: the Unity build runs through scripts/build/run_unity_player.sh (no
+    separate build_ios.sh script). These tests validate the contract behaviour by testing
     the fake_unity.sh fixture directly and verifying that the archive script
     (which runs AFTER Unity) fails correctly when no Xcode project was produced.
     The Unity-level failures (compile error, license error) must be verified via
@@ -972,7 +973,6 @@ def test_keychain_password_is_generated_with_sigpipe_ignored(tmp_path):
 
 @pytest.mark.parametrize("workflow, step", [
     ("reusable-build-platform.yml", "iOS — Setup signing"),
-    ("unity-release-ios.yml", "Setup iOS signing"),
 ])
 def test_setup_signing_has_a_timeout(workflow, step):
     wf = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8"))

@@ -232,8 +232,8 @@ and never pins a runner: it targets the group itself. See
 Per-run override, without touching any variable:
 
 ```bash
-gh workflow run unity-build.yml --repo "$ORG/<CONSUMER_REPO>" --ref develop \
-  -f platform=Windows64 \
+gh workflow run "Build / Development" --repo "$ORG/<CONSUMER_REPO>" --ref develop \
+  -f platform=Windows \
   -f runner-type=self-hosted \
   -f build-engine=local \
   -f runner-labels=self-hosted,windows
@@ -263,8 +263,8 @@ number of hosted minutes per run:
 ## 5 — First run and what to check
 
 ```bash
-gh workflow run unity-build.yml --repo "<ORG>/<CONSUMER_REPO>" --ref develop \
-  -f platform=Windows64 -f run-tests=false -f environment=development
+gh workflow run "Build / Development" --repo "<ORG>/<CONSUMER_REPO>" --ref develop \
+  -f platform=Windows -f run-tests=false -f environment=development
 ```
 
 | Symptom | Cause | Fix |

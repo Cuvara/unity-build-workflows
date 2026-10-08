@@ -6,7 +6,7 @@ triggering builds, reading logs, downloading artifacts, and common fixes.
 Related docs:
 - [UNITY\_PERSONAL\_DOCKER\_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md) — license setup and troubleshooting
 - [UNITY\_VERSION\_UPGRADE.md](UNITY_VERSION_UPGRADE.md) — upgrading Unity version
-- [EXPLICIT\_PLATFORM\_FLOW.md](EXPLICIT_PLATFORM_FLOW.md) — explicit-platform-jobs flow guide (inputs, activation, job graph)
+- [EXPLICIT\_PLATFORM\_FLOW.md](EXPLICIT_PLATFORM_FLOW.md) — the superseded explicit-platform-jobs design (historical record)
 - [GITHUB\_ENVIRONMENTS.md](GITHUB_ENVIRONMENTS.md) — GitHub Environments, deployment protection rules, branch-flow mapping, stale deployment cleanup
 
 ---
@@ -71,149 +71,55 @@ gh secret list --repo Cuvara/NDCUnityTemplate \
 
 ## 2. Triggering Builds Manually
 
-The consumer workflow file is `.github/workflows/build.yml` (name: `Unity CI`).
+Builds are dispatched through the consumer's entry workflows (copied from
+`templates/`): **Build / Development** (`10-build-development.yml`) and
+**Build / Release** (`11-build-release.yml`), both calling `unity-pipeline.yml`.
+Each platform is a separate, independently retryable job in the run.
 
 ### Trigger a single platform build
 
 ```bash
-# Android
-gh workflow run build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=Android
-
-# WebGL
-gh workflow run build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=WebGL
-
-# Linux Standalone
-gh workflow run build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=Linux64
-
-# Linux Dedicated Server
-gh workflow run build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=LinuxServer
+gh workflow run "Build / Development" \
+  --repo <ORG>/<CONSUMER_REPO> \
+  --ref develop \
+  -f platform=Android        # Android | iOS | WebGL | Windows | Linux | "Linux Server"
 ```
 
-### Trigger all Docker platforms at once
+### Trigger the environment's platform set
 
 ```bash
-gh workflow run build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=All
+gh workflow run "Build / Development" \
+  --repo <ORG>/<CONSUMER_REPO> \
+  --ref develop \
+  -f platform=All            # the environment's BUILD_PLATFORMS; Desktop = Windows64 + Linux64
 ```
 
-### Additional workflow inputs
+### Dispatch inputs
 
 | Input | Default | Options | Description |
 |---|---|---|---|
-| `platform` | `Android` | `All`, `Android`, `WebGL`, `Linux64`, `LinuxServer`, `iOS` | Platform(s) to build |
-| `environment` | `development` | `development`, `staging`, `production` | Target environment |
-| `release-mode` | `false` | `true`/`false` | Digest-pinned image, signing enforced |
-| `clean-build` | `false` | `true`/`false` | Force full reimport (deletes `Library/`) |
-| `build-addressables` | `true` | `true`/`false` | Build Addressables before player build |
-| `test-level` | `editmode` | `none`, `editmode`, `playmode`, `full` | Test scope |
+| `platform` | `All` | `All`, `Desktop`, `Android`, `iOS`, `WebGL`, `Windows`, `Linux`, `Linux Server` | Platform(s) to build |
+| `environment` | `development` | `development`, `staging` | Build / Development only |
+| `run-tests` | `true` | `true` / `false` | Unity tests as the quality gate |
+| `test-mode` | `All` | `EditMode`, `PlayMode`, `All` | Test suite |
+| `build-addressables` | `false` | `true` / `false` | Addressables before the player build |
+| `unity-version` | *(blank)* | e.g. `6000.0.26f1` | Override; blank = `ProjectVersion.txt` |
+| `clean-build` | `auto` | `auto`, `true`, `false` | `auto` = clean for release, incremental otherwise |
+| `define-symbols` | *(blank)* | `;` or `,` separated | Extra scripting define symbols |
+| `runner-type` | `auto` | `auto`, `github-hosted`, `self-hosted` | WHERE the job runs |
+| `build-engine` | `auto` | `auto`, `docker`, `local` | HOW Unity builds |
+| `runner-labels` | *(blank)* | JSON array | Pins every Unity job to these labels |
 
-Example with extra inputs:
-```bash
-gh workflow run build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=Android \
-  -f environment=staging \
-  -f test-level=editmode \
-  -f clean-build=false \
-  -f build-addressables=true
-```
-
-On `push` and `pull_request` events, `platform` defaults to `Android`.
-
----
-
-## 2a. Explicit-Platform-Jobs Workflow (`unity-build.yml`)
-
-The `unity-build.yml` workflow (name: **Unity Build**) is the current primary build
-workflow. It uses the explicit-platform-jobs flow: each platform is a **separate
-named job** in the GitHub Actions UI, independently retryable.
-
-For a complete guide see [EXPLICIT\_PLATFORM\_FLOW.md](EXPLICIT_PLATFORM_FLOW.md).
-
-### Trigger a single platform
-
-```bash
-# Android
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=Android
-
-# WebGL
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=WebGL
-
-# Linux Standalone
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=Linux64
-
-# Linux Dedicated Server
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=LinuxServer
-
-# Windows Standalone (Mono backend via docker; use runner-mode=self-hosted-windows for IL2CPP)
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=Windows64
-
-# iOS (requires a registered macos-unity-xcode runner — see Section 10)
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=iOS
-```
-
-### Trigger all platforms
-
-```bash
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
-  -f platform=All
-```
-
-### All workflow_dispatch inputs
-
-| Input | Default | Allowed values | Description |
-|---|---|---|---|
-| `platform` | `All` | `All`, `Android`, `WebGL`, `Linux64`, `LinuxServer`, `Windows64`, `iOS` | Platform(s) to build |
-| `run-tests` | `false` | `true` / `false` | Run Unity tests before builds |
-| `test-mode` | `All` | `EditMode`, `PlayMode`, `All` | Test suite (when `run-tests=true`) |
-| `build-addressables` | `false` | `true` / `false` | Build Addressables before platform builds |
-| `clean-build` | `false` | `true` / `false` | Force full `Library/` cache delete |
-| `environment` | `production` | `production`, `staging`, `development` | Build environment profile |
-| `activation-strategy` | `auto` | `auto`, `manual-license`, `account`, `preactivated`, `none` | Unity license strategy (docker lane only) |
-| `runner-mode` | `docker` | `docker`, `self-hosted-windows`, `auto` | Execution lane |
-| `unity-version` | *(blank)* | e.g. `6000.0.26f1` | Version override — leave blank in production |
+Everything else is Repository Variables ([REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md)).
+On `push` to `develop` / `staging` / `release-*`, the branch decides
+([BRANCH_FLOW_CONTRACT.md](BRANCH_FLOW_CONTRACT.md)).
 
 ### Example with extra inputs
 
 ```bash
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
+gh workflow run "Build / Development" \
+  --repo <ORG>/<CONSUMER_REPO> \
+  --ref develop \
   -f platform=Android \
   -f environment=staging \
   -f run-tests=true \
@@ -221,9 +127,9 @@ gh workflow run unity-build.yml \
   -f build-addressables=true \
   -f clean-build=false
 
-# Build an Android App Bundle (AAB) for Play Store submission
-gh workflow run 11-build-release.yml \
-  --repo Cuvara/NDCUnityTemplate \
+# A signed Android App Bundle for Play Store submission
+gh workflow run "Build / Release" \
+  --repo <ORG>/<CONSUMER_REPO> \
   --ref main \
   -f platform=Android
 ```
@@ -233,23 +139,8 @@ Bundle because that is what the release lifecycle means. `Build / Development`
 produces an APK for the same reason. See `docs/PIPELINE_ARCHITECTURE.md`
 §"Four questions, four owners".
 
-### Per-platform job names in the UI
-
-When a run is open in the GitHub Actions UI, platform jobs appear as distinct nodes:
-
-| UI job name | Platform |
-|---|---|
-| `Build Android` | Android APK / AAB |
-| `Build WebGL` | WebGL bundle |
-| `Build Linux64` | Linux Standalone binary |
-| `Build LinuxServer` | Linux Dedicated Server binary |
-| `Build Windows64` | Windows Standalone `.exe` (Mono; use `self-hosted-windows` for IL2CPP) |
-| `Build iOS` | iOS Xcode project |
-| `Unity Tests (All)` / `(EditMode)` / `(PlayMode)` | Tests |
-| `Build Addressables` | Addressables catalog |
-| `final-report` | Summary (always runs) |
-
-Each job can be **re-run individually** from the UI.
+The `unity-build.yml` / `build.yml` dispatch this section used to describe was
+removed in 7.0.0 ([MIGRATION_V7.md](MIGRATION_V7.md)).
 
 ---
 
@@ -279,8 +170,8 @@ deferred.
 ### List recent runs
 
 ```bash
-gh run list --repo Cuvara/NDCUnityTemplate \
-  --workflow build.yml --limit 10
+gh run list --repo <ORG>/<CONSUMER_REPO> \
+  --workflow "Build / Development" --limit 10
 ```
 
 ### View failed job logs
@@ -334,7 +225,7 @@ gh api repos/Cuvara/NDCUnityTemplate/actions/jobs/<JOB_ID>/logs
 
 ## 5. Downloading Artifacts
 
-Build artifacts are retained for 14 days (configured in `build.yml`).
+Build artifacts are retained per build type — release 90 days, staging 14, development 7 — unless `ARTIFACT_RETENTION_DAYS` overrides it ([REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md)).
 
 ### List artifacts for a run
 
@@ -413,35 +304,20 @@ For a full upgrade procedure, see [UNITY\_VERSION\_UPGRADE.md](UNITY_VERSION_UPG
 | `MFA_OR_2FA_REQUIRED` | CI Unity account has 2FA enabled | Disable 2FA on the CI Unity account |
 | `ACTIVATION_LIMIT_REACHED` | License activation seats exhausted | Return a seat in Unity Hub (Manage License → Return License) |
 | `AUTH_FAILED` | Wrong email or password | Re-set `UNITY_EMAIL` and `UNITY_PASSWORD` |
-| Build passes but artifacts empty | Upload step skipped or artifact path wrong | Check `upload-artifact: true` is set; check Unity build output path |
-| `version mismatch` in Editor.log | Image built for different Unity version | Update `unity-version` in `build.yml` and rebuild images |
+| Build passes but artifacts empty | Upload step skipped or artifact path wrong | Check `ARTIFACT_STORAGE` (with `firebase` no binary goes to GitHub); check the Unity build output path (`build/`) |
+| `version mismatch` in Editor.log | Image built for different Unity version | `ProjectSettings/ProjectVersion.txt` decides the version; rebuild images or clear a stale `unity-version` dispatch override |
 
 For licensing-specific issues, see the full troubleshooting table in
 [UNITY\_PERSONAL\_DOCKER\_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md).
 
 ---
 
-## 8. When to Use the GameCI Baseline Workflow
+## 8. GameCI Baseline
 
-The toolkit includes a `gameci-baseline.yml` workflow (if present in
-`.github/workflows/`) that calls GameCI's stock `game-ci/unity-builder` action
-directly, bypassing the toolkit's Docker layer.
-
-**Use it when:**
-- You need to isolate whether a failure is in the toolkit layer or in Unity itself.
-- You want to confirm license activation works with stock GameCI before debugging
-  the custom Docker entrypoint.
-- You are onboarding and want the simplest possible baseline to validate secrets.
-
-**Do not use it for production builds.** It does not use the same image pipeline,
-caching, or artifact structure as the main workflow.
-
-To trigger it:
-```bash
-gh workflow run gameci-baseline.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main
-```
+The Docker lane of `unity-pipeline.yml` already builds through stock
+`game-ci/unity-builder`, so a separate baseline workflow is not needed to
+isolate toolkit-vs-Unity failures. (`unity-build-gameci.yml` was removed in
+7.0.0 — [MIGRATION_V7.md](MIGRATION_V7.md).)
 
 ---
 
@@ -469,19 +345,18 @@ There is no Windows CI lane in the current workflow configuration.
 
 | Requirement | Status |
 |---|---|
-| Self-hosted macOS runner with label `macos-unity-xcode` | **Does not exist** |
+| Self-hosted macOS runner (labels `self-hosted`, `macOS`) | Required |
 | Unity iOS Build Support module installed on runner | Not configured |
 | Xcode installed and selected on runner | Not configured |
 | iOS secrets (`IOS_DISTRIBUTION_CERTIFICATE_BASE64`, etc.) | Not set |
 
-The consumer `build.yml` passes `ios-runner-label: macos-unity-xcode` to the
-toolkit. Until a runner with that label is registered and configured, selecting
-`platform=iOS` (or `platform=All`) in the workflow dispatch will fail or skip
-the iOS job.
+The pipeline routes iOS to `RUNNER_MACOS_LABEL` (or a runner policy). Until a
+macOS runner matching it is registered and configured, an iOS build queues, or
+reports `blocked` on a non-macOS runner.
 
 **To unblock iOS:** Provision a macOS machine (physical or cloud), install Unity
 with iOS Build Support and Xcode, register it as a self-hosted GitHub Actions
-runner with the label `macos-unity-xcode`, then set the iOS signing secrets
+runner (see [SELF_HOSTED_MACOS_RUNNER.md](SELF_HOSTED_MACOS_RUNNER.md)), then set the iOS signing secrets
 listed in [Section 1](#1-required-secrets).
 
 See [IOS\_VERIFICATION.md](IOS_VERIFICATION.md) for the macOS runner verification
@@ -528,7 +403,7 @@ gh api 'repos/Cuvara/NDCUnityTemplate/deployments?per_page=20' \
 
 ```bash
 # List recent workflow runs
-gh run list --repo Cuvara/NDCUnityTemplate --workflow build.yml --limit 10
+gh run list --repo Cuvara/NDCUnityTemplate --workflow "Build / Development" --limit 10
 
 # View a specific run (summary)
 gh run view <RUN_ID> --repo Cuvara/NDCUnityTemplate
@@ -546,7 +421,7 @@ gh secret list --repo Cuvara/NDCUnityTemplate
 gh secret set UNITY_LICENSE --repo Cuvara/NDCUnityTemplate < Unity_lic.ulf
 
 # Trigger a build
-gh workflow run build.yml --repo Cuvara/NDCUnityTemplate --ref main -f platform=Android
+gh workflow run "Build / Development" --repo Cuvara/NDCUnityTemplate --ref develop -f platform=Android
 
 # Trigger image rebuild
 gh workflow run build-unity-image.yml --repo Cuvara/unity-build-workflows --ref main \

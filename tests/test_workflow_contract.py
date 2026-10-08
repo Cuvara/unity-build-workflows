@@ -3,7 +3,6 @@ Tests for GitHub Actions workflow YAML contract.
 
 Covers:
 - Parsing all workflow YAMLs in .github/workflows/
-- unity-build.yml has all required inputs with correct types and defaults
 - Required secrets are documented (not hard-coded in env blocks)
 - No @main references in reusable workflow calls
 - if: always() on report/log upload steps
@@ -52,14 +51,6 @@ def iter_uses(workflow: dict):
             yield job["uses"]
 
 
-def load_unity_build_workflow(workflows_dir: Path):
-    """Load unity-build.yml, or return None if not yet created."""
-    path = workflows_dir / "unity-build.yml"
-    if not path.exists():
-        return None
-    return load_workflow(path)
-
-
 # ---------------------------------------------------------------------------
 # Workflow discovery
 # ---------------------------------------------------------------------------
@@ -88,143 +79,10 @@ class TestWorkflowDiscovery:
 
 
 # ---------------------------------------------------------------------------
-# unity-build.yml required inputs
-# ---------------------------------------------------------------------------
-
-UNITY_BUILD_REQUIRED_INPUTS = {
-    "project-path": {"type": "string"},
-    "unity-version": {"type": "string", "required": True},
-    "target-platform": {"type": "string", "required": True},
-    "build-config-path": {"type": "string"},
-    "environment": {"type": "string"},
-    "cache-mode": {"type": "string"},
-}
-
-
-class TestUnityBuildWorkflowInputs:
-
-    @pytest.fixture(autouse=True)
-    def load_workflow(self, workflows_dir):
-        doc = load_unity_build_workflow(workflows_dir)
-        if doc is None:
-            pytest.skip("unity-build.yml not yet implemented")
-        self.doc = doc
-        self.triggers = get_triggers(doc)
-        self.inputs = self.triggers.get("workflow_call", {}).get("inputs", {}) or {}
-        self.secrets = self.triggers.get("workflow_call", {}).get("secrets", {}) or {}
-
-    def test_unity_build_workflow_is_reusable(self):
-        assert "workflow_call" in self.triggers, \
-            "unity-build.yml must use workflow_call trigger"
-
-    def test_required_inputs_present(self):
-        for input_name in UNITY_BUILD_REQUIRED_INPUTS:
-            assert input_name in self.inputs, \
-                f"Missing required input: '{input_name}'"
-
-    def test_unity_version_is_required(self):
-        unity_version = self.inputs.get("unity-version", {})
-        assert unity_version.get("required") is True, \
-            "unity-version input must be required: true"
-
-    def test_build_target_is_required(self):
-        build_target = self.inputs.get("target-platform", {})
-        assert build_target.get("required") is True, \
-            "target-platform input must be required: true"
-
-    def test_input_types_are_string(self):
-        for input_name, expected in UNITY_BUILD_REQUIRED_INPUTS.items():
-            if input_name in self.inputs:
-                actual_type = self.inputs[input_name].get("type")
-                assert actual_type == expected["type"], \
-                    f"Input '{input_name}' type should be '{expected['type']}', got '{actual_type}'"
-
-    def test_project_path_has_default(self):
-        project_path = self.inputs.get("project-path", {})
-        assert "default" in project_path, "project-path should have a default value"
-
-    def test_cache_mode_has_default(self):
-        cache_mode = self.inputs.get("cache-mode", {})
-        assert "default" in cache_mode, "cache-mode should have a default value"
-
-    def test_all_inputs_have_descriptions(self):
-        for input_name, definition in self.inputs.items():
-            assert "description" in definition and definition["description"], \
-                f"Input '{input_name}' is missing a description"
-
-
-class TestUnityBuildWorkflowSecrets:
-
-    @pytest.fixture(autouse=True)
-    def load_workflow(self, workflows_dir):
-        doc = load_unity_build_workflow(workflows_dir)
-        if doc is None:
-            pytest.skip("unity-build.yml not yet implemented")
-        self.doc = doc
-        self.triggers = get_triggers(doc)
-        self.secrets = self.triggers.get("workflow_call", {}).get("secrets", {}) or {}
-
-    def test_unity_license_secret_documented(self):
-        assert "UNITY_LICENSE" in self.secrets, \
-            "UNITY_LICENSE must be declared in workflow_call.secrets"
-
-    def test_unity_license_is_required(self):
-        unity_license = self.secrets.get("UNITY_LICENSE", {})
-        assert unity_license.get("required") is True, \
-            "UNITY_LICENSE secret must be required: true"
-
-    def test_no_hardcoded_secrets_in_env_blocks(self):
-        """Secrets must come from ${{ secrets.NAME }}, not literal values.
-        Checks env: blocks in steps for secret-looking keys with bare literal values.
-        """
-        for step in iter_steps(self.doc):
-            env_block = step.get("env") or {}
-            for key, value in env_block.items():
-                if not isinstance(value, str):
-                    continue
-                is_secret_key = any(
-                    kw in key.upper()
-                    for kw in ("LICENSE", "PASSWORD", "SECRET", "TOKEN",
-                               "KEYSTORE", "CERTIFICATE", "KEY_PASS")
-                )
-                if is_secret_key:
-                    assert value.startswith("${{"), (
-                        f"Step '{step.get('name')}' env var '{key}' looks like "
-                        f"a secret but is not a ${{{{ secrets.* }}}} expression: {value!r}"
-                    )
-
-
-# ---------------------------------------------------------------------------
 # No @main references
 # ---------------------------------------------------------------------------
 
 class TestNoMainReferences:
-
-    def test_no_at_main_in_unity_test(self, workflows_dir):
-        path = workflows_dir / "unity-test.yml"
-        if not path.exists():
-            pytest.skip("unity-test.yml not present")
-        doc = load_workflow(path)
-        for ref in iter_uses(doc):
-            assert "@main" not in ref, \
-                f"@main reference found in unity-test.yml: {ref}"
-
-    def test_no_at_main_in_unity_validate(self, workflows_dir):
-        path = workflows_dir / "unity-validate.yml"
-        if not path.exists():
-            pytest.skip("unity-validate.yml not present")
-        doc = load_workflow(path)
-        for ref in iter_uses(doc):
-            assert "@main" not in ref, \
-                f"@main reference found in unity-validate.yml: {ref}"
-
-    def test_no_at_main_in_unity_build(self, workflows_dir):
-        doc = load_unity_build_workflow(workflows_dir)
-        if doc is None:
-            pytest.skip("unity-build.yml not yet implemented")
-        for ref in iter_uses(doc):
-            assert "@main" not in ref, \
-                f"@main reference found in unity-build.yml: {ref}"
 
     def test_all_workflows_have_no_at_main(self, workflows_dir):
         for yml_path in sorted(workflows_dir.glob("*.yml")):
@@ -245,121 +103,30 @@ class TestAlwaysConditionOnUploadSteps:
     job level (if: always() on the containing job).
     """
 
-    UPLOAD_STEP_KEYWORDS = (
-        "upload-artifact", "upload_artifact", "upload-build-report",
-        "test-reporter", "dorny/test-reporter",
-    )
-
-    def _is_upload_step(self, step: dict) -> bool:
-        uses = step.get("uses", "") or ""
-        name = (step.get("name", "") or "").lower()
-        # "report" alone is too broad — "Report toolkit version" is a logging step,
-        # not an artifact upload. Require "report" to co-occur with upload/test/build/artifact
-        # to avoid false positives on diagnostic steps added by toolkit setup.
-        is_report_upload = "report" in name and any(
-            k in name for k in ("upload", "test", "build", "artifact", "result")
-        )
-        return (
-            any(kw in uses for kw in self.UPLOAD_STEP_KEYWORDS)
-            or "upload" in name
-            or is_report_upload
-        )
-
     def _job_has_always(self, job_def: dict) -> bool:
         return "always()" in str(job_def.get("if", ""))
 
-    def _check_workflow_upload_steps(self, doc: dict, workflow_name: str):
-        """Assert every upload/report step is covered by always() at step or job level."""
-        for job_name, job_def in (doc.get("jobs") or {}).items():
-            job_always = self._job_has_always(job_def)
-            for step in (job_def.get("steps") or []):
-                if self._is_upload_step(step):
-                    step_always = "always()" in str(step.get("if", ""))
-                    assert job_always or step_always, (
-                        f"{workflow_name}: upload/report step "
-                        f"'{step.get('name', step.get('uses'))}' in job '{job_name}' "
-                        f"is not protected by if: always() at step or job level"
+    # The workflows a consumer runs: the pipeline, its reusable callees and
+    # the promotion pipelines. (scan/build image workflows are maintenance.)
+    PIPELINE_GLOBS = ("unity-pipeline.yml", "reusable-*.yml", "pipeline-*-release.yml")
+
+    def test_log_and_report_uploads_in_the_pipeline_have_always(self, workflows_dir):
+        paths = sorted({p for g in self.PIPELINE_GLOBS for p in workflows_dir.glob(g)})
+        assert paths, "no pipeline workflows found"
+        for path in paths:
+            doc = load_workflow(path)
+            for job_name, job_def in (doc.get("jobs") or {}).items():
+                job_always = self._job_has_always(job_def)
+                for step in (job_def.get("steps") or []):
+                    name = (step.get("name") or "").lower()
+                    if "upload-artifact" not in str(step.get("uses", "")):
+                        continue
+                    if not any(k in name for k in ("log", "report", "result")):
+                        continue
+                    assert job_always or "always()" in str(step.get("if", "")), (
+                        f"{path.name}: '{step.get('name')}' in job '{job_name}' is not "
+                        f"protected by if: always()"
                     )
-
-    def test_upload_steps_in_test_workflow_have_always(self, workflows_dir):
-        path = workflows_dir / "unity-test.yml"
-        if not path.exists():
-            pytest.skip("unity-test.yml not present")
-        self._check_workflow_upload_steps(load_workflow(path), "unity-test.yml")
-
-    def test_upload_steps_in_validate_workflow_have_always(self, workflows_dir):
-        path = workflows_dir / "unity-validate.yml"
-        if not path.exists():
-            pytest.skip("unity-validate.yml not present")
-        self._check_workflow_upload_steps(load_workflow(path), "unity-validate.yml")
-
-    def test_upload_steps_in_build_workflow_have_always(self, workflows_dir):
-        doc = load_unity_build_workflow(workflows_dir)
-        if doc is None:
-            pytest.skip("unity-build.yml not yet implemented")
-        self._check_workflow_upload_steps(doc, "unity-build.yml")
-
-
-# ---------------------------------------------------------------------------
-# Existing workflow specific checks
-# ---------------------------------------------------------------------------
-
-class TestExistingWorkflowContracts:
-
-    def test_unity_test_has_workflow_call_trigger(self, workflows_dir):
-        path = workflows_dir / "unity-test.yml"
-        if not path.exists():
-            pytest.skip("unity-test.yml not present")
-        doc = load_workflow(path)
-        triggers = get_triggers(doc)
-        assert "workflow_call" in triggers
-
-    def test_unity_test_unity_version_input_required(self, workflows_dir):
-        path = workflows_dir / "unity-test.yml"
-        if not path.exists():
-            pytest.skip("unity-test.yml not present")
-        doc = load_workflow(path)
-        triggers = get_triggers(doc)
-        inputs = triggers.get("workflow_call", {}).get("inputs", {})
-        assert "unity-version" in inputs
-        assert inputs["unity-version"].get("required") is True
-
-    def test_unity_test_has_unity_license_secret(self, workflows_dir):
-        path = workflows_dir / "unity-test.yml"
-        if not path.exists():
-            pytest.skip("unity-test.yml not present")
-        doc = load_workflow(path)
-        triggers = get_triggers(doc)
-        secrets = triggers.get("workflow_call", {}).get("secrets", {})
-        assert "UNITY_LICENSE" in secrets
-
-    def test_unity_validate_has_workflow_call_trigger(self, workflows_dir):
-        path = workflows_dir / "unity-validate.yml"
-        if not path.exists():
-            pytest.skip("unity-validate.yml not present")
-        doc = load_workflow(path)
-        triggers = get_triggers(doc)
-        assert "workflow_call" in triggers
-
-    def test_unity_validate_target_platform_required(self, workflows_dir):
-        path = workflows_dir / "unity-validate.yml"
-        if not path.exists():
-            pytest.skip("unity-validate.yml not present")
-        doc = load_workflow(path)
-        triggers = get_triggers(doc)
-        inputs = triggers.get("workflow_call", {}).get("inputs", {})
-        assert "target-platform" in inputs
-        assert inputs["target-platform"].get("required") is True
-
-    def test_unity_test_outputs_tests_passed(self, workflows_dir):
-        path = workflows_dir / "unity-test.yml"
-        if not path.exists():
-            pytest.skip("unity-test.yml not present")
-        doc = load_workflow(path)
-        triggers = get_triggers(doc)
-        outputs = triggers.get("workflow_call", {}).get("outputs", {})
-        assert "tests-passed" in outputs, \
-            "unity-test.yml must expose 'tests-passed' output"
 
 
 # ---------------------------------------------------------------------------
@@ -373,19 +140,10 @@ FORBIDDEN_EXECUTOR_INPUTS = ("executor-mode", "use-docker", "native-runner")
 FORBIDDEN_ACTIONS = ("setup-unity",)
 
 # Workflow files that must NOT exist after Docker migration (native-only platforms).
-FORBIDDEN_WORKFLOW_FILES = ("unity-build-ios.yml", "unity-build-windows.yml")
+FORBIDDEN_WORKFLOW_FILES = ("unity-build-windows.yml",)
 
 # Workflow that MUST exist after migration (image build pipeline).
 REQUIRED_WORKFLOW_FILES = ("build-unity-image.yml",)
-
-# Keyword that indicates a step is a Docker container run (post-migration contract).
-DOCKER_RUN_INDICATORS = (
-    "run-unity-container",
-    "run_unity_container",
-    "docker run",
-    "scripts/docker/",
-)
-
 
 def _all_workflow_inputs(workflows_dir: Path) -> dict[str, dict]:
     """Return {workflow_filename: {input_name: definition}} for all workflows."""
@@ -404,7 +162,6 @@ class TestDockerOnlyWorkflowContract:
     Enforces the Docker-mandatory contract:
     - No legacy executor-mode / use-docker / native-runner inputs
     - No setup-unity action usage
-    - Build/test workflows use run-unity-container
     - upload/report steps still have if: always()
     - Platform-specific impossible workflows (iOS, Windows) do not exist
     - Image build pipeline (build-unity-image.yml) exists
@@ -452,20 +209,6 @@ class TestDockerOnlyWorkflowContract:
             "setup-unity action found — it must be removed after Docker migration:\n" + \
             "\n".join(f"  {v}" for v in violations)
 
-    def test_unity_build_ios_workflow_exists(self, workflows_dir):
-        """
-        iOS builds are supported via the macos-unity-xcode executor (v2.1.0+).
-        unity-build-ios.yml must exist after the iOS pipeline was added.
-
-        NOTE: This replaces the v2.0.0-era test that asserted iOS workflow must NOT
-        exist (when iOS was unsupported). iOS is now supported via native macOS runner,
-        not Docker. The workflow MUST exist for iOS builds to work.
-        """
-        ios_workflow = workflows_dir / "unity-build-ios.yml"
-        assert ios_workflow.exists(), \
-            "unity-build-ios.yml must exist (added in v2.1.0 for macOS/Xcode iOS pipeline). " \
-            "iOS is no longer unsupported — it uses the macos-unity-xcode executor."
-
     def test_unity_build_windows_workflow_does_not_exist(self, workflows_dir):
         """Windows builds are not Docker-supported on Linux runners — workflow must be removed."""
         windows_workflow = workflows_dir / "unity-build-windows.yml"
@@ -486,54 +229,6 @@ class TestDockerOnlyWorkflowContract:
         doc = load_workflow(path)
         assert isinstance(doc, dict), "build-unity-image.yml must be a valid YAML mapping"
         assert "name" in doc, "build-unity-image.yml must have a 'name' field"
-
-    def test_all_build_workflows_reference_docker_runner(self, workflows_dir):
-        """
-        All build/test workflows must reference run-unity-container or scripts/docker/
-        somewhere in their steps, confirming Docker-only execution.
-        """
-        build_workflows = [
-            "unity-build-android.yml",
-            "unity-build-webgl.yml",
-            "unity-test.yml",
-        ]
-        missing_docker = []
-        for wf_name in build_workflows:
-            path = workflows_dir / wf_name
-            if not path.exists():
-                continue  # Will be created by Task #5
-            doc = load_workflow(path)
-            # Gather all step 'run' and 'uses' text
-            all_step_text = ""
-            for step in iter_steps(doc):
-                all_step_text += str(step.get("uses", "")) + " " + str(step.get("run", ""))
-            has_docker = any(
-                indicator in all_step_text
-                for indicator in DOCKER_RUN_INDICATORS
-            )
-            if not has_docker:
-                missing_docker.append(wf_name)
-
-        assert not missing_docker, \
-            "These build/test workflows do not reference Docker container execution:\n" + \
-            "\n".join(f"  {wf}" for wf in missing_docker)
-
-    def test_upload_steps_always_condition_in_build_android(self, workflows_dir):
-        """Upload/report steps in unity-build-android.yml must have if: always()."""
-        path = workflows_dir / "unity-build-android.yml"
-        if not path.exists():
-            pytest.skip("unity-build-android.yml not present")
-        checker = TestAlwaysConditionOnUploadSteps()
-        checker._check_workflow_upload_steps(load_workflow(path), "unity-build-android.yml")
-
-    def test_upload_steps_always_condition_in_build_webgl(self, workflows_dir):
-        """Upload/report steps in unity-build-webgl.yml must have if: always()."""
-        path = workflows_dir / "unity-build-webgl.yml"
-        if not path.exists():
-            pytest.skip("unity-build-webgl.yml not present")
-        checker = TestAlwaysConditionOnUploadSteps()
-        checker._check_workflow_upload_steps(load_workflow(path), "unity-build-webgl.yml")
-
 
 # ---------------------------------------------------------------------------
 # Sparse checkout must respect project-path

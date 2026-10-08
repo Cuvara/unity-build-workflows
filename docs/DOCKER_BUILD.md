@@ -1,41 +1,41 @@
 # Docker Build Guide
 
-All Unity builds, tests, and validation run inside Docker containers. The CI runner is an orchestrator only.
+This guide covers the toolkit's own Docker wrapper, `scripts/docker/run_unity_container.py`,
+used for local Docker builds and tests. In CI, the Docker lane of `reusable-build-platform.yml`
+runs `game-ci/unity-builder` instead (and the Windows-runner docker lane runs
+`scripts/build/docker_windows_container.sh` in a `unityci/editor` container); the composite
+actions that wrapped this script for the workflows removed in 7.0.0 are gone
+([MIGRATION_V7.md](MIGRATION_V7.md)).
 
 ## Container Execution Flow
 
 ```
-CI Runner / Developer Machine
+Developer Machine
   │
-  ├── resolve-unity-image action
-  │     └── Resolves target platform → image variant → pinned image reference
-  │
-  ├── run-unity-container action
-  │     └── scripts/docker/run_unity_container.py
-  │           │
-  │           ├── Validate inputs
-  │           ├── Resolve image reference
-  │           ├── Validate image manifest
-  │           ├── Construct docker run command
-  │           │
-  │           └── docker run --rm --init \
-  │                 --user "$(id -u):$(id -g)" \
-  │                 --workdir /workspace \
-  │                 --mount type=bind,source=<project>,target=/workspace \
-  │                 --mount type=bind,source=<output>,target=/workspace/Builds \
-  │                 --mount type=bind,source=<reports>,target=/workspace/BuildReports \
-  │                 --mount type=bind,source=<logs>,target=/workspace/Logs \
-  │                 --mount type=volume,source=<library-cache>,target=/workspace/Library \
-  │                 <pinned-image-reference> \
-  │                 build \
-  │                 --project-path /workspace \
-  │                 --build-config /workspace/BuildConfig/base.json \
-  │                 --environment staging \
-  │                 --target-platform Android
-  │
-  └── collect-container-output action
-        └── Gather logs, reports, artifacts from host directories
+  └── scripts/docker/run_unity_container.py
+              │
+              ├── Validate inputs
+              ├── Resolve image reference
+              ├── Validate image manifest
+              ├── Construct docker run command
+              │
+              └── docker run --rm --init \
+                    --user "$(id -u):$(id -g)" \
+                    --workdir /workspace \
+                    --mount type=bind,source=<project>,target=/workspace \
+                    --mount type=bind,source=<output>,target=/workspace/Builds \
+                    --mount type=bind,source=<reports>,target=/workspace/BuildReports \
+                    --mount type=bind,source=<logs>,target=/workspace/Logs \
+                    --mount type=volume,source=<library-cache>,target=/workspace/Library \
+                    <pinned-image-reference> \
+                    build \
+                    --project-path /workspace \
+                    --build-config /workspace/BuildConfig/base.json \
+                    --environment staging \
+                    --target-platform Android
 ```
+
+Logs, reports and artifacts land in the bound host directories.
 
 ## Bind Mounts
 

@@ -28,7 +28,6 @@ Allowlisted paths (minimal — keep as small as possible)
   README.md                      Top-level meta file with migration history.
   CHANGELOG.md                   Release-note history legitimately mentions BuzzelStudio.
   CONTRIBUTING.md                Contributor guide; may reference original project.
-  examples/sample-unity-project-integration/README.md  — doc, not config.
   tests/test_static_identifier_scan.py  — contains prohibited patterns AS
                                  regex literals for the scan itself; the only
                                  legitimate source of these strings in tests/.
@@ -99,8 +98,6 @@ ALLOWLISTED_FILES = {
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "LICENSE",
-    # Sub-directory README files in examples/ are documentation, not production config.
-    "examples/sample-unity-project-integration/README.md",
     # This scan file legitimately references forbidden patterns as test-data.
     "tests/test_static_identifier_scan.py",
 }
@@ -240,31 +237,6 @@ class TestProhibitedIdentifiers:
             ".github/ must not be allowlisted — it is now clean and should "
             "be caught by the scan if a future change reintroduces a leak."
         )
-
-    def test_example_buildconfig_uses_generic_project_name(self):
-        """examples/ BuildConfig base must use generic project name."""
-        base = REPO_ROOT / "examples" / "sample-unity-project-integration" / "BuildConfig" / "base.json"
-        if not base.exists():
-            pytest.skip("examples/sample-unity-project-integration/BuildConfig/base.json not yet created")
-        content = base.read_text()
-        for pattern, label in PROHIBITED_PATTERNS:
-            assert not pattern.search(content), (
-                f"examples/BuildConfig/base.json contains prohibited identifier: {label}"
-            )
-
-    def test_example_package_manifest_uses_generic_url(self):
-        """Packages/manifest.example.json must not contain real org identifiers."""
-        manifest = (
-            REPO_ROOT / "examples" / "sample-unity-project-integration"
-            / "Packages" / "manifest.example.json"
-        )
-        if not manifest.exists():
-            pytest.skip("Packages/manifest.example.json not yet created")
-        content = manifest.read_text()
-        for pattern, label in PROHIBITED_PATTERNS:
-            assert not pattern.search(content), (
-                f"Packages/manifest.example.json contains prohibited identifier: {label}"
-            )
 
     def test_unity_package_metadata_is_generic(self):
         """unity-package/ must not contain game-studio-specific strings."""

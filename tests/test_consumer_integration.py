@@ -2,7 +2,6 @@
 Consumer integration tests for the unity-build-workflows toolkit.
 
 Covers:
-- BuildConfig overlay merge (base + environment overlay → valid merged config)
 - Required project fields present in base config
 - Android applicationId validation across overlays
 - iOS bundleId validation
@@ -40,7 +39,6 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 SCHEMA_PATH = REPO_ROOT / "schemas" / "unity-build-config.schema.json"
-EXAMPLES_DIR = REPO_ROOT / "examples" / "sample-unity-project-integration"
 
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "common"))
 
@@ -68,15 +66,6 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def _get_deep_merge():
-    """Return deep_merge from config_loader if available, else local fallback."""
-    try:
-        from config_loader import deep_merge
-        return deep_merge
-    except ImportError:
-        return _deep_merge
-
-
 def _schema_validator():
     """Build a jsonschema validator for the build config schema."""
     import jsonschema
@@ -90,169 +79,6 @@ def _schema_validator():
     except (ImportError, TypeError):
         resolver = jsonschema.RefResolver(base_uri=SCHEMA_PATH.as_uri(), referrer=schema)
         return jsonschema.Draft7Validator(schema, resolver=resolver)
-
-
-# ---------------------------------------------------------------------------
-# BuildConfig overlay merge
-# ---------------------------------------------------------------------------
-
-class TestBuildConfigOverlayMerge:
-    """
-    Validates that the ExampleProject consumer fixtures merge correctly:
-      base.json + <env>.json → schema-valid merged config
-    """
-
-    @pytest.fixture(autouse=True)
-    def _setup(self):
-        self.base = _load_json(EXAMPLES_DIR / "BuildConfig" / "base.json")
-        self.validator = _schema_validator()
-        self.deep_merge = _get_deep_merge()
-
-    # ---------- Base alone ----------
-
-    def test_base_config_is_valid(self):
-        """base.json alone must pass schema validation (self-sufficient config)."""
-        errors = list(self.validator.iter_errors(self.base))
-        assert not errors, "base.json must be a standalone-valid config:\n" + "\n".join(
-            e.message for e in errors
-        )
-
-    def test_base_has_required_fields(self):
-        required = {"projectName", "companyName", "productName",
-                    "bundleVersion", "outputDirectory", "scenes"}
-        missing = required - set(self.base.keys())
-        assert not missing, f"base.json is missing required fields: {missing}"
-
-    def test_base_project_name_is_generic(self):
-        assert "example" in self.base["projectName"].lower(), (
-            "base.json projectName should use a generic 'example-' prefix"
-        )
-
-    def test_base_android_application_id_present(self):
-        assert "android" in self.base, "base.json must have an android section"
-        assert "applicationId" in self.base["android"], (
-            "base.json android section must declare applicationId"
-        )
-
-    def test_base_scenes_are_valid_paths(self):
-        import re
-        pattern = re.compile(r"^Assets/.*\.unity$")
-        for scene in self.base.get("scenes", []):
-            assert pattern.match(scene), (
-                f"Scene path '{scene}' does not match ^Assets/.*\\.unity$"
-            )
-
-    # ---------- development overlay ----------
-
-    def test_development_overlay_merges_valid(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "development.json")
-        merged = self.deep_merge(self.base, overlay)
-        errors = list(self.validator.iter_errors(merged))
-        assert not errors, "base+development merge must be valid:\n" + "\n".join(
-            e.message for e in errors
-        )
-
-    def test_development_overlay_enables_dev_build(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "development.json")
-        merged = self.deep_merge(self.base, overlay)
-        assert merged.get("developmentBuild") is True, (
-            "development overlay must set developmentBuild=true"
-        )
-
-    def test_development_overlay_uses_debug_keystore(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "development.json")
-        merged = self.deep_merge(self.base, overlay)
-        assert merged.get("android", {}).get("keystoreMode") == "debug", (
-            "development overlay must set android.keystoreMode='debug'"
-        )
-
-    def test_development_android_app_id_is_dev_variant(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "development.json")
-        merged = self.deep_merge(self.base, overlay)
-        app_id = merged.get("android", {}).get("applicationId", "")
-        assert "dev" in app_id or "debug" in app_id or app_id != self.base.get("android", {}).get("applicationId"), (
-            "development overlay should use a distinct applicationId (e.g. .dev suffix)"
-        )
-
-    # ---------- staging overlay ----------
-
-    def test_staging_overlay_merges_valid(self):
-        staging_path = EXAMPLES_DIR / "BuildConfig" / "staging.json"
-        if not staging_path.exists():
-            pytest.skip("staging.json not yet created")
-        overlay = _load_json(staging_path)
-        merged = self.deep_merge(self.base, overlay)
-        errors = list(self.validator.iter_errors(merged))
-        assert not errors, "base+staging merge must be valid:\n" + "\n".join(
-            e.message for e in errors
-        )
-
-    def test_staging_overlay_sets_environment_metadata(self):
-        staging_path = EXAMPLES_DIR / "BuildConfig" / "staging.json"
-        if not staging_path.exists():
-            pytest.skip("staging.json not yet created")
-        overlay = _load_json(staging_path)
-        merged = self.deep_merge(self.base, overlay)
-        env = merged.get("metadata", {}).get("environment", "")
-        assert env == "staging", (
-            f"staging overlay must set metadata.environment='staging', got: {env!r}"
-        )
-
-    # ---------- production overlay ----------
-
-    def test_production_overlay_merges_valid(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "production.json")
-        merged = self.deep_merge(self.base, overlay)
-        errors = list(self.validator.iter_errors(merged))
-        assert not errors, "base+production merge must be valid:\n" + "\n".join(
-            e.message for e in errors
-        )
-
-    def test_production_overlay_sets_production_environment(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "production.json")
-        merged = self.deep_merge(self.base, overlay)
-        env = merged.get("metadata", {}).get("environment", "")
-        assert env == "production", (
-            f"production overlay must set metadata.environment='production', got: {env!r}"
-        )
-
-    def test_production_overlay_disables_dev_build(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "production.json")
-        merged = self.deep_merge(self.base, overlay)
-        # base has developmentBuild=false; production must keep it false
-        assert merged.get("developmentBuild", False) is False, (
-            "production merged config must have developmentBuild=false"
-        )
-
-    def test_production_overlay_enables_failon_warnings(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "production.json")
-        merged = self.deep_merge(self.base, overlay)
-        assert merged.get("gates", {}).get("failOnWarnings") is True, (
-            "production overlay must set gates.failOnWarnings=true"
-        )
-
-    # ---------- deep merge contract ----------
-
-    def test_overlay_does_not_mutate_base(self):
-        overlay = _load_json(EXAMPLES_DIR / "BuildConfig" / "development.json")
-        original_base = copy.deepcopy(self.base)
-        self.deep_merge(self.base, overlay)
-        assert self.base == original_base, "deep_merge must not mutate the base dict"
-
-    def test_base_non_overridden_keys_survive_merge(self):
-        overlay = {"outputDirectory": "Builds/Custom"}
-        merged = self.deep_merge(self.base, overlay)
-        # scenes, scriptingBackend etc. from base must survive
-        assert merged["scenes"] == self.base["scenes"]
-        assert merged["companyName"] == self.base["companyName"]
-
-    def test_nested_android_merge_preserves_non_overridden_keys(self):
-        """Overlaying just android.keystoreMode must not delete android.minSdkVersion."""
-        overlay = {"android": {"keystoreMode": "debug"}}
-        merged = self.deep_merge(self.base, overlay)
-        assert "minSdkVersion" in merged.get("android", {}), (
-            "deep_merge must preserve android.minSdkVersion when overlay only sets android.keystoreMode"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -507,49 +333,6 @@ class TestPackageDependencyPreflight:
 
     def _make_manifest(self, deps: dict) -> dict:
         return {"dependencies": deps}
-
-    def test_manifest_example_declares_build_pipeline(self):
-        """The example manifest.example.json must declare the required package."""
-        manifest_path = EXAMPLES_DIR / "Packages" / "manifest.example.json"
-        if not manifest_path.exists():
-            pytest.skip("Packages/manifest.example.json not yet created")
-        manifest = _load_json(manifest_path)
-        deps = manifest.get("dependencies", {})
-        assert self.REQUIRED_PACKAGE_ID in deps, (
-            f"manifest.example.json must declare dependency '{self.REQUIRED_PACKAGE_ID}'. "
-            f"Found dependencies: {list(deps.keys())}"
-        )
-
-    def test_manifest_example_url_is_valid_upm_git_url(self):
-        """The package URL must be a valid UPM Git URL form."""
-        manifest_path = EXAMPLES_DIR / "Packages" / "manifest.example.json"
-        if not manifest_path.exists():
-            pytest.skip("Packages/manifest.example.json not yet created")
-        manifest = _load_json(manifest_path)
-        url = manifest.get("dependencies", {}).get(self.REQUIRED_PACKAGE_ID, "")
-        assert url.startswith("https://github.com/"), (
-            f"Package URL must start with 'https://github.com/', got: {url!r}"
-        )
-        assert "unity-build-workflows.git" in url, (
-            f"Package URL must reference unity-build-workflows.git, got: {url!r}"
-        )
-        assert "?path=" in url, (
-            f"Package URL must include ?path= for UPM subfolder, got: {url!r}"
-        )
-        assert "#" in url, (
-            f"Package URL must include a #ref (branch or tag), got: {url!r}"
-        )
-
-    def test_manifest_url_points_to_package_subfolder(self):
-        """The ?path= portion must point to the unity-package subfolder."""
-        manifest_path = EXAMPLES_DIR / "Packages" / "manifest.example.json"
-        if not manifest_path.exists():
-            pytest.skip("Packages/manifest.example.json not yet created")
-        manifest = _load_json(manifest_path)
-        url = manifest.get("dependencies", {}).get(self.REQUIRED_PACKAGE_ID, "")
-        assert "/unity-package/Packages/" in url, (
-            f"UPM path must include /unity-package/Packages/, got: {url!r}"
-        )
 
     def test_missing_package_declaration_is_detectable(self):
         """

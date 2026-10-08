@@ -164,9 +164,6 @@ it can execute on — derived from the build steps that actually exist
 
 ¹ A Windows host running Docker in Linux-container mode (pipeline lane only).
 There is no Linux + `local` build step, so Linux is not a `local` target.
-Standalone workflows are narrower: `unity-build-{android,webgl,linux}.yml` and
-`unity-test.yml` are Linux + docker only; `unity-build-ios.yml`,
-`unity-test-ios.yml` and `unity-release-ios.yml` are macOS + local only.
 
 A policy that names an incompatible target **for a specific platform** (iOS →
 a Linux runner, iOS → `github-hosted`, iOS with `build-engine: docker`,
@@ -235,8 +232,7 @@ and an iOS build. For a job with **no section of its own**:
 1. Default targets the job can never use are dropped, with the reason recorded.
 2. If nothing usable is left, or an inherited `mode: github-hosted` cannot run the
    job, the job falls back to its **legacy routing**:
-   - iOS in the pipeline: `RUNNER_MACOS_LABEL`, or `macos-latest`
-   - the standalone iOS workflows: `macos-unity-xcode`
+   - iOS: `RUNNER_MACOS_LABEL`, or `macos-latest`
 
    The fallback is logged with a warning, and the dropped candidates are listed.
 3. The legacy answer is itself checked. If its labels imply an OS the job can
@@ -244,8 +240,7 @@ and an iOS build. For a job with **no section of its own**:
    fails with *"No safe runner for iOS"* instead of routing it there.
 
 An inherited `build-engine` does not apply to jobs with a fixed engine: iOS
-always uses `local`, Unity tests and Addressables use the run's `BUILD_ENGINE`,
-and the standalone lanes keep theirs.
+always uses `local`, and Unity tests and Addressables use the run's `BUILD_ENGINE`.
 
 A job **with** its own `platforms.<job>` section never falls back silently. If
 that section, or the lists it inherits, names nothing the job can use, the run
@@ -384,8 +379,8 @@ labels. One discovery serves every job of the run.
 | Organization runners, runner groups | Organization → **Self-hosted runners: Read-only** | `admin:org` (read) |
 
 The consumer templates call the pipeline with `secrets: inherit`, so the secret
-reaches stage 01 with no further wiring. If you call `unity-pipeline.yml` (or a
-standalone workflow) with explicit secrets, add
+reaches stage 01 with no further wiring. If you call `unity-pipeline.yml` with
+explicit secrets, add
 `RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}`. The token is sent
 only as an `Authorization` header and is redacted from every message.
 
@@ -546,28 +541,9 @@ See [`examples/runner-policy/pools-and-groups.json`](../examples/runner-policy/p
 | file at **`RUNNER_POLICY_FILE`** (default `.github/unity-runner-policy.json`) | the policy, if `RUNNER_POLICY` is unset |
 | none | legacy `RUNNER_*` resolution, unchanged |
 
-This order is the same in the pipeline and the standalone workflows. In the
-standalone workflows, the explicit label input (`runner-label` /
-`ios-runner-label`) takes the place of `runner-labels`. It is deterministic:
+The order is deterministic:
 nothing depends on the runner's environment beyond these two variables and the
 file in the checkout.
-
-**Standalone workflows need a variable to opt in.** Their runner selection runs
-in a separate `resolve-runner` job on GitHub-hosted `ubuntu-latest`, because
-`runs-on` cannot be decided inside the job it schedules. So that projects without
-a policy gain no GitHub-hosted job, that resolver runs **only** when
-`RUNNER_POLICY` or `RUNNER_POLICY_FILE` is set as a repository or organization
-variable *and* no explicit label was passed. Otherwise it is skipped, and the Unity
-job uses the explicit label, else its pre-scheduler literal (`ubuntu-latest` or
-`macos-unity-xcode`). To use a policy *file* with the standalone workflows, set
-`RUNNER_POLICY_FILE`, even to the default path.
-
-When the resolver does run, it needs a GitHub-hosted Linux runner. If GitHub-hosted
-runners are disabled or out of minutes, it stays queued like any other job;
-remove the variable to return to the literal labels. When it runs but cannot find
-an eligible runner, it fails with the report from §8 instead of leaving the Unity
-job queued. The pipeline (`unity-pipeline.yml`) is unaffected: its selection runs
-in *Resolve Build Config*, which was already a GitHub-hosted job.
 
 Validate the file in your editor with
 [`schemas/unity-runner-policy.schema.json`](../schemas/unity-runner-policy.schema.json)
@@ -620,9 +596,6 @@ schedule with availability `unknown`.
 | Workflow | Input | Default | Meaning |
 |---|---|---|---|
 | `unity-pipeline.yml` | `runner-policy` | `auto` | `auto` applies the policy if one exists; `legacy` ignores it this run. Not on the dispatch forms, which are at GitHub's documented input limit; `runner-labels` on the form pins every job instead |
-| `unity-build-ios.yml`, `unity-build.yml` | `ios-runner-label` | `''` | explicit label wins; empty = policy (when opted in by variable), else `macos-unity-xcode` (unchanged) |
-| `unity-build-{android,webgl,linux}.yml`, `unity-test.yml` | `runner-label` | `''` | explicit label wins; empty = policy (when opted in by variable), else `ubuntu-latest` (unchanged) |
-| `unity-test-ios.yml`, `unity-release-ios.yml` | `runner-label` | `''` | explicit label wins; empty = policy (when opted in by variable), else `macos-unity-xcode` (unchanged) |
 
 ## 15. What you see in a run
 
@@ -681,7 +654,6 @@ Mapping legacy settings to a policy:
 | `RUNNER_MACOS_LABEL=self-hosted,macOS` | `"platforms": {"iOS": {"priority": ["mac-pool"]}}` with a `mac-pool` pool |
 | `RUNNER_WINDOWS_LABEL` + `BUILD_ENGINE=local` | `"platforms": {"Windows64": {"build-engine": "local", "priority": ["win-pool"]}}` |
 | `RUNNER_DEFAULT_MODE=self-hosted-macos` | `"mode": "self-hosted-only"` + a `default` pointing at the Mac |
-| `ios-runner-label: macos-unity-xcode` | keep it (explicit input still wins), or drop it and add `platforms.iOS` |
 
 The legacy variables are **not deprecated by this change**; they remain the
 routing for every job a policy does not cover.
@@ -697,11 +669,6 @@ routing for every job a policy does not cover.
 - **Environment-scoped variables**: the scheduler runs in jobs without a
   deployment environment, so `RUNNER_POLICY` must be a repository or
   organization variable (a policy *file* has no such constraint).
-- **Standalone workflows** honour a policy only when the `RUNNER_POLICY` or
-  `RUNNER_POLICY_FILE` variable is set, and their resolver then needs a
-  GitHub-hosted Linux runner (§14). In submodule mode the resolver fetches the
-  toolkit submodule only when a policy applies; it needs the same submodule access
-  the build job has.
 - **Installed software is declared, not detected**: Unity and Xcode versions are
   trusted as declared unless also expressed as labels (§3).
 - **Non-Unity jobs** (validation, reports, release promotion, the TestFlight upload

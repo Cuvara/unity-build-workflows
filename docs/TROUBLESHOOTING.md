@@ -379,7 +379,7 @@ Set the correct scheme via the `SCHEME` environment variable or the iOS build sc
 
 **Cause:** `target-platform: iOS` was used in a workflow running on `ubuntu-latest`.
 
-**Fix:** iOS requires a macOS runner. The resolver enforces this — use `unity-build-ios.yml` which specifies `runs-on: macos-13`.
+**Fix:** iOS requires a macOS runner with `build-engine: local`. The resolver enforces this — route iOS to a macOS runner (`RUNNER_MACOS_LABEL`, a runner policy, or a runner picked by name in the dispatch form; see [MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md)).
 
 ---
 

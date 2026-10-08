@@ -272,18 +272,13 @@ def test_a_multi_word_label_survives_tokenising(label):
 
 def test_the_superseded_per_platform_templates_are_gone():
     """consumer-build-{android,ios,webgl,all}.yml were the draft that the
-    numbered set replaced. Nothing referenced them; shipping two generations
-    side by side only made it unclear which one was current."""
+    numbered set replaced, and consumer-unity-build.yml / project-workflow.yml
+    the single-caller shape before it (removed in v7.0.0). Shipping two
+    generations side by side only made it unclear which one was current."""
     for name in ("android", "ios", "webgl", "all"):
         assert not (TEMPLATES / f"consumer-build-{name}.yml").exists(), name
-
-
-def test_the_previous_caller_says_it_is_superseded():
-    """It stays — removing it breaks existing projects — but a reader must not
-    mistake it for the current path."""
-    body = (TEMPLATES / "consumer-unity-build.yml").read_text()
-    assert "DEPRECATED" in body
-    assert "10-build-development" in body
+    for name in ("consumer-unity-build.yml", "project-workflow.yml"):
+        assert not (TEMPLATES / name).exists(), name
 
 
 @pytest.mark.parametrize("doc", ["README.md", "docs/CONSUMER_SETUP.md",

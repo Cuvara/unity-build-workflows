@@ -22,21 +22,18 @@ Related docs:
 
 ## 1 — The Runner Label
 
-The active explicit-platform flow (`unity-build.yml` → `unity-build-ios.yml`)
-routes the iOS job with:
+`unity-pipeline.yml` routes its iOS job (stage 01's runner selection, then
+`reusable-build-platform.yml` with `build-engine: local`) to:
 
-```yaml
-runs-on: ${{ needs.resolve-runner.result == 'success' && fromJSON(needs.resolve-runner.outputs.runs-on) || inputs.ios-runner-label || 'macos-unity-xcode' }}
-#   ios-runner-label input, if set
-#   else the runner policy's choice, if a policy is opted in via the
-#     RUNNER_POLICY / RUNNER_POLICY_FILE variable (resolve-runner then runs on ubuntu-latest)
-#   else macos-unity-xcode (unchanged default; no extra job runs)
-```
+- the runner picked by name in the dispatch form's `runner` dropdown, when the entry
+  workflows have one (`templates/consumer-30-sync-runners.yml` keeps it filled);
+- else the runner policy's choice, if `RUNNER_POLICY` / `RUNNER_POLICY_FILE` is set;
+- else `RUNNER_MACOS_LABEL` — default `self-hosted,macOS` with `RUNNER_TYPE=self-hosted`,
+  `macos-latest` otherwise ([REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md)).
 
-Register the runner with the **`macos-unity-xcode`** label. GitHub also auto-adds
-`self-hosted` and `macOS`, but with no runner policy the job matches on the custom
-`macos-unity-xcode` label. It **must** be present or `build-ios` queues
-indefinitely.
+Register the runner with GitHub's automatic `self-hosted` and `macOS` labels (plus its own
+name, so it can be picked by name). A non-macOS runner never gets the job: the build job
+reports `blocked` for iOS anywhere else.
 
 **Several Macs?** List them in a runner policy rather than juggling labels:
 
@@ -53,11 +50,6 @@ The scheduler takes the first one that is online and idle, skips one that is
 offline or lacks Xcode 16, and fails with a report instead of queueing when
 neither can run the job. It never sends iOS to Linux, Docker or GitHub-hosted.
 See [MULTI_RUNNER_SCHEDULING.md](MULTI_RUNNER_SCHEDULING.md#13-examples-android-and-ios).
-
-> **Note:** This flow does **not** use the three-label `[self-hosted, macOS, unity]`
-> convention (that belongs to the generic resolver-driven `unity-pipeline.yml` lane,
-> where `RUNNER_LABELS` supplies the labels). For `unity-build.yml`, use the single
-> `macos-unity-xcode` label unless you override `ios-runner-label`.
 
 ---
 
@@ -141,8 +133,7 @@ self-hosted runner → macOS**), extract it, then:
 ```bash
 ./config.sh --url https://github.com/<org-or-user>/<repo> \
             --token <REGISTRATION_TOKEN> \
-            --name macos-ios-runner-01 \
-            --labels macos-unity-xcode
+            --name macos-ios-runner-01
 
 # Run as a launchd service (starts on boot, restarts on crash)
 ./svc.sh install
@@ -156,7 +147,7 @@ Verify the service:
 ```
 
 In GitHub, **Settings → Actions → Runners** — the runner shows **Idle** (green)
-with the `macos-unity-xcode` label.
+with the `self-hosted` and `macOS` labels.
 
 ---
 
@@ -166,20 +157,20 @@ Trigger a smoke build (signing secrets must be set first — see
 [IOS_VERIFICATION.md](IOS_VERIFICATION.md)):
 
 ```bash
-gh workflow run unity-build.yml \
-  --repo Cuvara/NDCUnityTemplate \
-  --ref main \
+gh workflow run "Build / Development" \
+  --repo <ORG>/<CONSUMER_REPO> \
+  --ref develop \
   -f platform=iOS
 ```
 
 Watch it:
 
 ```bash
-gh run watch --repo Cuvara/NDCUnityTemplate
+gh run watch --repo <ORG>/<CONSUMER_REPO>
 ```
 
-Expected: `build-ios` picks up on your runner and produces the `ios-xcode`
-artifact. For the full sign/archive/export/TestFlight checklist, follow
+Expected: the iOS build job picks up on your runner and uploads the Xcode project
+artifact (`…_ios_xcodeproj`). For the full sign/archive/export/TestFlight checklist, follow
 [IOS_VERIFICATION.md](IOS_VERIFICATION.md).
 
 ---
@@ -188,8 +179,8 @@ artifact. For the full sign/archive/export/TestFlight checklist, follow
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `build-ios` queues indefinitely | Runner lacks the `macos-unity-xcode` label | Re-register with `--labels macos-unity-xcode`; or set `ios-runner-label` to match your runner; or add a runner policy, which fails fast with a report instead of queueing |
-| `build-ios` shows `blocked` | Job landed on a non-macOS runner (guard step caught it) | Ensure only macOS runners carry the label |
+| The iOS job queues indefinitely | No online runner matches `RUNNER_MACOS_LABEL` | Set `RUNNER_MACOS_LABEL` to your runner's labels, pick the runner by name in the dispatch form, or add a runner policy, which fails fast with a report instead of queueing |
+| The iOS job shows `blocked` | Job landed on a non-macOS runner (guard step caught it) | Ensure only macOS runners carry the labels iOS routes to |
 | `target platform not supported` / no `iOSSupport` | iOS Build Support module missing | Unity Hub → Editor **6000.0.26f1** → Add modules → iOS Build Support |
 | `xcodebuild: error: ... license` | Xcode license not accepted | `sudo xcodebuild -license accept` |
 | `No valid Unity license` at build | Runner service runs as a different user than Hub activation | Run the service as the same account that activated Unity Hub; re-activate |

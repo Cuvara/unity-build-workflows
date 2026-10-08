@@ -47,8 +47,8 @@ Your Project Repo (templates/consumer-*.yml)
                                 validate, publish phase by phase (builds nothing)
 ```
 
-The older `unity-build.yml` family is deprecated — see
-[docs/ARCHITECTURE.md § Legacy entry points](docs/ARCHITECTURE.md#legacy-entry-points).
+The older `unity-build.yml` family was removed in 7.0.0 — see
+[docs/MIGRATION_V7.md](docs/MIGRATION_V7.md).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the complete layer diagram, and
 [docs/PIPELINE_ARCHITECTURE.md](docs/PIPELINE_ARCHITECTURE.md) for the pipeline stage graph.
@@ -74,133 +74,11 @@ Unsupported targets fail with an actionable error message. The repository never 
 
 ## Consumer Quickstart
 
-> **Deprecated path.** This quickstart wires up the legacy `unity-build.yml`
-> (with `BuildConfig/`). It keeps working, but new projects should use
-> [Use in Another Project (Quick Start)](#use-in-another-project-quick-start)
-> below and [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md), which call
-> `unity-pipeline.yml` and `pipeline-*-release.yml`.
-
-### 1. Add the UPM Package
-
-In your Unity project's `Packages/manifest.json`:
-
-```json
-{
-  "dependencies": {
-    "com.company.build-pipeline": "https://github.com/<WORKFLOW_OWNER>/unity-build-workflows.git?path=/unity-package/Packages/com.company.build-pipeline#<WORKFLOW_REF>"
-  }
-}
-```
-
-### 2. Add a BuildConfig
-
-```bash
-mkdir BuildConfig
-cp templates/BuildConfig.base.example.json BuildConfig/base.json
-# Edit: projectName, companyName, applicationId/bundleIdentifier, scenes
-cp templates/BuildConfig.development.example.json BuildConfig/development.json
-cp templates/BuildConfig.staging.example.json BuildConfig/staging.json
-cp templates/BuildConfig.production.example.json BuildConfig/production.json
-```
-
-Environment files (`development.json`, etc.) are overlays — they contain only the fields that differ from `base.json`. See [docs/BUILD_CONFIG.md](docs/BUILD_CONFIG.md).
-
-### 3. Add Secrets
-
-At minimum: `UNITY_LICENSE`. See [templates/build-secrets.example.md](templates/build-secrets.example.md) for the full secret matrix.
-
-### 4. Create `.github/workflows/build.yml`
-
-**Android / WebGL / Linux (Docker lane):**
-```yaml
-name: Unity Build
-
-on:
-  pull_request:
-  push:
-    branches: [develop, staging]
-  workflow_dispatch:
-
-jobs:
-  build-android:
-    uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@<ref>
-    with:
-      project-path: .
-      unity-version: '6000.0.26f1'
-      target-platform: Android
-      environment: development
-      build-config-path: BuildConfig
-      test-level: editmode
-      cache-mode: safe
-      upload-artifact: true
-    secrets: inherit
-```
-
-**iOS (macOS lane):**
-```yaml
-name: iOS Build
-
-on:
-  push:
-    branches: [main, release/*]
-  workflow_dispatch:
-
-jobs:
-  build-ios:
-    uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build-ios.yml@<ref>
-    with:
-      project-path: .
-      unity-version: '6000.0.26f1'
-      target-platform: iOS
-      environment: staging
-      build-config-path: BuildConfig
-      upload-artifact: true
-    secrets: inherit
-```
-
-> **Choosing `<ref>`:**
-> - Development / pre-release: `@main` (tracks latest) or `@<commit-sha>` (pinned)
-> - Stable release: an exact released tag (e.g. `@vX.Y.Z`) — the latest is `@v3.0.0`; see [CHANGELOG.md](CHANGELOG.md) and the Releases page.
-> - A floating `@vMAJOR` tag tracks the newest release of that major version. `@v3` moves with each `3.x.y` release; `@v2` is frozen before the release layer; `@v1` at `v1.1.3`.
-
-The executor (Docker or macOS) is selected automatically from `target-platform`. No `executor-mode` input exists.
-
-See [docs/ADD_NEW_PROJECT.md](docs/ADD_NEW_PROJECT.md) for the complete onboarding walkthrough.
-
-### 5. Add iOS Secrets (iOS builds only)
-
-Repository secrets (**Settings → Secrets and variables → Actions**):
-
-```
-UNITY_LICENSE                              # .ulf license content
-UNITY_EMAIL                                # Unity account email
-UNITY_PASSWORD                             # Unity account password
-APP_STORE_CONNECT_KEY_ID                   # ASC API key ID (for TestFlight)
-APP_STORE_CONNECT_ISSUER_ID                # ASC issuer UUID (for TestFlight)
-APP_STORE_CONNECT_PRIVATE_KEY              # .p8 key contents (for TestFlight)
-```
-
-Environment secrets, in each of `development`, `staging` and `production`
-(**Settings → Environments → <env>**):
-
-```
-IOS_DISTRIBUTION_CERTIFICATE_BASE64        # Base64-encoded .p12 certificate
-IOS_DISTRIBUTION_CERTIFICATE_PASSWORD      # .p12 export password
-IOS_PROVISIONING_PROFILE_BASE64            # Base64-encoded .mobileprovision
-```
-
-See [docs/IOS_SIGNING.md](docs/IOS_SIGNING.md) and
-[docs/MIGRATING_TO_ENVIRONMENT_SECRETS.md](docs/MIGRATING_TO_ENVIRONMENT_SECRETS.md).
-
-### 6. Enable Discord Notifications (optional)
-
-Add a single secret to receive build-completion embeds in a Discord channel:
-
-```
-DISCORD_WEBHOOK_URL    # Discord webhook URL — omit to disable notifications
-```
-
-Notifications cover success, failure, and cancelled status. If the secret is not set the workflows skip the notification step silently. See [docs/DISCORD_NOTIFICATIONS.md](docs/DISCORD_NOTIFICATIONS.md).
+Copy the numbered entry workflows from `templates/` — see
+[Use in Another Project (Quick Start)](#use-in-another-project-quick-start) below —
+and follow [docs/CONSUMER_SETUP.md](docs/CONSUMER_SETUP.md) for secrets, repository
+variables and runners. Coming from the `unity-build.yml` workflows removed in 7.0.0:
+[docs/MIGRATION_V7.md](docs/MIGRATION_V7.md).
 
 ---
 
@@ -265,17 +143,21 @@ Semantic versioning (`MAJOR.MINOR.PATCH`).
 
 ```yaml
 # Development / pre-release — tracks latest changes
-uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@main
+uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-pipeline.yml@main
 
 # Pinned to exact commit SHA — fully reproducible
-uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@abc1234
+uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-pipeline.yml@abc1234
 
 # Stable release — use the exact published tag
-uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@vX.Y.Z
+uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-pipeline.yml@vX.Y.Z
 ```
 
-> **`@v3` is the current floating major tag**, repointed at each `3.x.y`
-> release. The numbered entry templates ship pinned to it.
+> **`@v7` is the current floating major tag**, repointed at each `7.x.y`
+> release. `@v6` stays at the last 6.x release, the last one that still ships
+> the `unity-build.yml` workflows (removed in 7.0.0 — see
+> [docs/MIGRATION_V7.md](docs/MIGRATION_V7.md)). Projects that call only
+> `unity-pipeline.yml` and `pipeline-*-release.yml` can move from `@v6` to
+> `@v7` without other changes.
 >
 > `@v2` predates the release layer: `Build / Release`, the Release Set, the
 > promotion workflows, the platform capability model and the immutable artifact
@@ -284,7 +166,7 @@ uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@v
 > inputs that never did anything — see the migration notes in
 > [CHANGELOG.md](CHANGELOG.md).
 >
-> Use `@v3` to track stable, `@v3.0.0` for an exact pin, `@main` for
+> Use `@v7` to track stable, `@v7.0.0` for an exact pin, `@main` for
 > development, or a SHA for full reproducibility.
 >
 > Release tags are created by hand, and they must be **lightweight**:
@@ -320,7 +202,7 @@ Current version: **3.0.0** — see [CHANGELOG.md](CHANGELOG.md).
 | [docs/PLATFORM_MATRIX.md](docs/PLATFORM_MATRIX.md) | **Canonical platform support matrix** — authoritative source for all platform/executor/status combinations |
 | [docs/DOCKER_BUILD.md](docs/DOCKER_BUILD.md) | Container flow, mounts, caches, licensing, debugging |
 | [docs/IMAGE_LIFECYCLE.md](docs/IMAGE_LIFECYCLE.md) | Base image, variants, bootstrap, scanning, SBOM, tagging, deprecation |
-| [docs/ADD_NEW_PROJECT.md](docs/ADD_NEW_PROJECT.md) | Step-by-step consumer onboarding guide |
+| [docs/MIGRATION_V7.md](docs/MIGRATION_V7.md) | Moving off the `unity-build.yml` workflows removed in 7.0.0 |
 | [docs/BUILD_CONFIG.md](docs/BUILD_CONFIG.md) | Every BuildConfig field documented (including full iOS section) |
 | [docs/ANDROID.md](docs/ANDROID.md) | Android signing, AAB, symbol export via Docker, image bootstrap |
 | [docs/IOS.md](docs/IOS.md) | Full iOS pipeline: Unity → Xcode → archive → IPA → TestFlight |

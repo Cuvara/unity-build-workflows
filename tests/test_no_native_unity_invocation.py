@@ -27,13 +27,9 @@ REPO_ROOT = Path(__file__).parent.parent
 
 # Files approved to contain direct (non-Docker) Unity invocations.
 # docker/unity/entrypoint.sh                — Docker container entrypoint (Docker lane)
-# .github/workflows/unity-build-ios.yml     — iOS pipeline (native Unity on macOS)
-# .github/workflows/unity-test-ios.yml      — iOS test runner (native Unity on macOS)
-# .github/workflows/unity-release-ios.yml   — iOS release pipeline (tag-triggered)
-# scripts/ios/run_unity_ios.sh              — Unity batch-mode caller (macOS only, called by workflows)
-# .github/actions/build-ios/action.yml      — iOS composite action (native Unity on macOS, added T7)
-# The iOS files are an approved exception: Xcode requires native Unity on macOS.
-# All other files must use the Docker executor.
+# scripts/ios/run_unity_ios.sh              — Unity batch-mode caller (macOS only)
+# The native lanes (reusable-build-platform.yml, reusable-unity-tests.yml and
+# the scripts they call) are approved by design; each entry says why.
 ALLOWED_PATH = "docker/unity/entrypoint.sh"  # kept for test backward-compat
 ALLOWED_PATHS = frozenset({
     "docker/unity/entrypoint.sh",
@@ -43,15 +39,7 @@ ALLOWED_PATHS = frozenset({
     # whether <folder>/Unity.app/Contents/MacOS/Unity exists to tell one editor
     # from an editors root; it never runs the editor.
     "scripts/common/unity_editor_root.sh",
-    ".github/workflows/unity-build-ios.yml",
-    ".github/workflows/unity-test-ios.yml",
-    ".github/workflows/unity-release-ios.yml",  # iOS release pipeline (tag-triggered)
     "scripts/ios/run_unity_ios.sh",             # iOS Unity batch-mode invocation (macOS only)
-    ".github/actions/build-ios/action.yml",     # iOS composite action — native Unity on macOS (T7)
-    # GameCI-delegation production path: Unity Personal/free Docker activation
-    # is performed by game-ci/unity-builder (the supported, working path). This
-    # workflow intentionally uses the game-ci action.
-    ".github/workflows/unity-build-gameci.yml",
     # Image build smoke-tests the editor inside the freshly built image
     # (unity-editor -batchmode -buildTarget X -version). This verifies the
     # image, it is not a project build invocation.
@@ -151,15 +139,7 @@ def _is_allowed(path: Path) -> bool:
     """
     Return True if this file is an approved location for Unity invocations.
 
-    Approved locations:
-    - docker/unity/entrypoint.sh              — Docker container entrypoint
-    - .github/workflows/unity-build-ios.yml   — iOS pipeline (native macOS/Xcode)
-    - .github/workflows/unity-test-ios.yml    — iOS test runner (native macOS/Xcode)
-    - .github/workflows/unity-release-ios.yml — iOS release pipeline
-    - scripts/ios/run_unity_ios.sh            — Unity batch-mode caller (macOS only)
-
-    iOS files are approved exceptions to the Docker-mandatory rule.
-    iOS builds require native Unity on macOS because Xcode only runs on macOS.
+    Approved locations are ALLOWED_PATHS; each entry there says why.
     """
     try:
         rel = path.relative_to(REPO_ROOT)
@@ -270,8 +250,9 @@ class TestNoNativeUnityInvocation:
         """No workflow should use game-ci actions EXCEPT approved (ALLOWED_PATHS).
 
         The toolkit delegates Unity Personal/free Docker activation to
-        game-ci/unity-builder in the approved unity-build-gameci.yml workflow;
-        any other use of a game-ci action is still a violation.
+        game-ci/unity-builder in the approved reusable-build-platform.yml (and
+        game-ci/unity-test-runner in reusable-unity-tests.yml); any other use
+        of a game-ci action is still a violation.
         """
         violations = []
         builder_pat = re.compile(r"game-ci/unity-builder")
@@ -338,8 +319,8 @@ class TestNoNativeUnityInvocation:
             pytest.fail(
                 f"REGRESSION: Native Unity invocations found outside approved paths.\n"
                 f"Approved: {allowed_list}\n"
-                f"iOS workflows (unity-build-ios.yml, unity-test-ios.yml) are approved "
-                f"exceptions — all other files must use the Docker executor.\n\n"
+                f"Each approved path says why in ALLOWED_PATHS — any other file "
+                f"must use the Docker executor or run_unity_player.sh.\n\n"
                 f"{msg}"
             )
 
@@ -347,8 +328,8 @@ class TestNoNativeUnityInvocation:
         """Sanity check: ALLOWED_PATHS contains the expected approved files."""
         assert "docker/unity/entrypoint.sh" in ALLOWED_PATHS, \
             "docker/unity/entrypoint.sh must be in ALLOWED_PATHS"
-        assert ".github/workflows/unity-build-ios.yml" in ALLOWED_PATHS, \
-            "unity-build-ios.yml must be in ALLOWED_PATHS (approved iOS exception)"
+        assert ".github/workflows/reusable-build-platform.yml" in ALLOWED_PATHS, \
+            "reusable-build-platform.yml must be in ALLOWED_PATHS (the native and game-ci lanes)"
         for path in ALLOWED_PATHS:
             assert "/" in path, f"All paths must use forward slashes: {path}"
 
@@ -356,24 +337,11 @@ class TestNoNativeUnityInvocation:
         """Document the contract: entrypoint.sh must remain in the approved allowlist."""
         assert "docker/unity/entrypoint.sh" in ALLOWED_PATHS
 
-    def test_ios_workflow_is_approved_exception(self):
-        """
-        iOS workflows and the run_unity_ios.sh shell script are approved exceptions
-        to the Docker-mandatory architecture. iOS builds require native Unity on
-        macOS because Xcode only runs on macOS.
-        All three iOS workflows and the iOS Unity runner script must be in ALLOWED_PATHS.
-        """
-        ios_approved = [
-            ".github/workflows/unity-build-ios.yml",
-            ".github/workflows/unity-test-ios.yml",
-            ".github/workflows/unity-release-ios.yml",
-            "scripts/ios/run_unity_ios.sh",
-        ]
-        for path in ios_approved:
-            assert path in ALLOWED_PATHS, (
-                f"{path} must be an approved exception. "
-                "iOS native Unity execution on macOS is required for Xcode integration."
-            )
+    def test_every_approved_path_exists(self):
+        """An allowlist entry for a file that is gone is an exception nobody
+        needs: it would quietly approve whatever is added under that name."""
+        missing = sorted(p for p in ALLOWED_PATHS if not (REPO_ROOT / p).exists())
+        assert not missing, f"ALLOWED_PATHS names files that no longer exist: {missing}"
 
 
 # ---------------------------------------------------------------------------

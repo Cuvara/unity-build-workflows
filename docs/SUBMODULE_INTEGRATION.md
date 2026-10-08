@@ -9,7 +9,7 @@ This guide explains how to consume `unity-build-workflows` as a **Git submodule*
 | Team hosts a private fork of the toolkit | Submodule — gives you full control and local script access |
 | Strictly reproducible builds pinned to an exact SHA | Submodule — the submodule SHA is tracked in your repo's git history |
 | You want to run toolkit scripts locally without cloning a second repo | Submodule — scripts are available at `tools/unity-build-workflows/scripts/` |
-| You want the simplest setup and are happy with remote `uses:` | Remote Git reference (see [ADD_NEW_PROJECT.md](ADD_NEW_PROJECT.md)) |
+| You want the simplest setup and are happy with remote `uses:` | Remote Git reference (see [CONSUMER_SETUP.md](CONSUMER_SETUP.md)) |
 
 Submodule integration and remote `uses:` integration are **not mutually exclusive** — many teams use a submodule for the UPM package (local file path) while still calling the hosted reusable workflows via `uses: OWNER/unity-build-workflows/...@REF`.
 
@@ -75,21 +75,18 @@ GitHub Actions **reusable workflow `uses:` calls always require a remote referen
 ```yaml
 jobs:
   build:
-    uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@<REF>
+    uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-pipeline.yml@<REF>
     with:
-      unity-version: '6000.0.26f1'
-      target-platform: Android
-      environment: development
-      build-config-path: BuildConfig
-      # Pin workflow-ref to the same tag/SHA as your submodule for reproducibility.
-      workflow-repository: <WORKFLOW_OWNER>/unity-build-workflows
-      workflow-ref: v1.0.0   # ← match your submodule pin
+      # Pin toolkit-ref to the same tag/SHA as your submodule for reproducibility:
+      # it is the ref the pipeline checks out for its scripts and actions.
+      toolkit-repo: <WORKFLOW_OWNER>/unity-build-workflows
+      toolkit-ref: v7.0.0   # ← match your submodule pin
     secrets: inherit
 ```
 
-> **Why not a local path?** GitHub Actions evaluates `uses:` with a relative path (e.g. `uses: ./tools/unity-build-workflows/.github/workflows/unity-build.yml`) only when the target workflow file exists in the **caller's own repository**. Because unity-build-workflows is a separate repo — even when submoduled — GitHub treats submodule contents as external and the local `uses:` path is not supported for cross-repo reusable workflows.
+> **Why not a local path?** GitHub Actions evaluates `uses:` with a relative path (e.g. `uses: ./tools/unity-build-workflows/.github/workflows/unity-pipeline.yml`) only when the target workflow file exists in the **caller's own repository**. Because unity-build-workflows is a separate repo — even when submoduled — GitHub treats submodule contents as external and the local `uses:` path is not supported for cross-repo reusable workflows.
 >
-> The practical effect: the reusable workflows are fetched from GitHub at the `workflow-ref` SHA, while your Unity project is checked out from your own repo. Both are available inside the same CI run.
+> The practical effect: the reusable workflows are fetched from GitHub at the `uses:` ref (and the toolkit at `toolkit-ref`), while your Unity project is checked out from your own repo. Both are available inside the same CI run.
 
 ---
 
@@ -210,6 +207,6 @@ your-unity-project/
 
 ## See also
 
-- [ADD_NEW_PROJECT.md](ADD_NEW_PROJECT.md) — Remote reference integration (no submodule)
+- [CONSUMER_SETUP.md](CONSUMER_SETUP.md) — Remote reference integration (no submodule)
 - [BUILD_CONFIG.md](BUILD_CONFIG.md) — Full BuildConfig field reference
 - [docs/adr/003-generic-consumer-integration.md](adr/003-generic-consumer-integration.md) — Architecture decision record for consumer integration patterns
