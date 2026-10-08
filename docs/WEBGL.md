@@ -18,17 +18,16 @@ Includes: Unity Editor, Emscripten toolchain
 
 ## Workflow Usage
 
-```yaml
-build-webgl:
-  uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build-webgl.yml@<ref>
-  with:
-    project-path: .
-    unity-version: '6000.0.26f1'
-    environment: development
-    build-config-path: BuildConfig
-    cache-mode: safe
-  secrets: inherit
+WebGL builds run in `unity-pipeline.yml`, called by the consumer's numbered entry
+workflows (`templates/consumer-10-build-development.yml`, `consumer-11-build-release.yml`).
+Put `WebGL` in the environment's `BUILD_PLATFORMS` repository variable, or pick it in
+the dispatch form:
+
+```bash
+gh workflow run "Build / Development" --ref develop -f platform=WebGL
 ```
+
+Setup: [CONSUMER_SETUP.md](CONSUMER_SETUP.md). Variables: [REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md).
 
 ---
 

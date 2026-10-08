@@ -13,6 +13,9 @@
 > pipeline works today, read
 > [PIPELINE_ARCHITECTURE.md](PIPELINE_ARCHITECTURE.md); to set a project up,
 > read [CONSUMER_SETUP.md](CONSUMER_SETUP.md).
+>
+> The `unity-build.yml` workflows it was written for were removed in 7.0.0
+> ([MIGRATION_V7.md](MIGRATION_V7.md)); their names below are historical.
 
 > **Branch:** `feature/explicit-platform-jobs`  
 > **Unity version SSOT:** `ProjectSettings/ProjectVersion.txt` → `6000.0.26f1`  

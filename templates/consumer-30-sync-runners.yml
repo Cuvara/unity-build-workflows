@@ -30,6 +30,6 @@ on:
 jobs:
   sync:
     name: Sync
-    uses: Cuvara/unity-build-workflows/.github/workflows/sync-runner-choices.yml@v6
+    uses: Cuvara/unity-build-workflows/.github/workflows/sync-runner-choices.yml@v7
     secrets:
       RUNNER_SYNC_TOKEN: ${{ secrets.RUNNER_SYNC_TOKEN }}

@@ -155,12 +155,14 @@ def resolve_executor(target_platform: str, runner_os: str = None) -> str:
 #               no Linux + local step, so Linux is not a local target.
 #     iOS     — macOS + local, always. There is no docker path for Xcode.
 #
-#   standalone-docker lane (unity-build-{android,webgl,linux}.yml, unity-test.yml)
-#     run-unity-container is a bash `docker run`: Linux + docker only.
+#   standalone-docker lane — a single Unity job that runs a bash `docker run`
+#     itself: Linux + docker only.
 #
-#   standalone-native lane (unity-build-ios.yml, unity-release-ios.yml,
-#   unity-test-ios.yml)
-#     iOS on macOS + local only.
+#   standalone-native lane — a single iOS job on macOS + local only.
+#
+#   The standalone lanes served the per-platform workflows removed in v7.0.0
+#   (unity-build-*.yml, unity-test*.yml, unity-release-ios.yml). No workflow
+#   selects them any more; runner_scheduler.py --lane still accepts them.
 #
 # resolve_executor() above is the legacy single-runner contract and is left
 # untouched; its callers and tests predate per-engine routing.

@@ -9,30 +9,23 @@ is the order to do things in.
 
 ---
 
-## 0 — Pick a path first
+## 0 — The one path
 
-There are two ways to consume this toolkit, they wire up different workflows,
-and **they do not use the same Docker images**. Choosing wrong is the most
-expensive mistake available here.
+Projects consume this toolkit through `unity-pipeline.yml` (builds) and
+`pipeline-<platform>-release.yml` (releases), called by the numbered entry
+workflows in `templates/` (`consumer-01-ci`, `10-build-development`,
+`11-build-release`, `20`–`24` releases). Configuration is Repository Variables;
+no `BuildConfig/*.json` is needed.
 
-| | **Path A — pipeline** (recommended) | **Path B — explicit builds** |
-|---|---|---|
-| Caller uses | `unity-pipeline.yml` | `unity-build.yml` |
-| Configuration | Repository Variables | workflow inputs per job |
-| `BuildConfig/*.json` | **not needed** | **required** |
-| `PlayerBuilder.Build` in your project | not needed on the docker lane | required |
-| Docker image | `unityci/editor` from Docker Hub, via `game-ci/unity-builder` | `ghcr.io/<org>/unity-editor`, which **you must publish first** |
-| Branch-based CI on `develop`/`staging`/`release-*` | yes, built in | you wire it |
+The pipeline never touches this organization's own images.
+`reusable-build-platform.yml` builds either through `game-ci/unity-builder@v5`
+or, on a self-hosted Windows runner, through
+`docker run unityci/editor:ubuntu-<version>-<variant>-3`, or with a local editor
+on a self-hosted machine.
 
-Verified, because it is counter-intuitive: the pipeline path never touches this
-organization's own images. `reusable-build-platform.yml` builds either through
-`game-ci/unity-builder@v5` or, on a self-hosted Windows runner, through
-`docker run unityci/editor:ubuntu-<version>-<variant>-3` (`:642`). Only the
-Path B workflows call the `resolve-unity-image` action and therefore
-`ghcr.io/<org>/unity-editor`.
-
-**Start with Path A.** Everything below is Path A unless a section says
-otherwise; Path B is in §7.
+The explicit per-job `unity-build.yml` path (with `BuildConfig/` and the
+`ghcr.io/<org>/unity-editor` images) was removed in 7.0.0 —
+[MIGRATION_V7.md](MIGRATION_V7.md).
 
 ---
 
@@ -127,15 +120,17 @@ different machine id fails with `TimeStamp validation failed`, and credentials
 alone fail with `0 entitlements`. That combination is the `personal-combined`
 strategy described in
 [UNITY_PERSONAL_DOCKER_LICENSE.md](UNITY_PERSONAL_DOCKER_LICENSE.md), and it is
-also what the toolkit's **own** container entrypoint requires on Path B. Start
-with the `.ulf` alone; add credentials if activation fails.
+also what the Windows-runner docker lane needs
+(`scripts/build/docker_windows_container.sh`). Start with the `.ulf` alone; add
+credentials if activation fails.
 
 Optional: `DISCORD_WEBHOOK_URL` for build-completion embeds — absent means the
 notification step is a no-op, not an error.
 
-Android release signing (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASS`,
-`ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASS`) is only consulted on Path B and the
-release workflows. It is **not** passed to the Editor on the pipeline path.
+Android release signing is optional: for a project with a custom keystore in
+Player Settings, the native lanes' `PlayerBuilder` reads `ANDROID_KEYSTORE_PASS`
+and `ANDROID_KEY_PASS` (never logged) — see
+[TOOLKIT_BUILD_PACKAGE.md](TOOLKIT_BUILD_PACKAGE.md).
 
 ---
 
@@ -319,56 +314,7 @@ hosted minutes:
 
 ---
 
-## 7 — Path B: explicit builds, and the images it needs
-
-Choose this only if you want one build per caller job with
-`target-platform` / `test-level` / `cache-mode` inputs and your own
-`BuildConfig/*.json`. Walkthrough: [ADD_NEW_PROJECT.md](ADD_NEW_PROJECT.md).
-
-This is the path that consumes `ghcr.io/<org>/unity-editor`, through the
-`resolve-unity-image` action, which **requires an `image-namespace`** and fails
-with an actionable error when it is absent. Publish the images first:
-
-```bash
-gh workflow run build-unity-image.yml --repo Cuvara/unity-build-workflows --ref main \
-  -f unity-version=6000.0.26f1 -f image-variant=android -f push-image=true
-```
-
-Published in this organization as of 2026-09-08 — mutable tag and the
-run-numbered tag resolve to the same digest, which the build now asserts:
-
-| Tag | Digest | Run tag |
-|---|---|---|
-| `6000.0.26f1-android` | `sha256:dc2603d05ce4…` | `-54` |
-| `6000.0.26f1-webgl` | `sha256:b89248b5284c…` | `-43` |
-| `6000.0.26f1-linux` | `sha256:2561e0509722…` | `-44` |
-| `6000.3.9f1-android` | `sha256:c82e726735a1…` | `-45` |
-| `6000.3.9f1-webgl` | `sha256:411257fff425…` | `-50` |
-| `6000.3.9f1-linux` | `sha256:86cabf50c569…` | `-51` |
-
-All six were checked directly against the registry: the mutable tag and its
-run-numbered tag resolve to the same digest in every case. `6000.0.26f1-android`
-needed a rebuild to get there — its mutable tag had been left on the image from
-run 39 while run 42 published `-42` — so the tags `-39` and `-42` still exist and
-point at superseded images. Read the current digest rather than trusting any
-printed table:
-
-```bash
-docker buildx imagetools inspect ghcr.io/cuvara/unity-editor:6000.0.26f1-android \
-  --format '{{.Manifest.Digest}}'
-```
-
-**The package is private.** A workflow in the same organization pulls it with
-`GITHUB_TOKEN`; a local `docker pull` needs `docker login ghcr.io`, and anything
-outside the org cannot pull it until the package visibility is changed (only
-possible in the UI — the REST API has no endpoint for it).
-
-Production releases should pin by digest, not by the mutable tag:
-[IMAGE_LIFECYCLE.md](IMAGE_LIFECYCLE.md), [RELEASE_FLOW.md](RELEASE_FLOW.md).
-
----
-
-## 8 — When it goes wrong
+## 7 — When it goes wrong
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -378,7 +324,6 @@ Production releases should pin by digest, not by the mutable tag:
 | Green run, empty `unity-build-<Platform>` artifact | self-hosted lane with no `PlayerBuilder.Build` | §6.2 |
 | Unity preflight step failed | No Python, an unwritable install root, a failed download, or a version pin that differs from `ProjectVersion.txt` | follow the remediation the step prints |
 | Job stays *Queued*, runner Idle | label mismatch, or an org runner group that disallows public repos | §6.4, §6.3 |
-| `image-namespace input is required` | Path B without a published image namespace | §7, or move to Path A |
 | `Wrong Docker container mode … Server.Os=windows` | `BUILD_ENGINE=docker` on a Windows engine; `unityci/editor` images are Linux | switch Docker Desktop to Linux containers |
 | iOS job refuses to run | iOS is macOS-only and dispatch-only | use a macOS runner |
 
@@ -387,12 +332,12 @@ More: [TROUBLESHOOTING.md](TROUBLESHOOTING.md),
 
 ---
 
-## 9 — Where to read further
+## 8 — Where to read further
 
 | Topic | Document |
 |---|---|
-| Path A in detail | [CONSUMER_SETUP.md](CONSUMER_SETUP.md) |
-| Path B in detail, `PlayerBuilder`, iOS | [ADD_NEW_PROJECT.md](ADD_NEW_PROJECT.md) |
+| The pipeline in detail | [CONSUMER_SETUP.md](CONSUMER_SETUP.md) |
+| Coming from `unity-build.yml` (removed in 7.0.0) | [MIGRATION_V7.md](MIGRATION_V7.md) |
 | Branch → flow rules, every variable | [BRANCH_FLOW_CONTRACT.md](BRANCH_FLOW_CONTRACT.md), [REPOSITORY_VARIABLES.md](REPOSITORY_VARIABLES.md) |
 | Runner vs build engine | [RUNNER_AND_BUILD_ENGINE.md](RUNNER_AND_BUILD_ENGINE.md) |
 | Own machine, per repo / per org | [SELF_HOSTED_WINDOWS_RUNNER.md](SELF_HOSTED_WINDOWS_RUNNER.md), [SELF_HOSTED_ORG_RUNNER.md](SELF_HOSTED_ORG_RUNNER.md) |

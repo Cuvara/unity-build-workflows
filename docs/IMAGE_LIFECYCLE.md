@@ -114,11 +114,11 @@ Consumer production workflows then resolve the image by digest:
 ghcr.io/<IMAGE_NAMESPACE>/unity-builder@sha256:<digest>
 ```
 
-The `resolve-unity-image` action reads the image manifest and enforces digest-only references when `release-mode: true`.
+`scripts/docker/resolve_image_reference.py` reads the image manifest and enforces digest-only references with `--release-mode`.
 
 ### What Happens If No Image Exists
 
-If a consumer build runs before any image is published, the `resolve-unity-image` action fails with an actionable error:
+If a build runs before any image is published, `scripts/docker/resolve_image_reference.py` fails with an actionable error:
 
 ```
 ERROR: No compatible image found in the registry.

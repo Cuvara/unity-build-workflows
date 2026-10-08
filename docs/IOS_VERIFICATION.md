@@ -159,26 +159,20 @@ bash scripts/ios/cleanup_signing.sh
 
 ## Level 3 — App Store distribution archive + TestFlight (protected, gated)
 
-Run via the release workflow only — never from a fork or PR.
-
-```bash
-# Manual dispatch (requires gh authenticated with write access)
-gh workflow run unity-release-ios.yml \
-  -f unity-version=6000.0.26f1 \
-  -f export-method=app-store \
-  -f upload-to-testflight=true
-gh run watch
-```
-
-Or push a release tag: `git tag v1.0.0-ios && git push origin v1.0.0-ios`.
+Run via the release workflows only — never from a fork or PR. A signed App Store IPA comes
+from **Build / Release** (`templates/consumer-11-build-release.yml`, iOS selected); TestFlight
+and the App Store are **Release / iOS** (`templates/consumer-21-release-ios.yml` →
+`pipeline-ios-release.yml`), started with that run's `source-run-id` and the IPA's
+`artifact-name`. (The `unity-release-ios.yml` dispatch this level used was removed in 7.0.0 —
+[MIGRATION_V7.md](MIGRATION_V7.md).)
 
 **Gates that must hold:**
-- Job runs on `macos-unity-xcode`, in the `ios-production` environment.
-- Fork / `pull_request` context is **refused** before any signing.
-- TestFlight upload happens only when `upload-to-testflight=true` **and** `dry-run` is not set.
-- Upload status reported as one of: `upload-accepted` / `processing` / `completed` / `failed` — an accepted upload is **not** a claim of TestFlight processing success.
-- `release_metadata.sh` emits SHA-256 checksums + metadata.
-- `cleanup_signing.sh` runs on `if: always()`; Unity license returned on `if: always()`.
+- Every Release / iOS job that holds the IPA verifies it against the Release Set first
+  (`verify-release-artifact`): same run, name, version, build number and SHA-256.
+- TestFlight internal, external and App Store phases run behind the `internal-testing`,
+  `external-testing` and `production` environments.
+- `dry-run` publishes nothing.
+- "iOS — Cleanup signing" runs on `if: always()` in the build job.
 
 ```bash
 # TestFlight upload (if running stages manually)

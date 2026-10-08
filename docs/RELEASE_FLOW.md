@@ -83,7 +83,7 @@ Production build uses:
 
 | Requirement | Enforcement |
 |---|---|
-| Digest-pinned image | `resolve-unity-image` rejects mutable tags in release mode |
+| Digest-pinned image | `scripts/docker/resolve_image_reference.py --release-mode` rejects mutable tags |
 | Clean build | `clean-build: true` forces fresh Library import |
 | Image scan passed | Image manifest records scan status |
 | Strict gates | `failOnWarnings: true`, all validation rules |
@@ -136,7 +136,7 @@ See [FASTLANE.md](FASTLANE.md) for all available lanes and credentials.
 Consumer repositories reference the major version:
 
 ```yaml
-uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-build.yml@<ref>
+uses: <WORKFLOW_OWNER>/unity-build-workflows/.github/workflows/unity-pipeline.yml@<ref>
 ```
 
 - `@main` — development / pre-release; tracks the latest commit

@@ -1,7 +1,0 @@
-{
-  "_comment": "OPTION B — Local file dependency. Use when unity-build-workflows is a git submodule at tools/unity-build-workflows/. Path is relative to Packages/manifest.json.",
-  "dependencies": {
-    "com.company.build-pipeline": "file:../tools/unity-build-workflows/unity-package/Packages/com.company.build-pipeline",
-    "com.unity.nuget.newtonsoft-json": "3.2.1"
-  }
-}

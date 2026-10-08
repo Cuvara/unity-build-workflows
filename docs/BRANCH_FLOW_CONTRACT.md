@@ -192,7 +192,11 @@ Default chain for other settings) apply. Non-dispatch-related grouped
 settings (e.g. `RUNNER_*_LABEL`, `CACHE_*`, `ARTIFACT_*`) have no dispatch
 input at all and always resolve via New → Legacy → Default.
 
-## Consumer workflow (`.github/workflows/unity-build.yml`)
+## Pipeline workflow (`unity-pipeline.yml`)
+
+The triggers live in the consumer's entry workflows (`templates/consumer-01-ci.yml`,
+`consumer-10-build-development.yml`, `consumer-11-build-release.yml`); the jobs below are
+`unity-pipeline.yml`'s.
 
 ### Triggers
 ```yaml

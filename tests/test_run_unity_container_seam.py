@@ -1,45 +1,38 @@
 """
-Regression tests for the run-unity-container action ↔ run_unity_container.py seam.
+Regression tests for scripts/docker/run_unity_container.py's argument contract.
 
 THE BUG THIS GUARDS AGAINST
 ----------------------------
-run-unity-container/action.yml passes a pre-resolved --image reference (from
-resolve-unity-image) to run_unity_container.py, but the script previously had
-NO --image arg and required --image-namespace unconditionally → every Docker
-build argparse-errored / failed at runtime.
+A caller passes a pre-resolved --image reference, but the script previously
+had NO --image arg and required --image-namespace unconditionally, so every
+Docker build argparse-errored.
 
-The fix: --image is now an optional passthrough.  When provided, internal
-resolution is skipped and --image-namespace is not required.  Release mode still
-requires a digest-pinned ref (@sha256:…).
+The fix: --image is an optional passthrough. When provided, internal
+resolution is skipped and --image-namespace is not required. Release mode
+still requires a digest-pinned ref (@sha256:...).
 
-ADDITIONAL DRIFT CAUGHT BY THIS FILE
--------------------------------------
-The action also passes --command, --timeout, --log-path, --report-path, and
-boolean inputs --clean-build/--release-mode as string "true"/"false" values.
-All are now recognised by the script's argparse.
+The script is the local Docker-lane runner (docs: CLAUDE.md "Local Docker-lane
+build"); the run-unity-container composite action that also called it was
+removed with the legacy workflows in v7.0.0.
 
 Coverage
 --------
 1. --image without --image-namespace → parses + namespace guard passes.
 2. Neither --image nor --image-namespace → ValueError / non-zero.
 3. --image + --release-mode without a digest-pinned ref → abort (non-zero).
-4. Action-contract: every --flag in the action's run: block is a recognised
-   argparse arg in the script (catches future drift generically).
-5. Boolean string inputs ("true"/"false") parse to correct bool values.
-6. --timeout and --container-timeout both set container_timeout.
+4. Boolean string inputs ("true"/"false") parse to correct bool values.
+5. --timeout and --container-timeout both set container_timeout; --command,
+   --log-path and --report-path are recognised.
 """
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
 
 SCRIPT_PATH = REPO_ROOT / "scripts" / "docker" / "run_unity_container.py"
-ACTION_PATH = REPO_ROOT / ".github" / "actions" / "run-unity-container" / "action.yml"
 
 FAKE_DIGEST = "sha256:" + "a" * 64
 FAKE_IMAGE = f"ghcr.io/example-namespace/unity-build:2022.3.21f1-android"
@@ -212,97 +205,6 @@ class TestReleaseModeDigestEnforcement:
         assert not would_abort, (
             "release-mode + separate --image-digest must NOT trigger the abort path"
         )
-
-
-# ---------------------------------------------------------------------------
-# 4. Action-contract: every flag the action passes must be a recognised arg
-# ---------------------------------------------------------------------------
-
-class TestActionContractDrift:
-    """
-    KEYSTONE: parse the run-unity-container/action.yml `run:` shell block,
-    extract every --flag it passes to run_unity_container.py, and assert each
-    is a recognised argparse argument.
-
-    Catches action↔script drift BEFORE it reaches CI (the --image bug took a
-    full sprint cycle to surface because no test exercised this seam).
-    """
-
-    _FLAG_RE = re.compile(r"^\s+(-{1,2}[a-z][a-z0-9-]+)\s", re.MULTILINE)
-
-    def _action_flags(self) -> set:
-        """Extract --flags passed to the script from action.yml's run: block."""
-        if not ACTION_PATH.exists():
-            pytest.skip("run-unity-container/action.yml not found")
-        text = ACTION_PATH.read_text()
-        # Find the run: block that invokes run_unity_container.py
-        if "run_unity_container.py" not in text:
-            pytest.skip("run_unity_container.py invocation not found in action.yml")
-        # Grab everything after the python3 invocation line
-        start = text.index("run_unity_container.py")
-        # Find the end of the shell run block (non-indented line or new step)
-        snippet = text[start:]
-        # Extract all --flags in the snippet
-        flags = set(self._FLAG_RE.findall(snippet))
-        # Only keep double-dash flags (single-dash are shell flags, not script args)
-        return {f for f in flags if f.startswith("--")}
-
-    def _script_known_flags(self) -> set:
-        """Return the set of --flags known to the script's argparse parser."""
-        _skip_if_no_script()
-        orig = sys.argv
-        import io, contextlib
-        buf = io.StringIO()
-        try:
-            sys.argv = ["x", "--help"]
-            with contextlib.redirect_stdout(buf):
-                try:
-                    _ruc.parse_args()
-                except SystemExit:
-                    pass
-        finally:
-            sys.argv = orig
-        help_text = buf.getvalue()
-        # Extract --flags from help output
-        return set(re.findall(r"(--[a-z][a-z0-9-]+)", help_text))
-
-    def test_all_action_flags_recognised_by_script(self):
-        """
-        Every --flag the action passes to run_unity_container.py must be
-        a recognised argparse argument.
-
-        If this test fails: the action would produce argparse error (exit 2)
-        on every CI run.  Fix: add the missing arg to parse_args() in
-        run_unity_container.py (or remove the stale flag from action.yml).
-        """
-        action_flags = self._action_flags()
-        assert action_flags, "No --flags extracted from action.yml — check regex"
-
-        known_flags = self._script_known_flags()
-        unknown = action_flags - known_flags
-
-        assert not unknown, (
-            "run-unity-container/action.yml passes flags that are NOT recognised "
-            "by run_unity_container.py's argparse. Every CI Docker build would "
-            "fail with 'unrecognized arguments'.\n\n"
-            f"Unknown flags: {sorted(unknown)}\n"
-            f"Known flags:   {sorted(known_flags)}\n"
-            "Fix: add the missing arg(s) to parse_args() in "
-            "scripts/docker/run_unity_container.py."
-        )
-
-    def test_action_passes_image_flag(self):
-        """Sanity: action.yml must pass --image (the flag that triggered the bug)."""
-        action_flags = self._action_flags()
-        assert "--image" in action_flags, (
-            "--image must be in the flags the action passes; "
-            "if missing, the pre-resolved image reference is never forwarded to the script"
-        )
-
-    def test_action_passes_image_digest_flag(self):
-        """Sanity: action.yml must pass --image-digest for release pinning."""
-        action_flags = self._action_flags()
-        assert "--image-digest" in action_flags
 
 
 # ---------------------------------------------------------------------------

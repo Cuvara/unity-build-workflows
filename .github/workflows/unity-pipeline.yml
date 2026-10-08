@@ -597,7 +597,7 @@ jobs:
           NEW_RELEASE_DEFINE_SYMBOLS:   ${{ vars.UNITY_RELEASE_DEFINE_SYMBOLS }}
           # UNITY_VERSION / UNITY_PROJECT_PATH are NOT wired as repo variables:
           # Unity version SSOT is ProjectSettings/ProjectVersion.txt; project path
-          # is set by the caller (unity-build.yml). Both would be redundant.
+          # is set by the caller (the project-path input). Both would be redundant.
           NEW_UNITY_BUILD_METHOD:       ${{ vars.UNITY_BUILD_METHOD }}
           NEW_BUILD_TIMEOUT_MINUTES:    ${{ vars.BUILD_TIMEOUT_MINUTES }}
           NEW_BUILD_CLEAN:              ${{ vars.BUILD_CLEAN }}

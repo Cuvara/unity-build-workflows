@@ -59,7 +59,6 @@ working unchanged until they delete their copy.
 | Self-hosted Windows / macOS (`BUILD_ENGINE=local`) | player build, Addressables |
 | Docker on a Windows runner | player build |
 | Docker on Linux (game-ci) | Addressables pre-step only. The player build uses game-ci's own builder unless `UNITY_BUILD_METHOD` names one |
-| Native iOS (`unity-build-ios.yml`) | `BuildCommand.Execute`, as before (needs `BuildConfig/`) |
 
 ---
 
