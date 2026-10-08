@@ -28,6 +28,12 @@
 #                           mode writes DIR/<mode>/results.xml and Editor.log
 #   --dry-run               print the command instead of running it
 #
+# Unity writes to its -logFile, not to stdout, so the step log used to show
+# only the "Unity binary" line until the build ended. The log file is now
+# followed into the step output while Unity runs (UNITY_LOG_STREAM=0 turns
+# that off); the file itself is still written for the steps that parse and
+# upload it. GitHub masks registered secrets in the step output.
+#
 # Test runs always exit 0: a mode with no tests exits non-zero, so the job's
 # verdict comes from the parsed results.xml (reusable-unity-tests.yml), and
 # Unity's exit code is reported as a warning.
@@ -92,6 +98,26 @@ echo "Unity binary: ${EDITOR}"
 # sees them; Unity's arguments are its own, not paths to translate.
 export MSYS2_ARG_CONV_EXCL='*'
 
+# run_unity LOG ARGS... -- run the editor, following LOG into the step output.
+# Returns Unity's exit code.
+run_unity() {
+  local log="$1"; shift
+  local rc=0 tail_pid=""
+  if [ "${UNITY_LOG_STREAM:-1}" != "0" ] && command -v tail >/dev/null 2>&1; then
+    # A log left by an earlier run would be replayed; -F waits for the new one.
+    rm -f "${log}"
+    tail -n +1 -F "${log}" 2>/dev/null &
+    tail_pid=$!
+  fi
+  "${EDITOR}" "$@" || rc=$?
+  if [ -n "${tail_pid}" ]; then
+    sleep 2   # let tail print the last lines Unity wrote
+    kill "${tail_pid}" 2>/dev/null || true
+    wait "${tail_pid}" 2>/dev/null || true
+  fi
+  return "${rc}"
+}
+
 if [ -n "${TEST_MODE}" ]; then
   case "${TEST_MODE}" in
     EditMode|PlayMode) MODES=("${TEST_MODE}") ;;
@@ -116,7 +142,7 @@ if [ -n "${TEST_MODE}" ]; then
     mkdir -p "${OUT}"
     echo "Running Unity ${MODE} tests..."
     RC=0
-    "${EDITOR}" "${TEST_ARGS[@]}" || RC=$?
+    run_unity "${OUT}/Editor.log" "${TEST_ARGS[@]}" || RC=$?
     [ "${RC}" -eq 0 ] || echo "::warning::${MODE} tests exited with code ${RC}"
   done
   exit 0
@@ -169,4 +195,6 @@ if [ "${DRY_RUN}" -eq 1 ]; then
   printf '%s' "${EDITOR}"; printf ' %q' "${ARGS[@]}"; printf '\n'
   exit 0
 fi
-exec "${EDITOR}" "${ARGS[@]}"
+RC=0
+run_unity "${LOG_FILE}" "${ARGS[@]}" || RC=$?
+exit "${RC}"
