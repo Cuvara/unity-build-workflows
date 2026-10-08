@@ -8,6 +8,23 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **A firebase-storage Production build never reached Google Play.**
+  `fastlane android upload_internal` passed `release_notes:` to
+  `upload_to_play_store`, which has no such option, so every direct-to-store
+  upload failed with "Could not find option 'release_notes' in the list of
+  available options". The step is `continue-on-error`, so the build stayed
+  green while nothing reached the internal track. The lane now writes the
+  notes to `<metadata_path>/<locale>/changelogs/default.txt`, where supply
+  reads them, but only when `GOOGLE_PLAY_RELEASE_NOTES_LOCALE` names a Play
+  listing language. Without one, the release goes up without notes rather
+  than failing on a language the listing lacks.
+  `tests/test_fastfile_play_upload.py` checks every `upload_to_play_store`
+  call against supply's options.
+
 ## [7.0.0] — 2026-10-08
 
 ### Removed — BREAKING

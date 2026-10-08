@@ -95,20 +95,43 @@ platform :android do
       end
     end
 
-    upload_to_play_store(
-      package_name:          options[:package_name],
-      aab:                   options[:aab_path],
-      apk:                   options[:apk_path],
-      track:                 options[:track] || "internal",
-      release_status:        "completed",
-      json_key_data:         ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"],
-      version_name:          options[:version_name],
-      skip_upload_metadata:  true,
-      skip_upload_changelogs: false,
-      skip_upload_images:    true,
-      skip_upload_screenshots: true,
-      release_notes:         { "en-US" => notes },
-    )
+    # supply has no release-notes option (passing one failed every upload
+    # with "Could not find option 'release_notes'"): it reads them from
+    # <metadata_path>/<locale>/changelogs/default.txt. The locale has to be
+    # one of the app's Play listing languages, which only the project knows,
+    # so notes are written only when it names one; otherwise the release
+    # goes up without notes rather than failing.
+    locale = (options[:release_notes_locale] || ENV["GOOGLE_PLAY_RELEASE_NOTES_LOCALE"]).to_s.strip
+    metadata_dir = nil
+    unless locale.empty?
+      require "tmpdir"
+      require "fileutils"
+      metadata_dir = Dir.mktmpdir("play-metadata")
+      changelogs = File.join(metadata_dir, locale, "changelogs")
+      FileUtils.mkdir_p(changelogs)
+      # Play caps release notes at 500 characters.
+      File.write(File.join(changelogs, "default.txt"), notes.to_s[0, 500])
+      UI.message("Release notes (#{locale}) from #{File.join(changelogs, 'default.txt')}")
+    end
+
+    begin
+      upload_to_play_store(
+        package_name:          options[:package_name],
+        aab:                   options[:aab_path],
+        apk:                   options[:apk_path],
+        track:                 options[:track] || "internal",
+        release_status:        "completed",
+        json_key_data:         ENV["GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"],
+        version_name:          options[:version_name],
+        metadata_path:         metadata_dir,
+        skip_upload_metadata:  true,
+        skip_upload_changelogs: metadata_dir.nil?,
+        skip_upload_images:    true,
+        skip_upload_screenshots: true,
+      )
+    ensure
+      FileUtils.rm_rf(metadata_dir) if metadata_dir
+    end
   end
 
   desc "Promote from one track to another"
