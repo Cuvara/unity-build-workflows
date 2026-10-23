@@ -127,6 +127,18 @@ jobs:
               VAR_NAME=$(echo "${var}" | jq -r '.name')
               VAR_VALUE=$(echo "${var}" | jq -r '.value')
 
+              # These Unity projects pin their editor in ProjectVersion.txt.
+              # Keep the repo-level value authoritative so the org default
+              # cannot break their version check during the weekly sync.
+              if [ "${VAR_NAME}" = "UNITY_VERSION" ]; then
+                case "${REPO_FULL}" in
+                  Cuvara/IndieRPGMMOAdventure|Cuvara/NDCUnityTemplate)
+                    echo "  SKIP: UNITY_VERSION is project-pinned for ${REPO_FULL}"
+                    continue
+                    ;;
+                esac
+              fi
+
               # Use PATCH to update or POST to create
               RESPONSE=$(gh api "repos/${REPO_FULL}/actions/variables/${VAR_NAME}" \
                 -X PATCH \
