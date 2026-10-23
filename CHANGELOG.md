@@ -8,6 +8,12 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [7.0.3] — 2026-10-23
+
+### Fixed
+
+- Check out the toolkit at `toolkit-ref` for Docker Unity test jobs and build the MCP-disabled test image from the toolkit checkout, so callers do not need the toolkit's Docker files in their own workspace.
+
 ## [7.0.2] — 2026-10-23
 
 ### Fixed

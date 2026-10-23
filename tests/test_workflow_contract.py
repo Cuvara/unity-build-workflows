@@ -92,6 +92,33 @@ class TestNoMainReferences:
                     f"@main reference found in {yml_path.name}: {ref}"
 
 
+class TestUnityTestImageUsesToolkitCheckout:
+    """The called workflow runs in a consumer workspace, which has no toolkit Dockerfile."""
+
+    def test_docker_image_build_uses_toolkit_files_in_consumer_workspace(self, workflows_dir):
+        workflow = load_workflow(workflows_dir / "reusable-unity-tests.yml")
+        steps = list(iter_steps(workflow))
+        checkout = next(s for s in steps if s.get("name") == "Checkout toolkit")
+        build = next(
+            s for s in steps
+            if s.get("name") == "Build Unity test image (disable Unity MCP reconnects)"
+        )
+
+        # Model a consumer checkout: its only files are the game repo's files.
+        # The toolkit context must come from the separate checkout at toolkit-ref.
+        assert "toolkit-ref" in str(checkout.get("with", {}).get("ref", "")) or (
+            "inputs.toolkit-ref" in str(checkout.get("with", {}).get("ref", ""))
+        )
+        assert checkout.get("with", {}).get("path") == ".toolkit"
+        assert "if" not in checkout, "token/docker consumers must also check out the toolkit"
+        contexts = [
+            line.strip() for line in str(build.get("run", "")).splitlines()
+            if line.strip().startswith(".github/docker/")
+            or line.strip().startswith(".toolkit/.github/docker/")
+        ]
+        assert contexts == [".toolkit/.github/docker/unity-test"]
+
+
 # ---------------------------------------------------------------------------
 # if: always() on upload/report steps
 # ---------------------------------------------------------------------------
