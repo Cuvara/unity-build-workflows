@@ -1,0 +1,4 @@
+ARG UNITY_VERSION
+FROM unityci/editor:ubuntu-${UNITY_VERSION}-linux-il2cpp-3
+
+ENV UNITY_MCP_KEEP_CONNECTED=false

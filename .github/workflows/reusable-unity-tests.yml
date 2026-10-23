@@ -334,6 +334,19 @@ jobs:
             }}
           restore-keys: Library-test-${{ inputs.test-mode }}-
 
+      # unity-test-runner v4.3.2 forwards a fixed list of env vars into Docker;
+      # arbitrary step env (including UNITY_MCP_KEEP_CONNECTED) is dropped.
+      # Build a thin local image so Unity itself receives this setting.
+      - name: Build Unity test image (disable Unity MCP reconnects)
+        if: ${{ inputs.build-engine == 'docker' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker build --pull \
+            --build-arg UNITY_VERSION='${{ inputs.unity-version }}' \
+            --tag 'unityci/editor-mcp-disabled:${{ inputs.unity-version }}' \
+            .github/docker/unity-test
+
       # ── 4a. Run tests — Docker lane (EditMode) ────────────────────────────────
       # game-ci/unity-test-runner handles activation via UNITY_LICENSE+EMAIL+PASSWORD.
       # Run EditMode first; PlayMode step uses if:always() so it still runs if EditMode fails.
@@ -371,6 +384,8 @@ jobs:
           projectPath:   ${{ inputs.project-path }}
           unityVersion:  ${{ inputs.unity-version }}
           testMode:      EditMode
+          customImage:   unityci/editor-mcp-disabled:${{ inputs.unity-version }}
+          customParameters: -testCategory "!LiveBackend"
           artifactsPath: test-results/EditMode
           # Empty unless asked for: supplying a token is what makes the action
           # attempt a check run, and the attempt fails on a read-only token.
@@ -395,6 +410,8 @@ jobs:
           projectPath:   ${{ inputs.project-path }}
           unityVersion:  ${{ inputs.unity-version }}
           testMode:      PlayMode
+          customImage:   unityci/editor-mcp-disabled:${{ inputs.unity-version }}
+          customParameters: -testCategory "!LiveBackend"
           artifactsPath: test-results/PlayMode
           # Empty unless asked for: supplying a token is what makes the action
           # attempt a check run, and the attempt fails on a read-only token.
