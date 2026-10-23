@@ -51,8 +51,8 @@ def test_both_jobs_fetch_submodules_with_the_shared_script(name, job):
     assert steps[toolkit]["with"]["path"] == ".toolkit"
     assert steps[toolkit]["with"]["clean"] is False
     if job == "test":
-        assert "inputs.submodule-auth == 'ssh'" in steps[toolkit]["if"], \
-            "the tests job checks the toolkit out for the fetch too"
+        assert "if" not in steps[toolkit], \
+            "the tests job needs the toolkit in token/docker and local lanes too"
 
 
 def test_the_fetch_script_keeps_its_safeguards():

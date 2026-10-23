@@ -300,7 +300,6 @@ jobs:
       # away if it came first), for the submodule fetch and the native
       # lanes' Unity preflight and test runner.
       - name: Checkout toolkit
-        if: ${{ inputs.submodule-auth == 'ssh' || (inputs.build-engine == 'local' && (runner.os == 'Windows' || runner.os == 'macOS')) }}
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.toolkit-repo }}
@@ -345,7 +344,7 @@ jobs:
           docker build --pull \
             --build-arg UNITY_VERSION='${{ inputs.unity-version }}' \
             --tag 'unityci/editor-mcp-disabled:${{ inputs.unity-version }}' \
-            .github/docker/unity-test
+            .toolkit/.github/docker/unity-test
 
       # ── 4a. Run tests — Docker lane (EditMode) ────────────────────────────────
       # game-ci/unity-test-runner handles activation via UNITY_LICENSE+EMAIL+PASSWORD.
