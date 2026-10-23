@@ -8,6 +8,14 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Pass `UNITY_MCP_KEEP_CONNECTED=false` into the Unity test container and exclude `LiveBackend` tests from routine EditMode and PlayMode runs.
+
+---
+
 ## [7.0.1] — 2026-10-08
 
 ### Fixed
