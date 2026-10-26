@@ -70,6 +70,11 @@ gh secret set APP_STORE_CONNECT_ISSUER_ID
 gh secret set APP_STORE_CONNECT_PRIVATE_KEY < AuthKey.p8
 ```
 
+For an **individual** API key (a user's own key, scoped to that user's apps and role) leave
+`APP_STORE_CONNECT_ISSUER_ID` unset: individual keys have no issuer ID, and
+`configure_asc_api_key` passes `issuer_id: nil` when it is empty. See
+[IOS_SIGNING.md § Step 3](IOS_SIGNING.md#step-3-create-an-app-store-connect-api-key).
+
 ### Firebase App Distribution
 
 Firebase uses a service account JSON **file** (not env var) because the Fastlane
