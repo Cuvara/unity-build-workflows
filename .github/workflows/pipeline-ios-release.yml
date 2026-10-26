@@ -5,6 +5,14 @@ name: Pipeline iOS Release
 #   Verify → Validate IPA → TestFlight internal → External → App Store
 # re-verifying it against the Release Set in every job that touches it.
 #
+# Two binary sources (`binary-source`):
+#   github             the IPA artifact above (default).
+#   app-store-connect  no artifact: the build is already on App Store Connect
+#                      (Build / Release uploaded it straight to TestFlight, as
+#                      it does with ARTIFACT_STORAGE=firebase) and is picked by
+#                      version-string + build-number. Nothing is downloaded or
+#                      uploaded; the phases act on that build.
+#
 # Each release phase is a separate job gated by GitHub Environments.
 # Store phases use the ASC API (ubuntu-latest; the TestFlight upload needs macOS).
 #
@@ -46,19 +54,49 @@ on:
         type: string
         required: false
         default: validate
+      binary-source:
+        description: >-
+          Where the promoted build comes from: `github` (the IPA artifact named
+          by source-run-id + artifact-name, default) or `app-store-connect` (a
+          build already on App Store Connect, picked by version-string +
+          build-number — no artifact, no IPA download). Use the latter when
+          Build / Release ran with ARTIFACT_STORAGE=firebase and so left no
+          GitHub artifact.
+        type: string
+        required: false
+        default: github
       source-run-id:
         description: >-
           Run ID of the Build / Release run that produced the artifact. Required
-          because `actions/download-artifact` only sees the current run by
-          default — promotion pulls the binary from another run, which is what
-          makes it the same binary QA approved rather than a rebuild.
+          when binary-source is github, because `actions/download-artifact` only
+          sees the current run by default — promotion pulls the binary from
+          another run, which is what makes it the same binary QA approved rather
+          than a rebuild. Unused for app-store-connect.
         type: string
-        required: true
+        required: false
+        default: ''
       artifact-name:
         description: >-
           Existing IPA artifact to publish when start-phase is
           internal/external/production. This is what makes the binary QA
           approved the binary that ships — nothing is rebuilt between them.
+          Required when binary-source is github; unused for app-store-connect.
+        type: string
+        required: false
+        default: ''
+      build-number:
+        description: >-
+          Build number (CFBundleVersion, e.g. 474) of the build to promote.
+          Required when binary-source is app-store-connect; with github it is
+          read from the IPA.
+        type: string
+        required: false
+        default: ''
+      testflight-groups:
+        description: >-
+          External TestFlight group names, comma-separated. Required for the
+          external phase when binary-source is app-store-connect; unused for
+          github, where external distribution stays a manual step.
         type: string
         required: false
         default: ''
@@ -112,6 +150,7 @@ on:
 env:
   PIPELINE_STAGES: |
     04 Verify Release Identity
+    04 Verify App Store Connect Build
     04 Validate IPA
     04 Release Notes
     05 Publish — TestFlight Internal
@@ -126,6 +165,7 @@ jobs:
   # prove what it is holding must not publish it.
   verify-artifact:
     name: iOS / Verify Release Identity
+    if: inputs.binary-source != 'app-store-connect'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolkit
@@ -134,6 +174,27 @@ jobs:
           repository: ${{ inputs.toolkit-repo }}
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
+
+      # source-run-id and artifact-name stopped being required at the call
+      # boundary when binary-source arrived, so the github source checks them.
+      # Any binary-source other than the two known ones lands here and fails,
+      # rather than skipping every job.
+      - name: Check inputs
+        shell: bash
+        env:
+          BINARY_SOURCE: ${{ inputs.binary-source }}
+          SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "${BINARY_SOURCE}" != "github" ]]; then
+            echo "::error::binary-source must be 'github' or 'app-store-connect', got '${BINARY_SOURCE}'."
+            exit 1
+          fi
+          if [[ -z "${SOURCE_RUN_ID}" || -z "${ARTIFACT_NAME}" ]]; then
+            echo "::error::binary-source 'github' needs source-run-id and artifact-name. To promote a build that is already on App Store Connect instead, set binary-source: app-store-connect."
+            exit 1
+          fi
 
       - name: Verify release artifact
         uses: ./.toolkit/.github/actions/verify-release-artifact
@@ -154,6 +215,55 @@ jobs:
           title: Release / iOS
           stages: ${{ env.PIPELINE_STAGES }}
           current: 04 Verify Release Identity
+
+  # ─── 04 — VERIFY APP STORE CONNECT BUILD ────────────────────────────────────
+  # The app-store-connect source has no bytes to hash, so the build's identity
+  # is what App Store Connect says it is: this version, this build number,
+  # finished processing. It fails closed for the same reason verify-artifact
+  # does — a promotion that cannot find exactly the build it was asked for must
+  # not act on a different one.
+  verify-asc-build:
+    name: iOS / Verify App Store Connect Build
+    if: inputs.binary-source == 'app-store-connect'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolkit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          repository: ${{ inputs.toolkit-repo }}
+          ref: ${{ inputs.toolkit-ref }}
+          path: .toolkit
+
+      - name: Verify build on App Store Connect
+        uses: ./.toolkit/.github/actions/ios-asc-existing-build
+        with:
+          mode: verify
+          app-id: ${{ inputs.app-id }}
+          version-string: ${{ inputs.version-string }}
+          build-number: ${{ inputs.build-number }}
+          asc-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          asc-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          asc-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+
+      - name: Summary
+        shell: bash
+        env:
+          VERSION_STRING: ${{ inputs.version-string }}
+          BUILD_NUMBER: ${{ inputs.build-number }}
+        run: |
+          echo "### Verify App Store Connect Build" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build:** ${VERSION_STRING} (${BUILD_NUMBER}) — finished processing" >> "${GITHUB_STEP_SUMMARY}"
+
+      # Where the run has got to, drawn into this job's summary.
+      - name: Progress
+        if: always()
+        continue-on-error: true
+        uses: ./.toolkit/.github/actions/pipeline-progress
+        with:
+          title: Release / iOS
+          stages: ${{ env.PIPELINE_STAGES }}
+          current: 04 Verify App Store Connect Build
+
   # ─── 04 — ARTIFACT VALIDATION ───────────────────────────────────────────────
   # Every other platform validated the artifact it downloaded; iOS did not, so
   # the IPA was checked once at build time and never again. Running it here
@@ -217,10 +327,10 @@ jobs:
 
   release-notes:
     name: iOS / Release Notes
-    needs: [verify-artifact]
+    needs: [verify-artifact, verify-asc-build]
     if: |
       !cancelled() &&
-      needs.verify-artifact.result == 'success' &&
+      (needs.verify-artifact.result == 'success' || needs.verify-asc-build.result == 'success') &&
       true
     runs-on: ubuntu-latest
     steps:
@@ -266,17 +376,19 @@ jobs:
 
   internal-testing:
     name: iOS / Publish — TestFlight Internal
-    needs: [verify-artifact, validate-ipa, release-notes]
+    needs: [verify-artifact, verify-asc-build, validate-ipa, release-notes]
     if: |
       !cancelled() &&
-      needs.verify-artifact.result == 'success' &&
+      (needs.verify-artifact.result == 'success' || needs.verify-asc-build.result == 'success') &&
       needs.validate-ipa.result != 'failure' &&
       !inputs.dry-run &&
       (inputs.start-phase == 'validate' || inputs.start-phase == 'internal')
-    runs-on: macos-latest
+    # The TestFlight upload needs macOS; an app-store-connect promotion uploads
+    # nothing and only talks to the API.
+    runs-on: ${{ inputs.binary-source == 'app-store-connect' && 'ubuntu-latest' || 'macos-latest' }}
     environment: internal-testing
     outputs:
-      build-number: ${{ steps.ipa.outputs.build-number }}
+      build-number: ${{ steps.ipa.outputs.build-number || inputs.build-number }}
     steps:
       - name: Checkout toolkit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -285,11 +397,27 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
 
+      # app-store-connect: Build / Release already uploaded the build, so this
+      # phase uploads nothing. It re-proves the build is still there and
+      # processed, which is what the upload + wait does for the github source.
+      - name: Verify build on App Store Connect
+        if: inputs.binary-source == 'app-store-connect'
+        uses: ./.toolkit/.github/actions/ios-asc-existing-build
+        with:
+          mode: verify
+          app-id: ${{ inputs.app-id }}
+          version-string: ${{ inputs.version-string }}
+          build-number: ${{ inputs.build-number }}
+          asc-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          asc-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          asc-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+
       # Re-verified here, not just in stage 04. This job downloads the artifact
       # again — a separate fetch — and an approval on an earlier phase is not
       # evidence about the bytes this job is holding. Cheap, and it is the last
       # point at which publishing the wrong binary is still preventable.
       - name: Verify release artifact
+        if: inputs.binary-source != 'app-store-connect'
         uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
           platform:      iOS
@@ -301,6 +429,7 @@ jobs:
 
       - name: Find IPA
         id: find-ipa
+        if: inputs.binary-source != 'app-store-connect'
         shell: bash
         run: |
           IPA_PATH=$(find ipa-artifact/ -name '*.ipa' -type f | head -1)
@@ -312,6 +441,7 @@ jobs:
 
       - name: Read IPA identity
         id: ipa
+        if: inputs.binary-source != 'app-store-connect'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -319,6 +449,7 @@ jobs:
 
       - name: Upload to TestFlight + wait for processing
         id: upload
+        if: inputs.binary-source != 'app-store-connect'
         uses: ./.toolkit/.github/actions/ios-testflight
         with:
           ipa-path: ${{ steps.find-ipa.outputs.ipa-path }}
@@ -329,10 +460,22 @@ jobs:
           app-id: ${{ inputs.app-id }}
 
       - name: Summary
+        if: inputs.binary-source != 'app-store-connect'
         shell: bash
         run: |
           echo "### Phase 1: TestFlight Internal" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Build:** ${{ steps.ipa.outputs.build-number }} (${{ steps.ipa.outputs.bundle-id }})" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Processing:** Complete" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Summary (App Store Connect build)
+        if: inputs.binary-source == 'app-store-connect'
+        shell: bash
+        env:
+          VERSION_STRING: ${{ inputs.version-string }}
+          BUILD_NUMBER: ${{ inputs.build-number }}
+        run: |
+          echo "### Phase 1: TestFlight Internal" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build:** ${VERSION_STRING} (${BUILD_NUMBER}) — already on App Store Connect, nothing uploaded" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Processing:** Complete" >> "${GITHUB_STEP_SUMMARY}"
 
       # Where the run has got to, drawn into this job's summary.
@@ -349,10 +492,10 @@ jobs:
 
   external-testing:
     name: iOS / Release — TestFlight External
-    needs: [verify-artifact, internal-testing]
+    needs: [verify-artifact, verify-asc-build, release-notes, internal-testing]
     if: |
       !cancelled() &&
-      needs.verify-artifact.result == 'success' &&
+      (needs.verify-artifact.result == 'success' || needs.verify-asc-build.result == 'success') &&
       !inputs.dry-run &&
       (
         needs.internal-testing.result == 'success' ||
@@ -368,6 +511,7 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
       - name: External testing gate
+        if: inputs.binary-source != 'app-store-connect'
         shell: bash
         run: |
           echo "[ios-release] Build: ${{ needs.internal-testing.outputs.build-number || 'uploaded in an earlier run' }}"
@@ -375,11 +519,50 @@ jobs:
           echo "[ios-release] This environment gate ensures manual approval before external distribution."
 
       - name: Summary
+        if: inputs.binary-source != 'app-store-connect'
         shell: bash
         run: |
           echo "### Phase 2: TestFlight External" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Build:** ${{ needs.internal-testing.outputs.build-number || 'uploaded in an earlier run' }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Approved for external TestFlight testing" >> "${GITHUB_STEP_SUMMARY}"
+
+      # app-store-connect: the environment gate above has been approved, so
+      # this is where the existing build actually goes out — to the external
+      # groups, with "What to Test" from this run's release notes, and into
+      # Beta App Review.
+      - name: Download release notes
+        if: inputs.binary-source == 'app-store-connect'
+        continue-on-error: true
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        with:
+          name: ios-release-notes
+          path: release-notes
+
+      - name: Distribute build to external groups
+        if: inputs.binary-source == 'app-store-connect'
+        uses: ./.toolkit/.github/actions/ios-asc-existing-build
+        with:
+          mode: distribute
+          app-id: ${{ inputs.app-id }}
+          version-string: ${{ inputs.version-string }}
+          build-number: ${{ inputs.build-number }}
+          groups: ${{ inputs.testflight-groups }}
+          notes-path: release-notes/release-notes.txt
+          asc-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          asc-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          asc-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+
+      - name: Summary (App Store Connect build)
+        if: inputs.binary-source == 'app-store-connect'
+        shell: bash
+        env:
+          VERSION_STRING: ${{ inputs.version-string }}
+          BUILD_NUMBER: ${{ inputs.build-number }}
+          GROUPS_CSV: ${{ inputs.testflight-groups }}
+        run: |
+          echo "### Phase 2: TestFlight External" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build:** ${VERSION_STRING} (${BUILD_NUMBER})" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Distributed to external groups: ${GROUPS_CSV}; submitted for Beta App Review" >> "${GITHUB_STEP_SUMMARY}"
 
       # Where the run has got to, drawn into this job's summary.
       - name: Progress
@@ -394,10 +577,10 @@ jobs:
 
   production-release:
     name: iOS / Release — App Store
-    needs: [verify-artifact, internal-testing, external-testing, release-notes]
+    needs: [verify-artifact, verify-asc-build, internal-testing, external-testing, release-notes]
     if: |
       !cancelled() &&
-      needs.verify-artifact.result == 'success' &&
+      (needs.verify-artifact.result == 'success' || needs.verify-asc-build.result == 'success') &&
       !inputs.dry-run &&
       (
         needs.external-testing.result == 'success' ||
@@ -422,6 +605,7 @@ jobs:
       # evidence about the bytes this job is holding. Cheap, and it is the last
       # point at which publishing the wrong binary is still preventable.
       - name: Verify release artifact
+        if: inputs.binary-source != 'app-store-connect'
         uses: ./.toolkit/.github/actions/verify-release-artifact
         with:
           platform:      iOS
@@ -433,12 +617,14 @@ jobs:
 
       - name: Read IPA identity
         id: ipa
+        if: inputs.binary-source != 'app-store-connect'
         shell: bash
         run: |
           set -Eeuo pipefail
           python3 .toolkit/scripts/ios/ipa_identity.py --ipa ipa-artifact --github-output
 
       - name: Submit for App Store review
+        if: inputs.binary-source != 'app-store-connect'
         uses: ./.toolkit/.github/actions/ios-asc-submit-review
         with:
           bundle-id: ${{ steps.ipa.outputs.bundle-id }}
@@ -450,12 +636,56 @@ jobs:
           asc-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
 
       - name: Summary
+        if: inputs.binary-source != 'app-store-connect'
         shell: bash
         run: |
           echo "### Phase 3: App Store Submission" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Version:** ${{ inputs.version-string }}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Build:** ${{ steps.ipa.outputs.build-number }} (${{ steps.ipa.outputs.bundle-id }})" >> "${GITHUB_STEP_SUMMARY}"
           echo "- **Phased Release:** ${{ inputs.phased-release }}" >> "${GITHUB_STEP_SUMMARY}"
+
+      # app-store-connect: no IPA to read the bundle id from, so the verify
+      # step asks App Store Connect for it. deliver then submits the build that
+      # version + build number name, with the same phased-release and metadata
+      # behaviour as the github source (skip_binary_upload).
+      - name: Verify build on App Store Connect
+        id: asc
+        if: inputs.binary-source == 'app-store-connect'
+        uses: ./.toolkit/.github/actions/ios-asc-existing-build
+        with:
+          mode: verify
+          app-id: ${{ inputs.app-id }}
+          version-string: ${{ inputs.version-string }}
+          build-number: ${{ inputs.build-number }}
+          asc-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          asc-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          asc-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+
+      - name: Submit App Store Connect build for review
+        if: inputs.binary-source == 'app-store-connect'
+        uses: ./.toolkit/.github/actions/ios-asc-submit-review
+        with:
+          bundle-id: ${{ steps.asc.outputs.bundle-id }}
+          version-string: ${{ inputs.version-string }}
+          build-number: ${{ inputs.build-number }}
+          phased-release: ${{ inputs.phased-release && 'true' || 'false' }}
+          asc-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          asc-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          asc-private-key: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+
+      - name: Summary (App Store Connect build)
+        if: inputs.binary-source == 'app-store-connect'
+        shell: bash
+        env:
+          VERSION_STRING: ${{ inputs.version-string }}
+          BUILD_NUMBER: ${{ inputs.build-number }}
+          BUNDLE_ID: ${{ steps.asc.outputs.bundle-id }}
+          PHASED_RELEASE: ${{ inputs.phased-release }}
+        run: |
+          echo "### Phase 3: App Store Submission" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Version:** ${VERSION_STRING}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Build:** ${BUILD_NUMBER} (${BUNDLE_ID})" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- **Phased Release:** ${PHASED_RELEASE}" >> "${GITHUB_STEP_SUMMARY}"
 
       # Where the run has got to, drawn into this job's summary.
       - name: Progress
@@ -475,7 +705,7 @@ jobs:
 
   report:
     name: iOS / Report & Notify
-    needs: [verify-artifact, validate-ipa, release-notes, internal-testing, external-testing, production-release]
+    needs: [verify-artifact, verify-asc-build, validate-ipa, release-notes, internal-testing, external-testing, production-release]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -492,7 +722,7 @@ jobs:
           platform: iOS
           destination: App Store Connect
           build-version: ${{ inputs.build-version }}
-          artifact-name: ${{ inputs.artifact-name }}
+          artifact-name: ${{ inputs.artifact-name || format('App Store Connect build {0} ({1})', inputs.version-string, inputs.build-number) }}
           start-phase: ${{ inputs.start-phase }}
           dry-run: ${{ inputs.dry-run }}
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -501,6 +731,7 @@ jobs:
           discord-config-file: ${{ vars.DISCORD_CONFIG_FILE || '.github/discord.json' }}
           phases: |
             04 Verify Release Identity=${{ needs.verify-artifact.result }}
+            04 Verify App Store Connect Build=${{ needs.verify-asc-build.result }}
             04 Validate IPA=${{ needs.validate-ipa.result }}
             04 Release Notes=${{ needs.release-notes.result }}
             05 Publish — TestFlight Internal=${{ needs.internal-testing.result }}

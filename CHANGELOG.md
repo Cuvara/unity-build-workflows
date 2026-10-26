@@ -8,6 +8,30 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [7.1.0] — 2026-10-26
+
+### Added
+
+- **Release / iOS can promote a build that is already on App Store Connect.**
+  With `ARTIFACT_STORAGE=firebase`, Build / Release uploads the IPA straight to
+  TestFlight and leaves no GitHub artifact, which made `pipeline-ios-release.yml`
+  unusable. New optional inputs `binary-source` (`github` default |
+  `app-store-connect`), `build-number` (CFBundleVersion) and `testflight-groups`.
+  With `app-store-connect`, `source-run-id` / `artifact-name` are not needed:
+  a new `verify-asc-build` job proves the version + build number exist on App
+  Store Connect and finished processing (replacing `verify-artifact` and
+  `validate-ipa`); the internal phase uploads nothing; the external phase
+  distributes the existing build to the given groups and submits it for Beta App
+  Review (`fastlane ios distribute_existing_build`); production submits it for
+  review with the existing `phased-release` behaviour. New lanes
+  `verify_asc_build` and `distribute_existing_build`, new composite action
+  `ios-asc-existing-build`. Environments, `start-phase` and `dry-run` behave as
+  before. `source-run-id` is no longer `required` at the call boundary; the
+  `github` source checks it (and `artifact-name`) in its first job. The
+  `21-release-ios.yml` template gains a `binary-source` choice defaulting to
+  `auto` (`ARTIFACT_STORAGE=firebase` → `app-store-connect`). Existing callers
+  are unchanged. See `docs/IOS_RELEASE.md`.
+
 ## [7.0.4] — 2026-10-26
 
 ### Added

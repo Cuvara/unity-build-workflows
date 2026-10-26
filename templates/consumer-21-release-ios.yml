@@ -2,11 +2,21 @@
 # 21-release-ios.yml — Release / iOS
 #
 # Release NEVER builds. There is no code path in this workflow that produces
-# a binary. The artifact it promotes was produced by
-# Build / Release and is IMMUTABLE: nothing here re-runs Unity, so the binary
-# QA approved is the binary that ships.
+# a binary. The build it promotes was produced by Build / Release and is
+# IMMUTABLE: nothing here re-runs Unity, so the binary QA approved is the
+# binary that ships.
 #
 #   Build / Release  ->  release-ios-ipa  ->  [this workflow]  ->  App Store Connect
+#
+# Two sources for that build (binary-source):
+#   github             the signed IPA artifact of a Build / Release run
+#                      (source-run-id + artifact-name).
+#   app-store-connect  a build already on App Store Connect, picked by version
+#                      + build-number. For repositories that set
+#                      ARTIFACT_STORAGE=firebase: Build / Release uploads the
+#                      IPA straight to TestFlight and keeps no GitHub artifact.
+#   auto (default)     app-store-connect when the ARTIFACT_STORAGE repository
+#                      variable is `firebase`, github otherwise.
 #
 # Each platform has its own workflow because the release lifecycles are not the
 # same shape. Forcing them into one matrix would mean a job full of
@@ -30,18 +40,38 @@ on:
         required: true
         type: string
 
+      binary-source:
+        description: "SOURCE · Where the build comes from. auto = app-store-connect if ARTIFACT_STORAGE is firebase, else github"
+        required: false
+        default: 'auto'
+        type: choice
+        options: ['auto', 'github', 'app-store-connect']
+
       source-run-id:
-        description: "ARTIFACT · Run ID of the Build / Release run that produced it"
-        required: true
+        description: "SOURCE github · Run ID of the Build / Release run that produced the artifact"
+        required: false
         type: string
 
       artifact-name:
-        description: "ARTIFACT · Signed IPA artifact name from Build / Release (e.g. MyGame_1.0.0_42_release_ios_ipa)"
-        required: true
+        description: "SOURCE github · Signed IPA artifact name from Build / Release (e.g. MyGame_1.0.0_42_release_ios_ipa)"
+        required: false
         # The signed IPA, not the Xcode project. Stage 03b of Build / Release
         # signs and exports before the immutable boundary, so what a promotion
         # publishes is the exact binary QA approved — a promotion cannot build,
         # export or sign, so an Xcode project here would be unpromotable.
+        # Required for the github source; the pipeline fails with a clear
+        # message when it is missing (a dispatch form cannot require an input
+        # conditionally).
+        type: string
+
+      build-number:
+        description: "SOURCE app-store-connect · Build number (CFBundleVersion) on App Store Connect, e.g. 474"
+        required: false
+        type: string
+
+      testflight-groups:
+        description: "SOURCE app-store-connect · External TestFlight group names, comma-separated (external phase)"
+        required: false
         type: string
 
       start-phase:
@@ -85,8 +115,12 @@ jobs:
       build-version: ${{ inputs.build-version }}
       version-string: ${{ inputs.build-version }}
       app-id: ${{ inputs.app-id }}
+      # dispatch input -> ARTIFACT_STORAGE repository variable -> github
+      binary-source: ${{ inputs.binary-source != 'auto' && inputs.binary-source || (vars.ARTIFACT_STORAGE == 'firebase' && 'app-store-connect' || 'github') }}
       artifact-name: ${{ inputs.artifact-name }}
       source-run-id: ${{ inputs.source-run-id }}
+      build-number: ${{ inputs.build-number }}
+      testflight-groups: ${{ inputs.testflight-groups }}
       start-phase: ${{ inputs.start-phase }}
       phased-release: ${{ inputs.phased-release }}
       dry-run: ${{ inputs.dry-run }}

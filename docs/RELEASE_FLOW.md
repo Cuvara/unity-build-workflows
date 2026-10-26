@@ -110,7 +110,9 @@ Signing and deployment credentials are never inside the Unity container.
 Build → Fastlane firebase_distribute (tester) → Fastlane supply/pilot (store)
 ```
 
-All in one job. No GitHub artifact storage cost. No separate release pipeline.
+All in one job. No GitHub artifact storage cost. For iOS the later phases (external TestFlight,
+App Store review) still run through Release / iOS with `binary-source: app-store-connect`, which
+acts on the build already on App Store Connect — see [IOS_RELEASE.md](IOS_RELEASE.md#binary-source-github-artifact-or-app-store-connect-build).
 
 **`ARTIFACT_STORAGE=github`** — promote-based (default):
 

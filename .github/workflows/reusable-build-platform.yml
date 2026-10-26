@@ -203,8 +203,11 @@ on:
           default) or `firebase` (Firebase App Distribution only — skips the
           GitHub binary upload to save storage on private repos). Logs,
           manifests and reports always go to GitHub regardless of this setting.
-          When `firebase`, validate-artifact and promotion jobs are not
-          available because they need the GitHub artifact to download.
+          When `firebase`, validate-artifact and the artifact-based promotion
+          are not available because they need the GitHub artifact to download.
+          iOS can still be promoted: Release / iOS with
+          `binary-source: app-store-connect` acts on the build this run
+          uploaded to TestFlight, picked by version + build number.
         required: false
         default: 'github'
         type: string
