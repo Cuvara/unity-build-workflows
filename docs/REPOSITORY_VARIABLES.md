@@ -404,7 +404,7 @@ CACHE_NUGET_ENABLED=true
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | `BUILD_DELIVERY=firebase` — Google service account JSON with Firebase App Distribution Admin role |
 | `R2_ACCESS_KEY_ID` · `R2_SECRET_ACCESS_KEY` | `BUILD_DELIVERY=r2` |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | `ARTIFACT_STORAGE=firebase` + Android release, or Release / Android pipeline |
-| `APP_STORE_CONNECT_KEY_ID` · `APP_STORE_CONNECT_ISSUER_ID` · `APP_STORE_CONNECT_PRIVATE_KEY` | `ARTIFACT_STORAGE=firebase` + iOS release, or Release / iOS pipeline |
+| `APP_STORE_CONNECT_KEY_ID` · `APP_STORE_CONNECT_ISSUER_ID` · `APP_STORE_CONNECT_PRIVATE_KEY` | `ARTIFACT_STORAGE=firebase` + iOS release, or Release / iOS pipeline. `APP_STORE_CONNECT_ISSUER_ID` only for a team key; leave it unset for an individual key ([IOS_SIGNING.md § Step 3](IOS_SIGNING.md#step-3-create-an-app-store-connect-api-key)) |
 
 ```
 # Example: Firebase delivery + direct-to-store for a private repo

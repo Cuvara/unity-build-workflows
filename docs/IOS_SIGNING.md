@@ -26,7 +26,7 @@ Navigate to **Settings → Secrets and variables → Actions** in your game repo
 | `IOS_DISTRIBUTION_CERTIFICATE_PASSWORD` | P12 export password |
 | `IOS_PROVISIONING_PROFILE_BASE64` | Base64-encoded `.mobileprovision` file |
 | `APP_STORE_CONNECT_KEY_ID` | App Store Connect API key ID (e.g. `AB1CD2EF3G`) |
-| `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect issuer ID (UUID) |
+| `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect issuer ID (UUID) of a **team** key. Leave unset for an individual key (Step 3) |
 | `APP_STORE_CONNECT_PRIVATE_KEY` | Contents of the `.p8` ASC API key file |
 | `UNITY_LICENSE` | Complete Unity `.ulf` license file content |
 | `UNITY_EMAIL` | Unity account email (for license activation) |
@@ -106,6 +106,25 @@ Provisioning profiles expire. Renew them **before** the `ExpirationDate`.
 ## Step 3: Create an App Store Connect API Key
 
 TestFlight uploads and symbol uploads use the App Store Connect API (not Apple ID + password).
+Two kinds of key work ([Apple: Creating API Keys](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api)):
+
+| | Team key | Individual key |
+|---|---|---|
+| Created by | Account Holder or Admin only | any user with the Account Holder, Admin, App Manager, Customer Support, Developer or Marketing role, from their own profile (on by default; an Admin can revoke it) |
+| Access | every app of the team, at the role chosen for the key | the apps and role of that user only |
+| Issuer ID | yes — set `APP_STORE_CONNECT_ISSUER_ID` | none — leave `APP_STORE_CONNECT_ISSUER_ID` unset |
+
+Uploading builds needs the Developer, App Manager or Admin role. An individual key cannot use
+the Provisioning endpoints, Sales and Finance or notarytool; none of these is used here.
+`fastlane/Fastfile` (`configure_asc_api_key`) treats an empty issuer ID as an individual key and
+logs which kind it uses.
+
+**Individual key** (no Admin needed): in App Store Connect click your name → **Edit Profile** →
+**Individual API Key** → **Generate API Key** → **Download**, note the **Key ID**, then set
+`APP_STORE_CONNECT_KEY_ID` and `APP_STORE_CONNECT_PRIVATE_KEY` only. Each user has one active
+individual key.
+
+**Team key** (Admin):
 
 1. Go to [App Store Connect → Users and Access → Keys](https://appstoreconnect.apple.com/access/api)
 2. Click **+** to generate a new key
