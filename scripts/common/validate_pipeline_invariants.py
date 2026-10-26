@@ -208,6 +208,18 @@ def delegate_of(workflows_dir, workflow):
     target = workflows_dir / uses.rsplit("/", 1)[1]
     return target if target in promotion_workflows(workflows_dir) else None
 
+def _checks_source_run_id(path, inputs):
+    """An optional source-run-id is acceptable only where the artifact is one of
+    several binary sources (a `binary-source` input) and the workflow itself
+    fails an empty run id before it downloads anything. pipeline-ios-release.yml
+    can promote a build already on App Store Connect, which has no run."""
+    if "binary-source" not in inputs:
+        return False
+    text = path.read_text(encoding="utf-8")
+    return ("SOURCE_RUN_ID: ${{ inputs.source-run-id }}" in text
+            and '-z "${SOURCE_RUN_ID}"' in text)
+
+
 def check_promotion_pins_its_source(workflows_dir, report):
     for path in promotion_workflows(workflows_dir):
         workflow = load_workflow(path)
@@ -217,7 +229,7 @@ def check_promotion_pins_its_source(workflows_dir, report):
         source = inputs.get("source-run-id")
         if not source:
             report.fail("I-010", f"{path.name} has no source-run-id input")
-        elif not source.get("required"):
+        elif not source.get("required") and not _checks_source_run_id(path, inputs):
             report.fail(
                 "I-010",
                 f"{path.name}: source-run-id is optional, so a promotion can look "
