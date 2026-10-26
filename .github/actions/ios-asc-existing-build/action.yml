@@ -1,0 +1,114 @@
+name: iOS App Store Connect Existing Build
+description: >
+  Acts on a build that is already on App Store Connect, picked by marketing
+  version + build number, without any IPA: `verify` proves it exists and has
+  finished processing; `distribute` sends it to external TestFlight groups
+  and Beta App Review. Uses App Store Connect API key authentication.
+
+inputs:
+  mode:
+    description: verify (build exists and is VALID) or distribute (external TestFlight groups + Beta App Review)
+    required: true
+  app-id:
+    description: Apple App ID (numeric)
+    required: true
+  version-string:
+    description: Marketing version of the build (CFBundleShortVersionString, e.g. 1.2.3)
+    required: true
+  build-number:
+    description: Build number of the build (CFBundleVersion, e.g. 474)
+    required: true
+  groups:
+    description: External TestFlight group names, comma-separated. Required for distribute.
+    required: false
+    default: ''
+  notes-path:
+    description: Text file used as "What to Test" for distribute. A default line is used when it is missing or empty.
+    required: false
+    default: ''
+  wait-timeout:
+    description: Seconds to wait for the build to appear and finish processing (verify)
+    required: false
+    default: '600'
+  asc-key-id:
+    description: App Store Connect API key ID
+    required: true
+  asc-issuer-id:
+    description: App Store Connect API issuer ID of a team key. Empty for an individual API key (a user's own key, scoped to that user's apps and role).
+    required: false
+    default: ''
+  asc-private-key:
+    description: App Store Connect API private key (.p8 content)
+    required: true
+  toolkit-path:
+    description: Path to the toolkit checkout (contains Gemfile + fastlane/)
+    required: false
+    default: '.toolkit'
+
+outputs:
+  bundle-id:
+    description: Bundle identifier of the app (set by verify)
+    value: ${{ steps.run.outputs.bundle-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Fastlane
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '3.2'
+        bundler-cache: true
+        working-directory: ${{ inputs.toolkit-path }}
+
+    - name: Run lane
+      id: run
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        APP_ID: ${{ inputs.app-id }}
+        VERSION_STRING: ${{ inputs.version-string }}
+        BUILD_NUMBER: ${{ inputs.build-number }}
+        GROUPS_CSV: ${{ inputs.groups }}
+        NOTES_PATH: ${{ inputs.notes-path }}
+        WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
+        TOOLKIT_PATH: ${{ inputs.toolkit-path }}
+        APP_STORE_CONNECT_KEY_ID: ${{ inputs.asc-key-id }}
+        APP_STORE_CONNECT_ISSUER_ID: ${{ inputs.asc-issuer-id }}
+        APP_STORE_CONNECT_PRIVATE_KEY: ${{ inputs.asc-private-key }}
+      run: |
+        set -Eeuo pipefail
+        WORKSPACE="${PWD}"
+        if [[ -z "${APP_ID}" || -z "${VERSION_STRING}" || -z "${BUILD_NUMBER}" ]]; then
+          echo "::error::app-id, version-string and build-number are all required to find a build on App Store Connect (got app '${APP_ID}', version '${VERSION_STRING}', build '${BUILD_NUMBER}')."
+          exit 1
+        fi
+        cd "${TOOLKIT_PATH}"
+        case "${MODE}" in
+          verify)
+            OUT="${RUNNER_TEMP}/asc-build.json"
+            bundle exec fastlane ios verify_asc_build \
+              app_id:"${APP_ID}" \
+              version_string:"${VERSION_STRING}" \
+              build_number:"${BUILD_NUMBER}" \
+              timeout:"${WAIT_TIMEOUT}" \
+              output_path:"${OUT}"
+            BUNDLE_ID=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["bundleId"]' "${OUT}")
+            echo "bundle-id=${BUNDLE_ID}" >> "${GITHUB_OUTPUT}"
+            ;;
+          distribute)
+            NOTES=""
+            if [[ -n "${NOTES_PATH}" && -f "${WORKSPACE}/${NOTES_PATH}" ]]; then
+              NOTES="${WORKSPACE}/${NOTES_PATH}"
+            fi
+            bundle exec fastlane ios distribute_existing_build \
+              app_id:"${APP_ID}" \
+              version_string:"${VERSION_STRING}" \
+              build_number:"${BUILD_NUMBER}" \
+              groups:"${GROUPS_CSV}" \
+              changelog_path:"${NOTES}"
+            ;;
+          *)
+            echo "::error::mode must be 'verify' or 'distribute', got '${MODE}'"
+            exit 1
+            ;;
+        esac

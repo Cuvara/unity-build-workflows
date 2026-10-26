@@ -759,10 +759,18 @@ def test_release_pipeline_downloads_across_runs(key, spec):
     path, _ = spec
     workflow = load(path)
     inputs = triggers(workflow)["workflow_call"]["inputs"]
-    assert inputs["source-run-id"]["required"] is True, (
-        f"{path.name}: source-run-id is optional, so a promotion can silently "
-        "look for the artifact in the wrong run"
-    )
+    if key == "ios":
+        # iOS can also promote a build already on App Store Connect
+        # (binary-source: app-store-connect), which has no run to download
+        # from. The github source is the default and checks the input itself
+        # (pipeline-ios-release.yml "Check inputs"); tests/test_ios_release_asc_source.py
+        # pins that.
+        assert inputs["binary-source"]["default"] == "github"
+    else:
+        assert inputs["source-run-id"]["required"] is True, (
+            f"{path.name}: source-run-id is optional, so a promotion can silently "
+            "look for the artifact in the wrong run"
+        )
     for job_id, job in workflow["jobs"].items():
         for step in job.get("steps", []) or []:
             if not str(step.get("uses", "")).startswith("actions/download-artifact"):

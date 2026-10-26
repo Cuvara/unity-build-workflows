@@ -236,9 +236,13 @@ def test_the_promotion_default_is_the_ipa():
     template = yaml.safe_load(
         (TEMPLATES / "consumer-21-release-ios.yml").read_text())
     inputs = (template.get("on") or template[True])["workflow_dispatch"]["inputs"]
-    # artifact-name is now required (no default) because the name includes
-    # product, version, and build number which vary per run.
-    assert inputs["artifact-name"].get("required") is True
+    # artifact-name has no default because the name includes product, version
+    # and build number which vary per run. It is not `required` in the form
+    # because a build already on App Store Connect (binary-source:
+    # app-store-connect) needs none; the github source fails without it
+    # (tests/test_ios_release_asc_source.py).
+    assert "default" not in inputs["artifact-name"]
+    assert "github" in inputs["artifact-name"]["description"].lower()
 
 
 def test_nothing_anywhere_still_points_at_the_xcode_project():
