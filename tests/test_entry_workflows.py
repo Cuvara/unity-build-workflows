@@ -441,7 +441,11 @@ def test_release_entry_point_promotes_a_stored_artifact(key, path):
     # Artifact names now include product/version/build, so the input is
     # required (no static default) or has a release- prefix default.
     an = inputs["artifact-name"]
-    assert an.get("required") is True or str(an.get("default", "")).startswith("release-"), (
+    # A form that can also promote an App Store Connect build (binary-source)
+    # cannot require it: that source has no artifact. The pipeline checks it
+    # for the github source (tests/test_ios_release_asc_source.py).
+    has_other_source = "binary-source" in inputs
+    assert has_other_source or an.get("required") is True or str(an.get("default", "")).startswith("release-"), (
         f"{key}: artifact-name must be required or default to a release- prefix"
     )
     assert "start-phase" in inputs
