@@ -247,3 +247,31 @@ def test_the_template_defaults_binary_source_from_artifact_storage():
     assert "vars.ARTIFACT_STORAGE == 'firebase'" in expression
     assert ASC in expression and "'github'" in expression
     assert job["with"]["build-number"] == "${{ inputs.build-number }}"
+
+
+# ── pipeline invariant I-010 ───────────────────────────────────────────────
+
+def test_the_invariant_checker_accepts_an_optional_run_id_only_with_a_guard(tmp_path):
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    script = REPO_ROOT / "scripts" / "common" / "validate_pipeline_invariants.py"
+
+    def run(root):
+        return subprocess.run([sys.executable, str(script), "--repo-root", str(root)], env={**os.environ, "PYTHONUTF8": "1"},
+                              capture_output=True, text=True, encoding="utf-8")
+
+    assert "FAIL" not in run(REPO_ROOT).stdout
+
+    # Without the guard step the optional input is the defect I-010 describes.
+    root = tmp_path / "repo"
+    shutil.copytree(REPO_ROOT / ".github", root / ".github")
+    for sub in ("scripts", "templates"):
+        shutil.copytree(REPO_ROOT / sub, root / sub)
+    wf = root / ".github" / "workflows" / "pipeline-ios-release.yml"
+    wf.write_text(wf.read_text(encoding="utf-8").replace(
+        '-z "${SOURCE_RUN_ID}"', '-n "${SOURCE_RUN_ID}"'), encoding="utf-8")
+    result = run(root)
+    assert "I-010" in result.stdout and "source-run-id is optional" in result.stdout
