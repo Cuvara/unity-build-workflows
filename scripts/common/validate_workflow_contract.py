@@ -214,8 +214,9 @@ def _validate_ios_block(
         warnings.append(
             "ios.uploadToTestFlight is set to true. This is a request flag only — "
             "the actual TestFlight upload is gated by the workflow deploy step and "
-            "requires APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, and "
-            "APP_STORE_CONNECT_PRIVATE_KEY secrets to be configured."
+            "requires APP_STORE_CONNECT_KEY_ID and APP_STORE_CONNECT_PRIVATE_KEY "
+            "secrets to be configured, plus APP_STORE_CONNECT_ISSUER_ID for a team "
+            "key (an individual key has no issuer ID)."
         )
 
     # ── enableBitcode advisory ─────────────────────────────────────────────

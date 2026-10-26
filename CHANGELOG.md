@@ -8,6 +8,19 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Individual App Store Connect API keys.** A user added to one app can now
+  upload to TestFlight with their own individual key (App Store Connect → Edit
+  Profile → Individual API Key), no Admin-created team key needed: leave
+  `APP_STORE_CONNECT_ISSUER_ID` unset. Individual keys have no issuer ID;
+  `configure_asc_api_key` in `fastlane/Fastfile` turns a blank issuer (an
+  unset GitHub secret arrives as "") into `issuer_id: nil` and logs which kind
+  of key it uses. The issuer inputs of `ios-testflight` and
+  `ios-asc-submit-review` are optional. See `docs/IOS_SIGNING.md` § Step 3.
+
 ## [7.0.1] — 2026-10-08
 
 ### Fixed

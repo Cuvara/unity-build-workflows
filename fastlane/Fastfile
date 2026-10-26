@@ -228,9 +228,16 @@ platform :ios do
 
   desc "Configure App Store Connect API key from environment"
   private_lane :configure_asc_api_key do
+    # A team key has an issuer ID; an individual key (a user's own key, scoped
+    # to that user's apps and role) has none, and fastlane expects nil for it.
+    # An unset GitHub secret arrives as "", which Ruby treats as present, so
+    # blank means individual.
+    issuer = ENV["APP_STORE_CONNECT_ISSUER_ID"].to_s.strip
+    issuer = nil if issuer.empty?
+    UI.message(issuer ? "App Store Connect API: team key" : "App Store Connect API: individual key (no issuer ID)")
     app_store_connect_api_key(
       key_id:             ENV["APP_STORE_CONNECT_KEY_ID"],
-      issuer_id:          ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      issuer_id:          issuer,
       key_content:        ENV["APP_STORE_CONNECT_PRIVATE_KEY"],
       is_key_content_base64: false,
     )

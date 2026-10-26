@@ -11,8 +11,9 @@ inputs:
     description: App Store Connect API key ID
     required: true
   app-store-connect-issuer-id:
-    description: App Store Connect API issuer ID
-    required: true
+    description: App Store Connect API issuer ID of a team key. Empty for an individual API key (a user's own key, scoped to that user's apps and role).
+    required: false
+    default: ''
   app-store-connect-private-key:
     description: App Store Connect API private key (.p8 file content)
     required: true

@@ -407,7 +407,7 @@ on:
         description: App Store Connect API key ID. Required for iOS Fastlane upload.
         required: false
       APP_STORE_CONNECT_ISSUER_ID:
-        description: App Store Connect API issuer ID. Required for iOS Fastlane upload.
+        description: App Store Connect API issuer ID of a team key. Leave unset for an individual API key (a user's own key, scoped to that user's apps and role).
         required: false
       APP_STORE_CONNECT_PRIVATE_KEY:
         description: App Store Connect API private key (.p8 content). Required for iOS Fastlane upload.
