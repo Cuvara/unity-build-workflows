@@ -1047,6 +1047,7 @@ jobs:
       submodule-auth:      ${{ inputs.submodule-auth || 'token' }}
       build-timeout-minutes:   ${{ fromJSON(needs.resolve-config.outputs.build-timeout-minutes) }}
       cache-library:           ${{ fromJSON(needs.resolve-config.outputs.cache-library) }}
+      clean-build:             ${{ fromJSON(needs.resolve-config.outputs.clean-build) }}
       artifact-retention-days: ${{ fromJSON(needs.resolve-config.outputs.artifact-retention-days) }}
       log-retention-days:      ${{ fromJSON(needs.resolve-config.outputs.log-retention-days) }}
       runner-windows-label:    ${{ needs.resolve-config.outputs.runner-windows-label }}

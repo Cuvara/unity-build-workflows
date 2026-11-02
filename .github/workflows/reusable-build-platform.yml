@@ -676,17 +676,22 @@ jobs:
           echo "Free space: $(free_gb)G (was ${BEFORE}G)"
 
       # ── Step 3: Checkout ──────────────────────────────────────────────────
+      # clean: false — the checkout's own `git clean -ffdx` would delete the
+      # project's Library/ on a self-hosted runner and turn every incremental
+      # build into a full reimport. "Clean workspace" below cleans instead,
+      # sparing Library/ unless this is a clean build.
       - name: Checkout
         if: ${{ steps.ios-guard.outputs.blocked != 'true' }}
         uses: actions/checkout@v4
         with:
           lfs: true
+          clean: false
           submodules: ${{ inputs.submodule-auth == 'ssh' && 'false' || 'recursive' }}
 
-      # The toolkit, right after the project checkout (which would clean it
-      # away if it came first): every later step that runs a toolkit script
-      # or action -- the submodule fetch, the Unity preflight, the build
-      # package -- comes from this checkout.
+      # The toolkit, right after the project checkout: every later step that
+      # runs a toolkit script or action -- the workspace clean, the submodule
+      # fetch, the Unity preflight, the build package -- comes from this
+      # checkout.
       - name: Checkout toolkit
         id: preflight-toolkit
         if: ${{ steps.ios-guard.outputs.blocked != 'true' }}
@@ -696,6 +701,16 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
           clean: false
+
+      # Replaces the checkout's own clean: resets the tree, keeping Library/
+      # (and .toolkit) unless clean-build. scripts/common/clean_workspace.sh.
+      - name: Clean workspace
+        if: ${{ steps.ios-guard.outputs.blocked != 'true' }}
+        shell: bash
+        env:
+          CLEAN_BUILD: ${{ inputs.clean-build }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+        run: bash .toolkit/scripts/common/clean_workspace.sh
 
       - name: Fetch submodules over SSH
         if: ${{ inputs.submodule-auth == 'ssh' && steps.ios-guard.outputs.blocked != 'true' }}
