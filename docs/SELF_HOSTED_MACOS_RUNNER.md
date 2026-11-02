@@ -185,6 +185,8 @@ artifact (`…_ios_xcodeproj`). For the full sign/archive/export/TestFlight chec
 | `xcodebuild: error: ... license` | Xcode license not accepted | `sudo xcodebuild -license accept` |
 | `No valid Unity license` at build | Runner service runs as a different user than Hub activation | Run the service as the same account that activated Unity Hub; re-activate |
 | `git-lfs filter-process died` / smudge error | Git LFS not installed | `brew install git-lfs && git lfs install --system`, then re-run |
+| Every build re-imports the whole project | Toolkit older than v7.1.1 (deleted `Library/`), or the Mac also builds other targets / runs tests | Use `@v7` ≥ 7.1.1; keep the Mac on iOS with a runner policy — [INCREMENTAL_BUILDS.md](INCREMENTAL_BUILDS.md) |
+| Import errors only in CI | Broken `Library/` in the workspace | One run with `clean-build: true` — [INCREMENTAL_BUILDS.md §3](INCREMENTAL_BUILDS.md#3-forcing-a-clean-build) |
 
 Verify the runner's registered labels:
 

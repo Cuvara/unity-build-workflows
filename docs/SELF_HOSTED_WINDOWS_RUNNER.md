@@ -446,16 +446,18 @@ Then re-run the workflow — the checkout step re-fetches LFS objects.
 
 ### 8.6 Library Cache Issues
 
-The self-hosted-windows lane caches the Unity `Library/` directory between runs.
-If the cache is corrupted:
+The self-hosted-windows lane keeps the Unity `Library/` directory in the
+workspace between runs (from v7.1.1; see
+[INCREMENTAL_BUILDS.md](INCREMENTAL_BUILDS.md)). If the cache is corrupted:
 
 ```powershell
-# Find and delete Library caches for this repo
-Get-ChildItem "D:\actions-runner\_work\<repo>\<repo>\Library" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+# Find and delete the Library of this repo's project (<project-path> is the
+# Unity project folder inside the repository, '.' when it is the root)
+Get-ChildItem "D:\actions-runner\_work\<repo>\<repo>\<project-path>\Library" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
 ```
 
-Or trigger the workflow with `clean-build: true` to delete the cache at the
-start of the build step.
+Or trigger the workflow with `clean-build: true`: the "Clean workspace" step
+deletes `Library/` before Unity starts.
 
 ---
 

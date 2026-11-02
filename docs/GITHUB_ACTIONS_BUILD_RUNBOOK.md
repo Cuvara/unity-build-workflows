@@ -104,7 +104,7 @@ gh workflow run "Build / Development" \
 | `test-mode` | `All` | `EditMode`, `PlayMode`, `All` | Test suite |
 | `build-addressables` | `false` | `true` / `false` | Addressables before the player build |
 | `unity-version` | *(blank)* | e.g. `6000.0.26f1` | Override; blank = `ProjectVersion.txt` |
-| `clean-build` | `auto` | `auto`, `true`, `false` | `auto` = clean for release, incremental otherwise |
+| `clean-build` | `auto` | `auto`, `true`, `false` | `auto` = the `BUILD_CLEAN` variable (default `false`, incremental) for every build type; `true` deletes `Library/` for this run. See [INCREMENTAL_BUILDS.md](INCREMENTAL_BUILDS.md) |
 | `define-symbols` | *(blank)* | `;` or `,` separated | Extra scripting define symbols |
 | `runner-type` | `auto` | `auto`, `github-hosted`, `self-hosted` | WHERE the job runs |
 | `build-engine` | `auto` | `auto`, `docker`, `local` | HOW Unity builds |

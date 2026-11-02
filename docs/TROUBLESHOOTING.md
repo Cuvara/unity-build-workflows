@@ -120,7 +120,9 @@ Common errors and their fixes for the Docker-mandatory Unity CI/CD platform.
 **Cause:** Library cache is incompatible with the current Unity version or was corrupted by a failed build.
 
 **Fix:**
-- Delete the cache volume: `docker volume rm unity-lib-<hash>`
+- Self-hosted local lane: run once with `clean-build: true`, which deletes the
+  workspace's `<project>/Library/` — [INCREMENTAL_BUILDS.md §3](INCREMENTAL_BUILDS.md#3-forcing-a-clean-build)
+- Docker lane: delete the cache volume: `docker volume rm unity-lib-<hash>`
 - Use `--clean-build` flag to skip cache restoration
 - Set `cache-mode: off` in the workflow
 
@@ -244,6 +246,8 @@ Common errors and their fixes for the Docker-mandatory Unity CI/CD platform.
 **Fix:**
 - Expected for first build; subsequent builds reuse cached Library volume
 - Set `cache-mode: safe` (default) to enable caching
+- Self-hosted runner, slow on *every* build: toolkit older than v7.1.1, or the
+  runner alternates build targets — [INCREMENTAL_BUILDS.md](INCREMENTAL_BUILDS.md)
 
 ### Build passes locally but fails in CI
 

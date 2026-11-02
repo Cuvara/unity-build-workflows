@@ -142,7 +142,8 @@ BUILD_CLEAN=false
   own `Library/` stays in the workspace between runs: the build and test jobs
   check out with `clean: false` and reset the tree with
   `scripts/common/clean_workspace.sh`, which removes every other untracked file
-  but keeps `<project>/Library/`. `true` removes it too.
+  but keeps `<project>/Library/`. `true` removes it too. How to use it, and
+  what it saves: [INCREMENTAL_BUILDS.md](INCREMENTAL_BUILDS.md).
 
 Manual runs can override the variable with the `Clean Build` `workflow_dispatch`
 input, which accepts `auto | true | false`:
