@@ -8,6 +8,22 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Documentation
+
+- **`docs/INCREMENTAL_BUILDS.md`** (new): how self-hosted runners keep
+  `Library/` between runs since 7.1.1, the recommended `BUILD_CLEAN` /
+  `CACHE_*_ENABLED` settings, forcing a clean build for one run or every run,
+  keeping each runner on one build target with a runner policy, how to check it
+  in the logs, and measured timings. Linked from the docs index, README,
+  `REPOSITORY_VARIABLES.md`, `CONSUMER_SETUP.md`, `TROUBLESHOOTING.md` and the
+  Windows / macOS runner guides.
+- `GITHUB_ACTIONS_BUILD_RUNBOOK.md`: `clean-build: auto` follows `BUILD_CLEAN`
+  for every build type; it never meant "clean for release".
+- `SELF_HOSTED_WINDOWS_RUNNER.md` §8.6: the `Library` path includes the
+  project folder.
+
 ## [7.1.1] — 2026-11-02
 
 ### Fixed

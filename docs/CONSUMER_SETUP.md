@@ -331,7 +331,8 @@ gh variable set ADDRESSABLES_RELEASE_ENABLED  --repo "${REPO}" --body "true"
 gh variable set RUNNER_DEFAULT_MODE  --repo "${REPO}" --body "docker"
 
 # Clean Library cache before building (default: false; the caller's clean-build
-# input defaults to `auto`, which defers to this variable)
+# input defaults to `auto`, which defers to this variable). On self-hosted
+# runners keep it false and see docs/INCREMENTAL_BUILDS.md.
 gh variable set BUILD_CLEAN  --repo "${REPO}" --body "false"
 
 # Discord thread ID (optional — pin notifications to a specific forum thread)
