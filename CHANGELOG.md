@@ -8,6 +8,24 @@ The public API is the set of reusable workflow inputs/outputs documented in [doc
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Incremental builds no longer re-import the whole project on self-hosted
+  runners.** The project checkout in `reusable-build-platform.yml` and
+  `reusable-unity-tests.yml` used `actions/checkout`'s default `clean: true`,
+  whose `git clean -ffdx` deleted `<project>/Library/` at the start of every
+  run. `BUILD_CLEAN=false` was silently ignored: each build and test run paid a
+  full asset import, script compile, shader compile, Burst and IL2CPP build
+  (about 3.5 minutes of import alone on a mid-size project). Both jobs now check
+  out with `clean: false` and run the new `scripts/common/clean_workspace.sh`,
+  which resets tracked files and removes every untracked file except
+  `<project>/Library/` and `.toolkit/`; with `clean-build: true` it removes
+  `Library/` as well. The tests job gains a `clean-build` input, passed from
+  the resolved `BUILD_CLEAN`. GitHub-hosted runners start empty, so nothing
+  changes there.
+
 ## [7.1.0] — 2026-10-26
 
 ### Added

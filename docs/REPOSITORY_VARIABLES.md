@@ -138,7 +138,11 @@ BUILD_CLEAN=false
   The Library cache is cleared only when the selected runner mode requires it
   to guarantee a clean state. Use this when you need certainty over speed.
 - **`false` (incremental, default):** reuses the Library/Gradle/NuGet caches
-  from the previous run for faster builds.
+  from the previous run for faster builds. On a self-hosted runner the project's
+  own `Library/` stays in the workspace between runs: the build and test jobs
+  check out with `clean: false` and reset the tree with
+  `scripts/common/clean_workspace.sh`, which removes every other untracked file
+  but keeps `<project>/Library/`. `true` removes it too.
 
 Manual runs can override the variable with the `Clean Build` `workflow_dispatch`
 input, which accepts `auto | true | false`:

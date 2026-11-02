@@ -136,6 +136,12 @@ on:
         default: true
         type: boolean
 
+      clean-build:
+        description: Delete the Library folder before the tests (clean-build / BUILD_CLEAN). Off keeps a self-hosted runner's Library between runs.
+        required: false
+        default: false
+        type: boolean
+
       test-fail-fast:
         description: |
           Best-effort fail-fast toggle. No test matrix exists today (single job runs
@@ -290,15 +296,19 @@ jobs:
           echo "After:"; df -h / | tail -1
 
       # ── 2. Checkout ───────────────────────────────────────────────────────────
+      # clean: false — the checkout's own `git clean -ffdx` would delete the
+      # project's Library/ on a self-hosted runner, so every test run paid a
+      # full reimport. "Clean workspace" below cleans instead.
       - name: Checkout
         uses: actions/checkout@v4
         with:
           lfs: true
+          clean: false
           submodules: ${{ inputs.submodule-auth == 'ssh' && 'false' || 'recursive' }}
 
-      # The toolkit, right after the project checkout (which would clean it
-      # away if it came first), for the submodule fetch and the native
-      # lanes' Unity preflight and test runner.
+      # The toolkit, right after the project checkout, for the workspace
+      # clean, the submodule fetch and the native lanes' Unity preflight and
+      # test runner.
       - name: Checkout toolkit
         uses: actions/checkout@v4
         with:
@@ -306,6 +316,15 @@ jobs:
           ref: ${{ inputs.toolkit-ref }}
           path: .toolkit
           clean: false
+
+      # Resets the tree, keeping Library/ (and .toolkit) unless clean-build.
+      # scripts/common/clean_workspace.sh, shared with the build job.
+      - name: Clean workspace
+        shell: bash
+        env:
+          CLEAN_BUILD: ${{ inputs.clean-build }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+        run: bash .toolkit/scripts/common/clean_workspace.sh
 
       - name: Fetch submodules over SSH
         if: ${{ inputs.submodule-auth == 'ssh' }}
